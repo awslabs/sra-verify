@@ -36,7 +36,7 @@ SRA Verify is designed with an extensible framework that makes it easy to add ne
 
 ```mermaid
 graph TD;
-  Class-->BaseClass["Base Class (GuardDutyCheck)"]
+  BaseSecurityClass["Base Class (SecurityCheck)"] -->BaseClass["Base Class (GuardDutyCheck)"]
   BaseClass["Base Class (GuardDutyCheck)"]-->Client["Client (GuardDutyClient)"]
   Client["Client (GuardDutyClient)"]-->AWS_API["AWS API"]
 ```

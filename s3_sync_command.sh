@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# S3 sync command with exclusions
+aws s3 sync . s3://sra-source-schiefj/ \
+  --exclude "__pycache__/*" \
+  --exclude "*.pyc" \
+  --exclude "*.pyo" \
+  --exclude "*.pyd" \
+  --exclude "*$py.class" \
+  --exclude "*.so" \
+  --exclude ".Python" \
+  --exclude "build/*" \
+  --exclude "develop-eggs/*" \
+  --exclude "dist/*" \
+  --exclude "downloads/*" \
+  --exclude "eggs/*" \
+  --exclude ".eggs/*" \
+  --exclude "lib64/*" \
+  --exclude "parts/*" \
+  --exclude "sdist/*" \
+  --exclude "var/*" \
+  --exclude "wheels/*" \
+  --exclude "*.egg-info/*" \
+  --exclude ".installed.cfg" \
+  --exclude "*.egg" \
+  --exclude "MANIFEST" \
+  --exclude "venv/*" \
+  --exclude "env/*" \
+  --exclude "ENV/*" \
+  --exclude ".env" \
+  --exclude ".venv/*" \
+  --exclude ".idea/*" \
+  --exclude ".vscode/*" \
+  --exclude "*.swp" \
+  --exclude "*.swo" \
+  --exclude ".DS_Store" \
+  --exclude ".aws/*" \
+  --exclude ".aws-sam/*" \
+  --exclude "samconfig.toml" \
+  --exclude "*.csv" \
+  --exclude "*.json" \
+  --exclude "*.log" \
+  --exclude "*.bak" \
+  --exclude "*.tmp" \
+  --exclude ".ipynb_checkpoints/*" \
+  --exclude "htmlcov/*" \
+  --exclude ".tox/*" \
+  --exclude ".coverage" \
+  --exclude ".coverage.*" \
+  --exclude ".cache/*" \
+  --exclude "nosetests.xml" \
+  --exclude "coverage.xml" \
+  --exclude "*.cover" \
+  --exclude ".hypothesis/*" \
+  --exclude ".git/*"

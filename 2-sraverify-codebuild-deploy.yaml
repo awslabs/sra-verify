@@ -1,0 +1,288 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to deploy SRAVerify CodeBuild project'
+
+Parameters:
+  
+  # Using a bucket for SRA source until published on GitHub
+  # ./s3_sync_command.sh
+  S3SRASourceBucket:
+    Type: String
+    Description: S3 bucket name for storing SRA files
+  
+  ParallelAccounts:
+    Type: Number
+    Description: Number of accounts to scan in parallel
+    Default: 5
+    MinValue: 1
+    MaxValue: 20
+  
+  IncludeRegions:
+    Type: String
+    Description: Comma-separated list of AWS regions to include in the scan
+    Default: 'us-east-1,us-east-2,us-west-2'
+
+  MultiAccountScan:
+    Description: 'Set this to true if you want to scan all accounts in your organization. You must have deployed the prerequisite template to provision a role, or specify a different ProwlerRole with the appropriate permissions.'
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+
+Conditions:
+  CreateMemberRole: !Equals
+    - !Ref MultiAccountScan
+    - false
+
+Resources:
+  # This is the role that CodeBuild assumes to perform the Prowler scan
+  SRAMemberRole:
+    Condition: CreateMemberRole
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Role allows * in resource policy. The role needs broad, read-only privileges to review all resources. Only the CodeBuild role created as part of this solution can assume this role.
+          - id: W28
+            reason: Resource has an explicit name so Prowler can loop through and assume it in each account.
+          - id: W76
+            reason: SPCM for IAM policy is higher than 25 due to managed polices, and additional polices. Each section of the role has a comment with the Prowler documentation describing the need for the privileges. 
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: SRAMemberRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' 
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              ArnEquals:
+                aws:PrincipalArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SRAVerifyCodeBuildServiceRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/SecurityAudit'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess'
+
+  # This is the role that Codebuild uses
+  SRAVerifyCodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SRAVerifyCodeBuildServiceRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess
+      Policies:
+        - PolicyName: CodeBuildServiceRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: 'arn:aws:iam::*:role/SRAMemberRole'
+              - Effect: Allow
+                Action:
+                  - organizations:ListAccounts
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeRegions
+                Resource: '*'
+
+  bucketSRAVerifyFindings:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: No bucket logging needed.
+          - id: W41
+            reason: Amazon S3 now applies server-side encryption with Amazon S3 managed keys (SSE-S3) as the base level of encryption for every bucket in Amazon S3.
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain 
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  bucketPolicySRAVerifyFindings:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref bucketSRAVerifyFindings
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSSLRequestsOnly
+            Principal: '*'
+            Action: 's3:*'
+            Effect: Deny
+            Resource:
+              - !Sub '${bucketSRAVerifyFindings.Arn}'
+              - !Sub '${bucketSRAVerifyFindings.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  # CodeBuild Project
+  SRAVerifyCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: SRAVerify-Security-Assessment
+      Description: 'CodeBuild project for running SRAVerify security assessment'
+      ServiceRole: !GetAtt  SRAVerifyCodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref 'AWS::Region'
+          - Name: PARALLEL_ACCOUNTS
+            Value: !Ref ParallelAccounts
+          - Name: INCLUDE_REGIONS
+            Value: !Ref IncludeRegions
+          - Name: S3_SRA_RESULTS_BUCKET
+            Value: !Ref bucketPolicySRAVerifyFindings
+          - Name: S3_SRA_SOURCE_BUCKET
+            Value: !Ref S3SRASourceBucket
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.11
+              commands:
+                - echo "Setting up SRAVerify environment..."
+                - pip3 install --upgrade pip
+                - pip3 install boto3 click pandas
+                - yum install -y parallel
+                - aws s3 sync s3://$S3_SRA_SOURCE_BUCKET/ .
+                - pip install ./sraverify
+
+            build:
+              commands:
+                - |
+
+                  # Create directories for results
+                  mkdir -p /tmp/sraverify-results
+                  timestamp=$(date +%Y%m%d_%H%M%S)
+                  export timestamp
+                  
+                  # Get list of all accounts using management role
+                  account_list=$(aws organizations list-accounts --query 'Accounts[?Status==`ACTIVE`].Id' --output text)
+                  echo "Found accounts: $account_list"
+                  export account_list
+
+                  # Get CodeBuild/Management account
+                  management_account=$(aws organizations describe-organization --query 'Organization.MasterAccountId' --output text)
+                  echo "Assuming role running in management account: $management_account"
+
+                  # Run organization-level checks from management account
+                  echo "Running organization-level checks..."
+                  cd /tmp/sraverify-results
+                  sraverify \
+                      --role arn:aws:iam::${management_account}:role/SRAMemberRole \
+                      --check-type management \
+                      --regions ${INCLUDE_REGIONS}
+
+                  # Create scan_account function
+                  scan_account() {
+                      local accountId=$1
+                      local timestamp=$2
+                      echo "Starting scan for account $accountId"
+                      
+                      # Create temporary directory for this account's scan
+                      mkdir -p "/tmp/sraverify-results/${accountId}"
+                      cd "/tmp/sraverify-results/${accountId}"
+                      
+                      # Don't assume role, just use the role 
+                      sraverify  \
+                          --role arn:aws:iam::${accountId}:role/SRAMemberRole \
+                          --check-type account \
+                          --regions ${INCLUDE_REGIONS}
+                  }
+                  export -f scan_account
+                  
+                  # Run account-level scans in parallel
+                  echo "Running account-level checks in parallel..."
+                  echo $account_list | tr ' ' '\n' | parallel -j ${PARALLEL_ACCOUNTS:-5} scan_account {} $timestamp
+
+                  echo "Consolidating CSV files..."
+                  mkdir -p /tmp/sraverify-consolidated/csv
+                  mkdir -p /tmp/sraverify-consolidated/raw
+                  
+                  # Copy all raw CSV files including organization findings
+                  find /tmp/sraverify-results -name "sraverify*.csv" -type f -exec cp {} /tmp/sraverify-consolidated/raw/ \;
+                  
+                  # Run Python consolidation script
+                  python3 - <<'PYTHON_EOF'
+                  import pandas as pd
+                  import glob
+                  import os
+                  import sys
+                  
+                  try:
+                      # Find all CSV files including organization findings
+                      csv_files = glob.glob('/tmp/sraverify-results/**/sraverify*.csv', recursive=True)
+                      
+                      if csv_files:
+                          # Read and combine all CSVs
+                          all_dfs = []
+                          for file in csv_files:
+                              try:
+                                  df = pd.read_csv(file)
+                                  all_dfs.append(df)
+                              except Exception as e:
+                                  print(f"Error reading file {file}: {str(e)}")
+                                  continue
+                          
+                          if all_dfs:
+                              # Save consolidated findings
+                              combined_df = pd.concat(all_dfs, ignore_index=True)
+                              output_file = f'/tmp/sraverify-consolidated/csv/sraverify-consolidated-{os.environ["timestamp"]}.csv'
+                              combined_df.to_csv(output_file, index=False)
+                      
+                  except Exception as e:
+                      print(f"Error in Python script: {str(e)}")
+                      import traceback
+                      traceback.print_exc()
+                      sys.exit(1)
+                  PYTHON_EOF
+
+            post_build:
+              commands:
+                - echo "Uploading SRAVerify results to S3..."
+                - aws s3 cp /tmp/sraverify-consolidated/csv/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/ --recursive
+                - aws s3 cp /tmp/sraverify-consolidated/raw/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/raw/ --recursive
+
+          artifacts:
+            files:
+              - '**/*.csv'
+            base-directory: '/tmp/sraverify-consolidated'
+
+          cache:
+            paths:
+              - '/root/.cache/pip/**/*'

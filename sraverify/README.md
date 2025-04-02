@@ -35,10 +35,82 @@ sra-verify/
 SRA Verify is designed with an extensible framework that makes it easy to add new security checks. 
 
 ```mermaid
-graph TD;
-  BaseSecurityClass["Base Class (SecurityCheck)"] -->BaseClass["Base Class (GuardDutyCheck)"]
-  BaseClass["Base Class (GuardDutyCheck)"]-->Client["Client (GuardDutyClient)"]
-  Client["Client (GuardDutyClient)"]-->AWS_API["AWS API"]
+classDiagram
+    class SecurityCheck {
+        +check_type: str
+        +service: str
+        +resource_type: str
+        +check_id: str
+        +check_name: str
+        +description: str
+        +rational: str
+        +remediation: str
+        +severity: str
+        +check_logic: str
+        +findings: list
+        +regions: list
+        +session: boto3.Session
+        +_clients: dict
+
+        +_get_enabled_regions()
+        +initialize(session, regions)
+        +get_client(region)
+        +create_finding(status, region, account_id, resource_id, actual_value, remediation)
+        +get_findings()
+        +get_session_accountId(session)
+        +get_management_accountId(session)
+    }
+
+    class GuardDutyCheck {
+        +_detector_details_cache: dict
+        +_detector_ids_cache: dict
+        +_setup_clients()
+        +get_detector_id(region)
+        +get_detector_details(region)
+        +get_enabled_regions()
+    }
+
+    class GuardDutyClient {
+        +region: str
+        +session: boto3.Session
+        +client: boto3.client
+        +get_detector_id()
+        +get_detector_details(detector_id)
+    }
+
+    class SRA_GD_1 {
+        +check_id: str
+        +check_name: str
+        +description: str
+        +severity: str
+        +check_logic: str
+        +execute()
+    }
+
+    class SRA_GD_2 {
+        +check_id: str
+        +check_name: str
+        +description: str
+        +severity: str
+        +check_logic: str
+        +execute()
+    }
+
+    class SRA_GD_3 {
+        +check_id: str
+        +check_name: str
+        +description: str
+        +severity: str
+        +check_logic: str
+        +execute()
+    }
+
+    SecurityCheck <|-- GuardDutyCheck : extends
+    GuardDutyCheck <|-- SRA_GD_1 : extends
+    GuardDutyCheck <|-- SRA_GD_2 : extends
+    GuardDutyCheck <|-- SRA_GD_3 : extends
+
+    GuardDutyCheck --> GuardDutyClient :  uses
 ```
 
 ### Best Practices for Check Implementation

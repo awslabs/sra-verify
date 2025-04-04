@@ -20,7 +20,7 @@ REQUIRED_FIELDS = [
     'Remediation',
     'Service',
     'CheckLogic',
-    'CheckType'  
+    'AccountType'  # Changed from CheckType to AccountType
 ]
 
 
@@ -41,6 +41,11 @@ def write_csv_output(findings: List[Dict[str, Any]], output_file: str):
         for field in REQUIRED_FIELDS:
             if field not in finding:
                 finding[field] = ''  # Add empty string for missing fields
+        
+        # Handle the case where a finding might have CheckType but not AccountType
+        if 'CheckType' in finding and 'AccountType' not in finding:
+            finding['AccountType'] = finding['CheckType']
+            del finding['CheckType']
     
     with open(output_file, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=REQUIRED_FIELDS)

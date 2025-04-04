@@ -18,7 +18,7 @@ class GuardDutyCheck(SecurityCheck):
     def __init__(self):
         """Initialize GuardDuty base check."""
         super().__init__(
-            check_type="account",
+            account_type="application",
             service="GuardDuty",
             resource_type="AWS::GuardDuty::Detector"
         )

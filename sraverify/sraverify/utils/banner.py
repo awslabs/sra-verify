@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any
 
 
 def print_banner(profile: str, region: str, session: boto3.Session = None, 
-                 regions: Optional[List[str]] = None, check_type: str = 'all',
+                 regions: Optional[List[str]] = None, account_type: str = 'all',
                  checks_count: int = 0, output_file: str = None, role: Optional[str] = None):
     """
     Print the SRAVerify banner and initial execution information.
@@ -18,7 +18,7 @@ def print_banner(profile: str, region: str, session: boto3.Session = None,
         region: AWS region name
         session: AWS session
         regions: List of AWS regions to check
-        check_type: Type of checks to run
+        account_type: Type of accounts to run checks against
         checks_count: Number of checks to run
         output_file: Output file name
         role: ARN of IAM role being assumed
@@ -58,7 +58,7 @@ def print_banner(profile: str, region: str, session: boto3.Session = None,
     if role:
         print(f"  · Assuming Role: {role}")
     print(f"  · Regions: {', '.join(regions) if regions else 'all enabled regions'}")
-    print(f"  · Check Type: {check_type}")
+    print(f"  · Account Type: {account_type}")
     print(f"  · Checks: {checks_count}")
     if output_file:
         print(f"  · Output: {output_file}")

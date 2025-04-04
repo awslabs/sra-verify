@@ -1,3 +1,1 @@
-"""
-CloudTrail security checks.
-"""
+"""CloudTrail security checks."""

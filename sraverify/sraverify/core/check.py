@@ -9,16 +9,16 @@ from sraverify.core.logging import logger
 class SecurityCheck:
     """Base class for all security checks."""
     
-    def __init__(self, check_type="account", service=None, resource_type=None):
+    def __init__(self, account_type="application", service=None, resource_type=None):
         """
         Initialize security check.
         
         Args:
-            check_type: Type of check (account or management)
+            account_type: Type of account (application, audit, log-archive, management)
             service: AWS service name
             resource_type: AWS resource type for findings
         """
-        self.check_type = check_type
+        self.account_type = account_type
         self.service = service
         self.resource_type = resource_type
         self.check_id = None
@@ -43,10 +43,8 @@ class SecurityCheck:
         """
         logger.debug(f"Initializing {self.__class__.__name__} check")
         self.session = session
-        if self.check_type == "account":
-            self.regions = regions if regions else self._get_enabled_regions()
-        if self.check_type == "management":
-            self.regions = regions if regions else self._get_enabled_regions()
+        # All account types need regions, so we'll get them regardless of account type
+        self.regions = regions if regions else self._get_enabled_regions()
         logger.debug(f"Check will run in regions: {', '.join(self.regions)}")
         self._setup_clients()
 
@@ -123,7 +121,7 @@ class SecurityCheck:
             "Remediation": remediation,
             "Service": self.service,
             "CheckLogic": self.check_logic,
-            "CheckType": self.check_type
+            "AccountType": self.account_type
         }
     
     def execute(self) -> List[Dict[str, Any]]:

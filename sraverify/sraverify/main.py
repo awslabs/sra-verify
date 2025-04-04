@@ -14,11 +14,15 @@ from sraverify.utils.progress import ScanProgress
 from sraverify.utils.banner import print_banner
 from sraverify.services.guardduty import CHECKS as guardduty_checks
 from sraverify.services.cloudtrail import CHECKS as cloudtrail_checks
+from sraverify.services.accessanalyzer import CHECKS as accessanalyzer_checks
+from sraverify.services.config import CHECKS as config_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
     **guardduty_checks,
     **cloudtrail_checks,
+    **accessanalyzer_checks,
+    **config_checks
     # Add more service checks here as they're implemented
     # **config_checks,
     # etc.
@@ -35,8 +39,14 @@ def parse_args():
                         help='Output file name (default: sraverify_findings.csv)')
     parser.add_argument('--check', type=str, help='Run a specific check (e.g., SRA-GD-1)')
     parser.add_argument('--service', type=str, help='Run checks for a specific service (e.g., GuardDuty)')
-    parser.add_argument('--check-type', type=str, choices=['account', 'management', 'all'], default='all',
-                        help='Type of checks to run: account, management, or all (default: all)')
+    parser.add_argument('--account-type', type=str, 
+                        choices=['application', 'audit', 'log-archive', 'management', 'all'], 
+                        default='all',
+                        help='Type of accounts to run checks against: application, audit, log-archive, management, or all (default: all)')
+    parser.add_argument('--audit-account', type=str, metavar='ACCOUNTID1,ACCOUNTID2', 
+                        help='AWS accounts used for Audit/Security Tooling, use comma separated values')
+    parser.add_argument('--log-archive-account', type=str, metavar='ACCOUNTID1,ACCOUNTID2',
+                        help='AWS accounts used for Logging, use comma separated values')
     parser.add_argument('--list-checks', action='store_true', help='List available checks')
     parser.add_argument('--list-services', action='store_true', help='List available services')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
@@ -44,19 +54,19 @@ def parse_args():
     return parser.parse_args()
 
 
-def list_checks(check_type='all'):
+def list_checks(account_type='all'):
     """
-    List all available checks, optionally filtered by check type.
+    List all available checks, optionally filtered by account type.
     
     Args:
-        check_type: Type of checks to list ('account', 'management', or 'all')
+        account_type: Type of accounts to list checks for ('application', 'audit', 'log-archive', 'management', or 'all')
     """
     logger.info("Listing available checks")
     print("Available checks:")
     for check_id, check_class in sorted(ALL_CHECKS.items()):
         check = check_class()
-        if check_type == 'all' or check.check_type == check_type:
-            print(f"  {check_id}: {check.check_name} ({check.service}) [{check.check_type}]")
+        if account_type == 'all' or check.account_type == account_type:
+            print(f"  {check_id}: {check.check_name} ({check.service}) [{check.account_type}]")
 
 
 def list_services():
@@ -84,14 +94,14 @@ def get_checks_to_run(args) -> Dict[str, Any]:
     """
     logger.debug("Determining checks to run based on command line arguments")
     
-    # Start with all checks or filtered by check type
-    if args.check_type == 'all':
+    # Start with all checks or filtered by account type
+    if args.account_type == 'all':
         checks_to_run = ALL_CHECKS.copy()
     else:
-        logger.debug(f"Filtering checks by type: {args.check_type}")
+        logger.debug(f"Filtering checks by account type: {args.account_type}")
         checks_to_run = {
             check_id: check_class for check_id, check_class in ALL_CHECKS.items()
-            if check_class().check_type == args.check_type
+            if check_class().account_type == args.account_type
         }
     
     # Filter by specific check if provided
@@ -102,8 +112,8 @@ def get_checks_to_run(args) -> Dict[str, Any]:
             sys.exit(1)
         
         check = ALL_CHECKS[args.check]()
-        if args.check_type != 'all' and check.check_type != args.check_type:
-            logger.error(f"Check {args.check} is a {check.check_type} check, but --check-type is set to {args.check_type}")
+        if args.account_type != 'all' and check.account_type != args.account_type:
+            logger.error(f"Check {args.check} is for {check.account_type} accounts, but --account-type is set to {args.account_type}")
             sys.exit(1)
             
         return {args.check: ALL_CHECKS[args.check]}
@@ -118,7 +128,7 @@ def get_checks_to_run(args) -> Dict[str, Any]:
                 service_checks[check_id] = check_class
         
         if not service_checks:
-            logger.error(f"No {args.check_type} checks found for service {args.service}")
+            logger.error(f"No {args.account_type} checks found for service {args.service}")
             sys.exit(1)
         
         return service_checks
@@ -134,7 +144,8 @@ def get_checks_to_run(args) -> Dict[str, Any]:
 
 def run_checks(checks_to_run: Dict[str, Any], regions: Optional[List[str]] = None, 
                profile: Optional[str] = None, role_arn: Optional[str] = None,
-               session: Optional[Session] = None) -> List[Dict[str, Any]]:
+               session: Optional[Session] = None, audit_accounts: Optional[List[str]] = None,
+               log_archive_accounts: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Run the specified checks.
     
@@ -144,6 +155,8 @@ def run_checks(checks_to_run: Dict[str, Any], regions: Optional[List[str]] = Non
         profile: AWS profile to use
         role_arn: ARN of IAM role to assume
         session: Existing AWS session to use (if provided)
+        audit_accounts: List of AWS accounts used for Audit/Security Tooling
+        log_archive_accounts: List of AWS accounts used for Logging
         
     Returns:
         List of findings
@@ -181,6 +194,12 @@ def run_checks(checks_to_run: Dict[str, Any], regions: Optional[List[str]] = Non
             check = check_class()
             check.initialize(aws_session, regions=regions)
             
+            # Pass audit and log archive accounts to the check if it needs them
+            if audit_accounts:
+                check._audit_accounts = audit_accounts
+            if log_archive_accounts:
+                check._log_archive_accounts = log_archive_accounts
+            
             try:
                 logger.debug(f"Executing check {check_id}: {check.check_name}")
                 findings = check.execute()
@@ -204,7 +223,7 @@ def run_checks(checks_to_run: Dict[str, Any], regions: Optional[List[str]] = Non
                     "Remediation": "Check the error message and try again",
                     "Service": service,
                     "CheckLogic": None,
-                    "CheckType": check.check_type
+                    "AccountType": check.account_type
                 })
             
             progress.increment()
@@ -222,7 +241,7 @@ def main():
     configure_logging(args.debug)
     
     if args.list_checks:
-        list_checks(args.check_type)
+        list_checks(args.account_type)
         return
     
     if args.list_services:
@@ -233,6 +252,18 @@ def main():
     regions = None
     if args.regions:
         regions = [r.strip() for r in args.regions.split(',')]
+    
+    # Parse audit accounts if provided
+    audit_accounts = None
+    if args.audit_account:
+        audit_accounts = [a.strip() for a in args.audit_account.split(',')]
+        logger.debug(f"Using audit accounts: {', '.join(audit_accounts)}")
+    
+    # Parse log archive accounts if provided
+    log_archive_accounts = None
+    if args.log_archive_account:
+        log_archive_accounts = [a.strip() for a in args.log_archive_account.split(',')]
+        logger.debug(f"Using log archive accounts: {', '.join(log_archive_accounts)}")
     
     # Determine which checks to run
     checks_to_run = get_checks_to_run(args)
@@ -253,14 +284,22 @@ def main():
         region=session.region_name, 
         session=session,
         regions=regions,
-        check_type=args.check_type,
+        account_type=args.account_type,
         checks_count=len(checks_to_run),
         output_file=output_file,
         role=args.role
     )
     
     # Run checks (reusing the session we already created)
-    findings = run_checks(checks_to_run, regions, args.profile, args.role, session=session)
+    findings = run_checks(
+        checks_to_run, 
+        regions, 
+        args.profile, 
+        args.role, 
+        session=session,
+        audit_accounts=audit_accounts,
+        log_archive_accounts=log_archive_accounts
+    )
     
     # Write output
     logger.debug(f"Writing findings to {output_file}")

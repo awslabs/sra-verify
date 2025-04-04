@@ -2,7 +2,6 @@
 Base class for CloudTrail security checks.
 """
 from typing import List, Optional, Dict, Any
-import boto3
 from sraverify.core.check import SecurityCheck
 from sraverify.services.cloudtrail.client import CloudTrailClient
 from sraverify.core.logging import logger
@@ -11,13 +10,15 @@ from sraverify.core.logging import logger
 class CloudTrailCheck(SecurityCheck):
     """Base class for all CloudTrail security checks."""
     
-    # Class-level cache shared across all instances
-    _trails_cache = {}
+    # Class-level caches shared across all instances - only keeping the ones specified
+    _describe_trails_cache = {}
+    _trail_status_cache = {}
+    _delegated_admin_account_id_cache = {}
     
     def __init__(self):
         """Initialize CloudTrail base check."""
         super().__init__(
-            check_type="account",
+            account_type="management",
             service="CloudTrail",
             resource_type="AWS::CloudTrail::Trail"
         )
@@ -31,43 +32,136 @@ class CloudTrailCheck(SecurityCheck):
             for region in self.regions:
                 self._clients[region] = CloudTrailClient(region, session=self.session)
     
-    def get_trails(self, region: str, trail_name_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def get_client(self, region: str) -> Optional[CloudTrailClient]:
         """
-        Get CloudTrail trails in a specific region with caching.
+        Get CloudTrail client for a specific region.
         
         Args:
             region: AWS region name
-            trail_name_list: List of trail names to describe (if None, all trails are described)
             
         Returns:
-            List of trail descriptions or empty list if not available
+            CloudTrailClient for the region or None if not available
         """
-        # Create a cache key that includes the region and trail names (if specified)
-        cache_key = f"{self.session.region_name}:{region}"
-        if trail_name_list:
-            cache_key += f":{','.join(sorted(trail_name_list))}"
+        return self._clients.get(region)
+    
+    def describe_trails(self, include_shadow_trails: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get all CloudTrail trails across all regions using the client with caching.
         
-        # Check if we already have cached trails
-        if cache_key in CloudTrailCheck._trails_cache:
-            logger.debug(f"Using cached trails for {region}")
-            return CloudTrailCheck._trails_cache[cache_key]     
+        Args:
+            include_shadow_trails: Include shadow trails in the response
+            
+        Returns:
+            List of all trails
+        """
+        if not self.regions:
+            logger.warning("No regions specified")
+            return []
         
-        # Get client
+        # Use session region name as part of cache key
+        cache_key = f"describe_trails:{self.session.region_name}:{include_shadow_trails}"
+        if cache_key in self.__class__._describe_trails_cache:
+            logger.debug(f"Using cached trails for {cache_key}")
+            return self.__class__._describe_trails_cache[cache_key]
+        
+        # Use any region to get all trails
+        client = self.get_client(self.regions[0])
+        if not client:
+            logger.warning("No CloudTrail client available")
+            return []
+        
+        # Get all trails using the client
+        trails = client.describe_trails(include_shadow_trails=include_shadow_trails)
+        
+        # Cache the results
+        self.__class__._describe_trails_cache[cache_key] = trails
+        logger.debug(f"Cached {len(trails)} trails for {cache_key}")
+        
+        return trails
+    
+    def get_organization_trails(self) -> List[Dict[str, Any]]:
+        """
+        Get all organization CloudTrail trails.
+        
+        Returns:
+            List of organization trails
+        """
+        # Get all trails first
+        all_trails = self.describe_trails()
+        
+        # Filter for organization trails
+        org_trails = [
+            trail for trail in all_trails 
+            if trail.get('IsOrganizationTrail', False)
+        ]
+        
+        logger.debug(f"Found {len(org_trails)} organization trails")
+        return org_trails
+    
+    def get_trail_status(self, region: str, trail_arn: str) -> Dict[str, Any]:
+        """
+        Get status of a specific CloudTrail trail using the client with caching.
+        
+        Args:
+            region: AWS region name
+            trail_arn: ARN of the trail
+            
+        Returns:
+            Dictionary containing trail status
+        """
+        # Check cache first
+        cache_key = f"{trail_arn}:{region}"
+        if cache_key in self.__class__._trail_status_cache:
+            logger.debug(f"Using cached trail status for {trail_arn} in {region}")
+            return self.__class__._trail_status_cache[cache_key]
+        
         client = self.get_client(region)
         if not client:
             logger.warning(f"No CloudTrail client available for region {region}")
+            return {}
+        
+        # Get trail status from client
+        status = client.get_trail_status(trail_arn)
+        
+        # Cache the result
+        self.__class__._trail_status_cache[cache_key] = status
+        logger.debug(f"Cached trail status for {trail_arn} in {region}")
+        
+        return status
+    
+    def get_delegated_administrators(self) -> List[Dict[str, Any]]:
+        """
+        Get CloudTrail delegated administrators with caching.
+        
+        Returns:
+            List of delegated administrators
+        """
+        if not self.regions:
+            logger.warning("No regions specified")
             return []
         
-        try:
-            # Get trails
-            trails = client.describe_trails(trail_name_list)
-            
-            # Cache the trails
-            CloudTrailCheck._trails_cache[cache_key] = trails
-            
-            return trails
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error describing trails in {region}: {error_msg}")
-            # Return a special value to indicate an error
-            return {"error": True, "message": error_msg}
+        account_id = self.get_session_accountId(self.session)
+        if not account_id:
+            logger.warning("Could not determine account ID")
+            return []
+        
+        # Check cache first
+        cache_key = f"{account_id}:{self.session.region_name}"
+        if cache_key in self.__class__._delegated_admin_account_id_cache:
+            logger.debug(f"Using cached delegated administrators for {cache_key}")
+            return self.__class__._delegated_admin_account_id_cache[cache_key]
+        
+        # Use any region to get delegated administrators
+        client = self.get_client(self.regions[0])
+        if not client:
+            logger.warning("No CloudTrail client available")
+            return []
+        
+        # Get delegated administrators from client
+        delegated_admins = client.list_delegated_administrators()
+        
+        # Cache the results
+        self.__class__._delegated_admin_account_id_cache[cache_key] = delegated_admins
+        logger.debug(f"Cached {len(delegated_admins)} delegated administrators for {cache_key}")
+        
+        return delegated_admins

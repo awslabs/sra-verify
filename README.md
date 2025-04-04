@@ -65,7 +65,7 @@ pip install -r sraverify/requirements.txt
 
 ```bash
 usage: sraverify [-h] [--profile PROFILE] [--role ROLE] [--regions REGIONS] [--output OUTPUT] [--check CHECK]
-                 [--service SERVICE] [--check-type {account,management,all}] [--list-checks] [--list-services]
+                 [--service SERVICE] [--account-type {application,audit,log-archive,management,all}] [--list-checks] [--list-services]
                  [--debug]
 
 SRA Verify - Security Rule Assessment Verification Tool
@@ -78,8 +78,8 @@ options:
   --output OUTPUT       Output file name (default: sraverify_findings.csv)
   --check CHECK         Run a specific check (e.g., SRA-GD-1)
   --service SERVICE     Run checks for a specific service (e.g., GuardDuty)
-  --check-type {account,management,all}
-                        Type of checks to run: account, management, or all (default: all)
+  --account-type {application,audit,log-archive,management,all}
+                        Type of accounts to run checks against: application, audit, log-archive, management, or all (default: all)
   --list-checks         List available checks
   --list-services       List available services
   --debug               Enable debug logging

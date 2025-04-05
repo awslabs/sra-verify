@@ -89,5 +89,5 @@ options:
 1. Deploy 1-sraverify-member-roles.yaml as stackset to member accounts in one Region
 2. Deploy 1-sraverify-member-roles.yaml as stack to management account (stack sets don't apply)
 3. Run s3_sync_command.sh (change bucket name) to sync files to S3.
-4. `aws cloudformation deploy --template-file 2-sraverify-codebuild-deploy.yaml --stack-name sra --parameter-overrides S3SRASourceBucket=sra-source-schiefj --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM`
+4. `aws cloudformation deploy --template-file 2-sraverify-codebuild-deploy.yaml --stack-name sra --parameter-overrides S3SRASourceBucket=sra-source-schiefj AuditAccountID=810727160357 LogArchiveAccountID=856257193524 --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM`
 5. Start the CodeBuild job.

@@ -9,7 +9,7 @@ aws s3 sync . s3://sra-source-schiefj/ \
   --exclude "*$py.class" \
   --exclude "*.so" \
   --exclude ".Python" \
-  --exclude "build/*" \
+  --exclude "*/build/*" \
   --exclude "develop-eggs/*" \
   --exclude "dist/*" \
   --exclude "downloads/*" \

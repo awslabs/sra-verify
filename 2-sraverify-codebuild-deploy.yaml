@@ -9,6 +9,14 @@ Parameters:
     Type: String
     Description: S3 bucket name for storing SRA files
   
+  AuditAccountID:
+    Type: String
+    Description: The AWS account ID for the audit account. If you have multiple audit accounts, use a comma separated list.
+
+  LogArchiveAccountID:
+    Type: String
+    Description: The AWS account ID for the log archive account. If you have multiple log archive accounts, use a comma separated list.
+
   ParallelAccounts:
     Type: Number
     Description: Number of accounts to scan in parallel
@@ -22,7 +30,7 @@ Parameters:
     Default: 'us-east-1,us-east-2,us-west-2'
 
   MultiAccountScan:
-    Description: 'Set this to true if you want to scan all accounts in your organization. You must have deployed the prerequisite template to provision a role, or specify a different ProwlerRole with the appropriate permissions.'
+    Description: 'Set this to true if you want to scan all accounts in your organization. You must have deployed the prerequisite template to provision a role, or specify a different SRAVerifyRole with the appropriate permissions.'
     Type: String
     AllowedValues:
       - 'true'
@@ -35,7 +43,7 @@ Conditions:
     - false
 
 Resources:
-  # This is the role that CodeBuild assumes to perform the Prowler scan
+  # This is the role that CodeBuild assumes to perform the SRAVerify scan
   SRAMemberRole:
     Condition: CreateMemberRole
     Metadata:
@@ -44,9 +52,9 @@ Resources:
           - id: W11
             reason: Role allows * in resource policy. The role needs broad, read-only privileges to review all resources. Only the CodeBuild role created as part of this solution can assume this role.
           - id: W28
-            reason: Resource has an explicit name so Prowler can loop through and assume it in each account.
+            reason: Resource has an explicit name so SRAVerify can loop through and assume it in each account.
           - id: W76
-            reason: SPCM for IAM policy is higher than 25 due to managed polices, and additional polices. Each section of the role has a comment with the Prowler documentation describing the need for the privileges. 
+            reason: SPCM for IAM policy is higher than 25 due to managed polices, and additional polices. Each section of the role has a comment with the SRAVerify documentation describing the need for the privileges. 
     Type: 'AWS::IAM::Role'
     Properties:
       RoleName: SRAMemberRole
@@ -166,6 +174,10 @@ Resources:
             Value: !Ref bucketPolicySRAVerifyFindings
           - Name: S3_SRA_SOURCE_BUCKET
             Value: !Ref S3SRASourceBucket
+          - Name: AWS_AUDIT_ACCOUNTS
+            Value: !Ref AuditAccountID
+          - Name: AWS_LOG_ARCHIVE_ACCOUNTS
+            Value: !Ref LogArchiveAccountID
       Source:
         Type: NO_SOURCE
         BuildSpec: |
@@ -205,8 +217,32 @@ Resources:
                   cd /tmp/sraverify-results
                   sraverify \
                       --role arn:aws:iam::${management_account}:role/SRAMemberRole \
-                      --check-type management \
+                      --account-type management \
                       --regions ${INCLUDE_REGIONS}
+
+                  # Run audit checks from audit account
+                  if [ "$AWS_AUDIT_ACCOUNTS" != "" ]; then
+                      echo "Running audit checks..."
+                      for account in $(echo $AWS_AUDIT_ACCOUNTS | tr ',' ' '); do
+                          echo "Running audit checks for account: $account"
+                          sraverify \
+                              --role arn:aws:iam::${account}:role/SRAMemberRole \
+                              --account-type audit \
+                              --regions ${INCLUDE_REGIONS}
+                      done
+                  fi
+
+                  # Run log archive checks from log account
+                  if [ "$AWS_LOG_ARCHIVE_ACCOUNTS" != "" ]; then
+                      echo "Running log archive checks..."
+                      for account in $(echo $AWS_LOG_ARCHIVE_ACCOUNTS | tr ',' ' '); do
+                          echo "Running log archive checks for account: $account"
+                          sraverify \
+                              --role arn:aws:iam::${account}:role/SRAMemberRole \
+                              --account-type log-archive \
+                              --regions ${INCLUDE_REGIONS}
+                      done
+                  fi
 
                   # Create scan_account function
                   scan_account() {
@@ -221,7 +257,7 @@ Resources:
                       # Don't assume role, just use the role 
                       sraverify  \
                           --role arn:aws:iam::${accountId}:role/SRAMemberRole \
-                          --check-type account \
+                          --account-type application \
                           --regions ${INCLUDE_REGIONS}
                   }
                   export -f scan_account

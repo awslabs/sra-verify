@@ -6,15 +6,15 @@ from typing import List, Dict, Any
 
 # Required fields as per developer guide
 REQUIRED_FIELDS = [
+    'AccountId',
+    'Region',
     'CheckId',
     'Status',
-    'Region',
     'Severity',
     'Title',
     'Description',
     'ResourceId',
     'ResourceType',
-    'AccountId',
     'CheckedValue',
     'ActualValue',
     'Remediation',

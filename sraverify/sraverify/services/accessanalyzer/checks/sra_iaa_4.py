@@ -62,20 +62,28 @@ class SRA_IAA_4(AccessAnalyzerCheck):
             )
             return findings
         
-        # Check if this account is the delegated admin for Access Analyzer
-        is_delegated_admin = False
+        # Check if any analyzers exist across all regions
+        total_analyzers = 0
+        for region, client in self._clients.items():
+            analyzers = self.get_analyzers(region)
+            total_analyzers += len(analyzers)
         
-        try:
-            # Try to list analyzers - if we can create organization analyzers, we're likely the delegated admin
-            for region, client in self._clients.items():
-                analyzers = self.get_analyzers(region)
-                org_analyzers = [a for a in analyzers if a.get('type') == 'ORGANIZATION' and a.get('arn', '').split(':')[4] == account_id]
-                if org_analyzers:
-                    is_delegated_admin = True
-                    break
-        except Exception as e:
-            # Don't log debug messages, just continue
-            pass
+        # If no analyzers exist at all, return a single global finding
+        if total_analyzers == 0:
+            findings.append(
+                self.create_finding(
+                    status="FAIL",
+                    region="global",
+                    account_id=account_id,
+                    resource_id="accessanalyzer:global",
+                    actual_value="No IAM Access Analyzers found in any region",
+                    remediation=(
+                        "Create IAM Access Analyzers with Organization zone of trust in each region using the AWS CLI command: "
+                        "aws accessanalyzer create-analyzer --analyzer-name org-analyzer --type ORGANIZATION --region <region>"
+                    )
+                )
+            )
+            return findings
         
         # Track if we found organization analyzers in any region
         found_org_analyzers = False
@@ -136,18 +144,5 @@ class SRA_IAA_4(AccessAnalyzerCheck):
                         remediation="Ensure you have proper permissions to list IAM Access Analyzers and that the service is available in this region"
                     )
                 )
-        
-        # If we didn't find any organization analyzers and we're not the delegated admin
-        if not found_org_analyzers and not is_delegated_admin and all_regions_checked:
-            findings.append(
-                self.create_finding(
-                    status="ERROR",
-                    region="global",
-                    account_id=account_id,
-                    resource_id=f"accessanalyzer:delegatedadmin",
-                    actual_value="This account does not appear to be the delegated administrator for IAM Access Analyzer",
-                    remediation="Register this account as the delegated administrator for IAM Access Analyzer using the AWS CLI command: aws organizations register-delegated-administrator --service-principal access-analyzer.amazonaws.com --account-id " + account_id
-                )
-            )
         
         return findings

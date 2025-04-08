@@ -1,3 +1,1 @@
-"""
-AWS Config check implementations.
-"""
+"""Config checks package."""

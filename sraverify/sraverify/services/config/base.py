@@ -11,9 +11,17 @@ class ConfigCheck(SecurityCheck):
     """Base class for all AWS Config security checks."""
     
     # Class-level caches shared across all instances
-    # Only keeping the caches we actually use
     _config_recorder_status_cache = {}
     _config_delivery_channel_status_cache = {}
+    _config_organization_aggregator = {}
+    _config_delivery_channel_cache = {}
+    _config_delegated_admin_cache = {}
+    
+    # Config service principals
+    CONFIG_SERVICE_PRINCIPALS = [
+        "config.amazonaws.com",
+        "config-multiaccountsetup.amazonaws.com"
+    ]
     
     def __init__(self):
         """Initialize Config base check."""
@@ -107,6 +115,12 @@ class ConfigCheck(SecurityCheck):
         Returns:
             List of delivery channels
         """
+        # Check cache first
+        cache_key = f"{region}:{self.session.region_name}"
+        if cache_key in self.__class__._config_delivery_channel_cache:
+            logger.debug(f"Using cached delivery channels for {region}")
+            return self.__class__._config_delivery_channel_cache[cache_key]
+            
         # Get client for the region
         client = self.get_client(region)
         if not client:
@@ -115,7 +129,10 @@ class ConfigCheck(SecurityCheck):
         
         # Get delivery channels from client
         channels = client.describe_delivery_channels()
-        logger.debug(f"Found {len(channels)} delivery channels for {region}")
+        
+        # Cache the results
+        self.__class__._config_delivery_channel_cache[cache_key] = channels
+        logger.debug(f"Cached {len(channels)} delivery channels for {region}")
         
         return channels
     
@@ -149,3 +166,84 @@ class ConfigCheck(SecurityCheck):
         logger.debug(f"Cached {len(statuses)} delivery channel statuses for {region}")
         
         return statuses
+        
+    def get_configuration_aggregators(self, region: str) -> List[Dict[str, Any]]:
+        """
+        Get configuration aggregators for a specific region with caching.
+        
+        Args:
+            region: AWS region name
+            
+        Returns:
+            List of configuration aggregators
+        """
+        # Check cache first
+        cache_key = f"{region}:{self.session.region_name}"
+        if cache_key in self.__class__._config_organization_aggregator:
+            logger.debug(f"Using cached configuration aggregators for {region}")
+            return self.__class__._config_organization_aggregator[cache_key]
+        
+        # Get client for the region
+        client = self.get_client(region)
+        if not client:
+            logger.warning(f"No Config client available for region {region}")
+            return []
+        
+        # Get configuration aggregators from client
+        aggregators = client.describe_configuration_aggregators()
+        
+        # Cache the results
+        self.__class__._config_organization_aggregator[cache_key] = aggregators
+        logger.debug(f"Cached {len(aggregators)} configuration aggregators for {region}")
+        
+        return aggregators
+        
+    def get_delegated_administrators(self, service_principal=None) -> List[Dict[str, Any]]:
+        """
+        Get Config delegated administrators with caching.
+        
+        Args:
+            service_principal: Optional specific service principal to check
+            
+        Returns:
+            List of delegated administrators
+        """
+        if not self.regions:
+            logger.warning("No regions specified")
+            return []
+        
+        account_id = self.get_session_accountId(self.session)
+        if not account_id:
+            logger.warning("Could not determine account ID")
+            return []
+        
+        # If a specific service principal is provided, only check that one
+        service_principals = [service_principal] if service_principal else self.CONFIG_SERVICE_PRINCIPALS
+        
+        all_delegated_admins = []
+        
+        for sp in service_principals:
+            # Check cache first
+            cache_key = f"{account_id}:{self.session.region_name}:{sp}"
+            if cache_key in self.__class__._config_delegated_admin_cache:
+                logger.debug(f"Using cached delegated administrators for {cache_key}")
+                admins = self.__class__._config_delegated_admin_cache[cache_key]
+                all_delegated_admins.extend(admins)
+                continue
+            
+            # Use any region to get delegated administrators
+            client = self.get_client(self.regions[0])
+            if not client:
+                logger.warning("No Config client available")
+                continue
+            
+            # Get delegated administrators from client
+            delegated_admins = client.list_delegated_administrators(sp)
+            
+            # Cache the results
+            self.__class__._config_delegated_admin_cache[cache_key] = delegated_admins
+            logger.debug(f"Cached {len(delegated_admins)} delegated administrators for {cache_key}")
+            
+            all_delegated_admins.extend(delegated_admins)
+        
+        return all_delegated_admins

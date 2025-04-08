@@ -59,11 +59,11 @@ class SRA_IAA_3(AccessAnalyzerCheck):
             if not audit_accounts:
                 findings.append(
                     self.create_finding(
-                        status="FAIL",
+                        status="ERROR",
                         region="global",
                         account_id=account_id,
                         resource_id=delegated_admin_id,
-                        actual_value=f"Audit account IDs not provided. Current delegated admin is: {delegated_admin_id}",
+                        actual_value="Audit Account ID not provided",
                         remediation="Provide the Audit account IDs using --audit-account flag"
                     )
                 )

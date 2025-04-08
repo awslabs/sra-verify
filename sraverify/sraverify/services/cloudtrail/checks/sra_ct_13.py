@@ -66,12 +66,12 @@ class SRA_CT_13(CloudTrailCheck):
         if not audit_accounts:
             findings.append(
                 self.create_finding(
-                    status="FAIL",
+                    status="ERROR",
                     region="global",
                     account_id=account_id,
                     resource_id=f"organization/{account_id}",
                     checked_value="CloudTrail delegated administrator is an Audit account",
-                    actual_value="Audit account IDs not provided",
+                    actual_value="Audit Account ID not provided",
                     remediation="Provide the Audit account IDs using --audit-account flag"
                 )
             )

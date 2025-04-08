@@ -14,7 +14,7 @@ class SRA_CONFIG_3(ConfigCheck):
         super().__init__()
         self.check_id = "SRA-CONFIG-3"
         self.check_name = "AWS Config latest recording event is processed successfully"
-        self.account_type = "account"  # This check applies to all account types
+        self.account_type = "application"  # This check applies to all account types
         self.severity = "HIGH"
         self.description = (
             "This check verifies whether the last delivery attempt to the delivery channel was successful "
@@ -23,7 +23,7 @@ class SRA_CONFIG_3(ConfigCheck):
             "states through the delivery channel."
         )
         self.check_logic = (
-            "Checks if the lastStatus of the delivery channel is SUCCESS using describe-delivery-channel-status API."
+            "Checks if the lastStatus of the delivery channel is SUCCESS."
         )
     
     def execute(self) -> List[Dict[str, Any]]:

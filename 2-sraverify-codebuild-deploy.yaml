@@ -193,11 +193,10 @@ Resources:
                 - yum install -y parallel
                 - aws s3 sync s3://$S3_SRA_SOURCE_BUCKET/ .
                 - pip install ./sraverify
-
+          
             build:
               commands:
                 - |
-
                   # Create directories for results
                   mkdir -p /tmp/sraverify-results
                   timestamp=$(date +%Y%m%d_%H%M%S)
@@ -207,19 +206,21 @@ Resources:
                   account_list=$(aws organizations list-accounts --query 'Accounts[?Status==`ACTIVE`].Id' --output text)
                   echo "Found accounts: $account_list"
                   export account_list
-
+          
                   # Get CodeBuild/Management account
                   management_account=$(aws organizations describe-organization --query 'Organization.MasterAccountId' --output text)
                   echo "Assuming role running in management account: $management_account"
-
+          
                   # Run organization-level checks from management account
                   echo "Running organization-level checks..."
                   cd /tmp/sraverify-results
                   sraverify \
                       --role arn:aws:iam::${management_account}:role/SRAMemberRole \
                       --account-type management \
-                      --regions ${INCLUDE_REGIONS}
-
+                      --regions ${INCLUDE_REGIONS} \
+                      --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                      --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
+          
                   # Run audit checks from audit account
                   if [ "$AWS_AUDIT_ACCOUNTS" != "" ]; then
                       echo "Running audit checks..."
@@ -228,10 +229,12 @@ Resources:
                           sraverify \
                               --role arn:aws:iam::${account}:role/SRAMemberRole \
                               --account-type audit \
-                              --regions ${INCLUDE_REGIONS}
+                              --regions ${INCLUDE_REGIONS} \
+                              --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                              --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
                       done
                   fi
-
+          
                   # Run log archive checks from log account
                   if [ "$AWS_LOG_ARCHIVE_ACCOUNTS" != "" ]; then
                       echo "Running log archive checks..."
@@ -240,10 +243,12 @@ Resources:
                           sraverify \
                               --role arn:aws:iam::${account}:role/SRAMemberRole \
                               --account-type log-archive \
-                              --regions ${INCLUDE_REGIONS}
+                              --regions ${INCLUDE_REGIONS} \
+                              --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                              --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
                       done
                   fi
-
+          
                   # Create scan_account function
                   scan_account() {
                       local accountId=$1
@@ -255,17 +260,19 @@ Resources:
                       cd "/tmp/sraverify-results/${accountId}"
                       
                       # Don't assume role, just use the role 
-                      sraverify  \
+                      sraverify \
                           --role arn:aws:iam::${accountId}:role/SRAMemberRole \
                           --account-type application \
-                          --regions ${INCLUDE_REGIONS}
+                          --regions ${INCLUDE_REGIONS} \
+                          --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                          --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
                   }
                   export -f scan_account
                   
                   # Run account-level scans in parallel
                   echo "Running account-level checks in parallel..."
                   echo $account_list | tr ' ' '\n' | parallel -j ${PARALLEL_ACCOUNTS:-5} scan_account {} $timestamp
-
+          
                   echo "Consolidating CSV files..."
                   mkdir -p /tmp/sraverify-consolidated/csv
                   mkdir -p /tmp/sraverify-consolidated/raw
@@ -307,18 +314,19 @@ Resources:
                       traceback.print_exc()
                       sys.exit(1)
                   PYTHON_EOF
-
+          
             post_build:
               commands:
                 - echo "Uploading SRAVerify results to S3..."
                 - aws s3 cp /tmp/sraverify-consolidated/csv/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/ --recursive
                 - aws s3 cp /tmp/sraverify-consolidated/raw/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/raw/ --recursive
-
+          
           artifacts:
             files:
               - '**/*.csv'
             base-directory: '/tmp/sraverify-consolidated'
-
+          
           cache:
             paths:
               - '/root/.cache/pip/**/*'
+          

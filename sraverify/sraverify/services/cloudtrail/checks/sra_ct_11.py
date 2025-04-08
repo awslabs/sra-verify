@@ -66,12 +66,12 @@ class SRA_CT_11(CloudTrailCheck):
         if not log_archive_accounts:
             findings.append(
                 self.create_finding(
-                    status="FAIL",
+                    status="ERROR",
                     region="global",
                     account_id=account_id,
                     resource_id=f"organization/{account_id}",
                     checked_value="S3 bucket in Log Archive account",
-                    actual_value="Log Archive account IDs not provided",
+                    actual_value="Log Archive Account ID not provided",
                     remediation="Provide the Log Archive account IDs using --log-archive-account flag"
                 )
             )
@@ -108,8 +108,11 @@ class SRA_CT_11(CloudTrailCheck):
                         bucket_owner_account = log_archive_account
                         break
             
-            # Create a resource ID that includes the bucket information
-            resource_id = f"cloudtrail arn delivering to Log Archive account {log_archive_accounts[0]} and bucket name {s3_bucket_name}"
+            # Create appropriate resource IDs based on whether the bucket is in the Log Archive account
+            if bucket_owner_account and bucket_owner_account in log_archive_accounts:
+                resource_id = f"cloudtrail logs being delivered to Log Archive account {log_archive_accounts[0]} and bucket name {s3_bucket_name}"
+            else:
+                resource_id = f"cloudtrail logs not being delivered to S3 bucket in the Log Archive account"
             
             # If we still couldn't determine the bucket owner, we'll need to make an API call
             # For this example, we'll just report that we couldn't determine the bucket owner

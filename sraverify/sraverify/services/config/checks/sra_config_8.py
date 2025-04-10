@@ -181,7 +181,7 @@ class SRA_CONFIG_8(ConfigCheck):
                         resource_id=resource_id,
                         checked_value=f"Config rule {rule_name} exists in all member accounts",
                         actual_value=f"Config rule '{rule_name}' exists in all member accounts",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
         

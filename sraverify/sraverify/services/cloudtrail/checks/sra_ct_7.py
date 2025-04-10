@@ -77,7 +77,7 @@ class SRA_CT_7(CloudTrailCheck):
                         resource_id=trail_arn,
                         checked_value="IsLogging: true",
                         actual_value=f"Organization trail '{trail_name}' is actively logging events",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

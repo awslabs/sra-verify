@@ -96,7 +96,7 @@ class SRA_CT_8(CloudTrailCheck):
                                 resource_id=trail_arn,
                                 checked_value="LatestDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' is publishing logs to S3 bucket '{s3_bucket_name}', latest delivery time: {latest_delivery_time_str}",
-                                remediation=""
+                                remediation="No remediation needed"
                             )
                         )
                     else:

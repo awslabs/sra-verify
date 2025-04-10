@@ -120,7 +120,7 @@ class SRA_CONFIG_2(ConfigCheck):
                         account_id=account_id,
                         resource_id=recorder_arn,
                         actual_value=f"Configuration recorder '{recorder_name}' is running with lastStatus: SUCCESS",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             elif is_recording:

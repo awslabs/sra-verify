@@ -240,7 +240,7 @@ class SRA_XX_1(YourServiceCheck):
                     account_id=account_id,
                     resource_id=f"resource-id",
                     actual_value="Compliant configuration",
-                    remediation=""
+                    remediation="No remediation needed"
                 ))
 
         return self.findings

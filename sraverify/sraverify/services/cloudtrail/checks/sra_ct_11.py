@@ -154,7 +154,7 @@ class SRA_CT_11(CloudTrailCheck):
                             f"Organization trail '{trail_name}' is using S3 bucket '{s3_bucket_name}' "
                             f"owned by Log Archive account {bucket_owner_account}"
                         ),
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

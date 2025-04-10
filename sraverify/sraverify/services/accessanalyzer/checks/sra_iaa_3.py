@@ -79,7 +79,7 @@ class SRA_IAA_3(AccessAnalyzerCheck):
                         resource_id=delegated_admin_id,
                         actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
                                    f"matches one of the specified Audit accounts {', '.join(audit_accounts)}",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

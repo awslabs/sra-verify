@@ -113,7 +113,7 @@ class SRA_CT_10(CloudTrailCheck):
                                 resource_id=resource_id,
                                 checked_value="LatestDigestDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' is delivering log file validation digest files to S3 bucket '{s3_bucket_name}', latest delivery time: {latest_digest_delivery_time_str}",
-                                remediation=""
+                                remediation="No remediation needed"
                             )
                         )
                     else:

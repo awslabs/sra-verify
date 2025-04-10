@@ -75,7 +75,7 @@ class SRA_CT_3(CloudTrailCheck):
                         resource_id=trail_arn,
                         checked_value="LogFileValidationEnabled: true",
                         actual_value=f"Organization trail '{trail_name}' has log file validation enabled",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

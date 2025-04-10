@@ -119,7 +119,7 @@ class SRA_CT_9(CloudTrailCheck):
                                 resource_id=resource_id,
                                 checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' is publishing logs to CloudWatch Logs, latest delivery time: {latest_cloudwatch_logs_delivery_time_str}",
-                                remediation=""
+                                remediation="No remediation needed"
                             )
                         )
                     else:

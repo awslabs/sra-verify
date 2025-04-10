@@ -135,7 +135,7 @@ class SRA_CONFIG_10(ConfigCheck):
                             resource_id=f"delegated-admin/{audit_account_id}",
                             checked_value=f"Delegated administrator is audit account {audit_account_id}",
                             actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) for both service principals",
-                            remediation=""
+                            remediation="No remediation needed"
                         )
                     )
                 else:

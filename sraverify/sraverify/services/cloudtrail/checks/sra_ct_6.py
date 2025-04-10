@@ -74,7 +74,7 @@ class SRA_CT_6(CloudTrailCheck):
                         resource_id=trail_arn,
                         checked_value="IncludeGlobalServiceEvents: true",
                         actual_value=f"Organization trail '{trail_name}' is configured to publish events from global services",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

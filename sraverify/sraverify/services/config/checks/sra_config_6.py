@@ -148,7 +148,7 @@ class SRA_CONFIG_6(ConfigCheck):
                             resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}",
                             checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                             actual_value=f"Delivery channel S3 bucket '{bucket_name}' is owned by the Log Archive account {log_archive_account}",
-                            remediation=""
+                            remediation="No remediation needed"
                         )
                     )
                 else:
@@ -177,7 +177,7 @@ class SRA_CONFIG_6(ConfigCheck):
                                 resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}",
                                 checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                                 actual_value=f"Delivery channel S3 bucket '{bucket_name}' is owned by the Log Archive account {log_archive_account} (cross-region bucket)",
-                                remediation=""
+                                remediation="No remediation needed"
                             )
                         )
                     else:

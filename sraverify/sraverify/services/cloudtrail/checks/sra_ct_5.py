@@ -85,7 +85,7 @@ class SRA_CT_5(CloudTrailCheck):
                             f"CloudWatch Logs Group ARN: {cloudwatch_logs_group_arn}, "
                             f"CloudWatch Logs Role ARN: {cloudwatch_logs_role_arn}"
                         ),
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

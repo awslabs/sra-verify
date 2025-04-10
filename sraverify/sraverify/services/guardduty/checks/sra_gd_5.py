@@ -1,25 +1,24 @@
 """
-Check if GuardDuty finding frequency is set.
+Check if GuardDuty has VPC flow logs enabled as a log source.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_2(GuardDutyCheck):
-    """Check if GuardDuty finding frequency is set."""
+class SRA_GD_5(GuardDutyCheck):
+    """Check if GuardDuty has VPC flow logs enabled as a log source."""
 
     def __init__(self):
-        """Initialize GuardDuty enabled check."""
+        """Initialize GuardDuty VPC flow logs check."""
         super().__init__()
-        self.check_id = "SRA-GD-2"
-        self.check_name = "GuardDuty finding frequency is set"
-        self.description = ("This check verifies that the GuardDuty finding frequency is set "
-                           "as per your organization requirement. This determines how often updates to active "
-                           "findings are exported to EventBridge, S3 (optional) and Detective (optional). "
-                           "By default, updated findings are exported every 6 hours but you can set to "
-                           "every 15 minutes or 1 hour.")
-        self.severity = "LOW"
-        self.check_logic = "Get detector details in each Region. Check value of FindingPublishingFrequency."
+        self.check_id = "SRA-GD-5"
+        self.check_name = "GuardDuty VPC flow logs enabled"
+        self.description = ("SRA-GD-5 This check verifies that GuardDuty has VPC flow logs as one of the log sources, "
+                            "enabled.GuardDuty analyzes your VPC flow logs from Amazon EC2 instances within your account. "
+                            "It consumes VPC flow log events directly from the VPC Flow Logs feature through an independent "
+                            "and duplicated stream of flow logs.")
+        self.severity = "MEDIUM"
+        self.check_logic = "Get detector details in each Region. Check if VPC Flow logs are enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -47,22 +46,27 @@ class SRA_GD_2(GuardDutyCheck):
                 ))
                 continue
                 
-            # Use helper method from the base class
+            # Get detector details
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                finding_frequency = detector_details.get('FindingPublishingFrequency', 'Not set')
+                # Check if VPC flow logs are enabled in the Features array
+                vpc_logs_enabled = False
+                features = detector_details.get('Features', [])
                 
-                # Determine if the frequency is set to a valid value
-                valid_frequencies = ['FIFTEEN_MINUTES', 'ONE_HOUR', 'SIX_HOURS']
-                if finding_frequency in valid_frequencies:
+                for feature in features:
+                    if feature.get('Name') == 'FLOW_LOGS' and feature.get('Status') == 'ENABLED':
+                        vpc_logs_enabled = True
+                        break
+                
+                if vpc_logs_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Finding frequency is set to {finding_frequency}", 
-                        remediation="No remediation needed"
+                        actual_value="VPC flow logs are enabled as a data source", 
+                        remediation=""
                     ))
                 else:
                     findings.append(self.create_finding(
@@ -70,8 +74,8 @@ class SRA_GD_2(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Finding frequency is not properly set: {finding_frequency}", 
-                        remediation="Set GuardDuty finding frequency to FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS"
+                        actual_value="VPC flow logs are not enabled as a data source", 
+                        remediation=f"Enable VPC flow logs as a data source for GuardDuty in {region}"
                     ))
             else:
                 findings.append(self.create_finding(

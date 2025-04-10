@@ -79,7 +79,7 @@ class SRA_CT_1(CloudTrailCheck):
                     resource_id=trail_arn,
                     checked_value="IsOrganizationTrail: true",
                     actual_value=f"Organization trail '{trail_name}' is configured",
-                    remediation=""
+                    remediation="No remediation needed"
                 )
             )
         

@@ -73,7 +73,7 @@ class SRA_CT_4(CloudTrailCheck):
                         resource_id=trail_arn,
                         checked_value="IsMultiRegionTrail: true",
                         actual_value=f"Organization trail '{trail_name}' is configured as a multi-region trail",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

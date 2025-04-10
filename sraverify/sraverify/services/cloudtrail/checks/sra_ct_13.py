@@ -95,7 +95,7 @@ class SRA_CT_13(CloudTrailCheck):
                         resource_id=resource_id,
                         checked_value=f"CloudTrail delegated administrator is an Audit account ({', '.join(audit_accounts)})",
                         actual_value=f"CloudTrail delegated administrator {admin_id} ({admin_name}) is an Audit account",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

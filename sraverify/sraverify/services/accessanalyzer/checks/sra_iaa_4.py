@@ -117,7 +117,7 @@ class SRA_IAA_4(AccessAnalyzerCheck):
                             account_id=account_id,
                             resource_id=analyzer_arn,
                             actual_value=f"Found IAM Access Analyzer with Organization zone of trust in {region}: {', '.join(analyzer_names)}",
-                            remediation=""
+                            remediation="No remediation needed"
                         )
                     )
                 else:

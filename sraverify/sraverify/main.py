@@ -16,13 +16,17 @@ from sraverify.services.guardduty import CHECKS as guardduty_checks
 from sraverify.services.cloudtrail import CHECKS as cloudtrail_checks
 from sraverify.services.accessanalyzer import CHECKS as accessanalyzer_checks
 from sraverify.services.config import CHECKS as config_checks
+from sraverify.services.securityhub import CHECKS as securityhub_checks
+from sraverify.services.s3 import CHECKS as s3_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
     **guardduty_checks,
     **cloudtrail_checks,
     **accessanalyzer_checks,
-    **config_checks
+    **config_checks,
+    **securityhub_checks,
+    **s3_checks
     # Add more service checks here as they're implemented
     # **config_checks,
     # etc.

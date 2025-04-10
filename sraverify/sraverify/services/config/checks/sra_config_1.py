@@ -93,7 +93,7 @@ class SRA_CONFIG_1(ConfigCheck):
                             account_id=account_id,
                             resource_id=recorder_arn,
                             actual_value=f"Configuration recorder '{recorder_name}' exists and is recording",
-                            remediation=""
+                            remediation="No remediation needed"
                         )
                     )
                 elif recorder_status:

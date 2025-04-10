@@ -114,7 +114,7 @@ class SRA_CONFIG_9(ConfigCheck):
                             resource_id=f"delegated-admin/{admin_id}",
                             checked_value="Delegated administrator exists for Config service",
                             actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) for both service principals",
-                            remediation=""
+                            remediation="No remediation needed"
                         )
                     )
                 else:

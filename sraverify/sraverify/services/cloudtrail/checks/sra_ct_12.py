@@ -73,7 +73,7 @@ class SRA_CT_12(CloudTrailCheck):
                     resource_id=resource_id,
                     checked_value="At least one delegated administrator for CloudTrail",
                     actual_value=f"CloudTrail has delegated administrator: {admin_id} ({admin_name})",
-                    remediation=""
+                    remediation="No remediation needed"
                 )
             )
         

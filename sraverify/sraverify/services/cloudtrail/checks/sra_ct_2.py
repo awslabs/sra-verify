@@ -78,7 +78,7 @@ class SRA_CT_2(CloudTrailCheck):
                         resource_id=trail_arn,
                         checked_value="KmsKeyId: not empty",
                         actual_value=f"Organization trail '{trail_name}' is encrypted with KMS key: {kms_key_id}",
-                        remediation=""
+                        remediation="No remediation needed"
                     )
                 )
             else:

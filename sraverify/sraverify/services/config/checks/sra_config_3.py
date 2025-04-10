@@ -126,7 +126,7 @@ class SRA_CONFIG_3(ConfigCheck):
                                 f"Config Snapshot: {snapshot_status}, "
                                 f"Config Stream: {stream_status}"
                             ),
-                            remediation=""
+                            remediation="No remediation needed"
                         )
                     )
                 else:

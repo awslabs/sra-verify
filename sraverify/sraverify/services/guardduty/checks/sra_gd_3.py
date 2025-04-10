@@ -30,22 +30,20 @@ class SRA_GD_3(GuardDutyCheck):
         findings = []
         account_id = self.get_session_accountId(self.session)
         
-        # Only check regions where GuardDuty is enabled
-        enabled_regions = self.get_enabled_regions()
-        if not enabled_regions:
-            # If GuardDuty is not enabled in any region, return a single finding
-            return [self.create_finding(
-                status="FAIL", 
-                region="global", 
-                account_id=account_id,
-                resource_id="guardduty:global", 
-                actual_value="GuardDuty not enabled in any region", 
-                remediation="Enable GuardDuty in at least one region"
-            )]
-        
-        for region in enabled_regions:
+        # Check all regions
+        for region in self.regions:
             detector_id = self.get_detector_id(region)
+            
+            # Handle regions where we can't access GuardDuty
             if not detector_id:
+                findings.append(self.create_finding(
+                    status="ERROR", 
+                    region=region, 
+                    account_id=account_id,
+                    resource_id=f"guardduty:{region}", 
+                    actual_value="Unable to access GuardDuty in this region", 
+                    remediation="Check permissions or if GuardDuty is supported in this region"
+                ))
                 continue
                 
             # Use helper method from the base class

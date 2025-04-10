@@ -37,8 +37,11 @@ class GuardDutyClient:
             logger.debug(f"No detector found in {self.region}")
             return None
         except ClientError as e:
-            logger.error(f"Error getting detector ID in {self.region}: {e}")
-            return None
+            error_code = e.response.get('Error', {}).get('Code', '')
+            error_message = str(e)
+            logger.error(f"Error getting detector ID in {self.region}: {error_message}")
+            # Return a special error indicator instead of None
+            return f"ERROR:{error_code}:{error_message}"
     
     def get_detector_details(self, detector_id: str) -> Dict[str, Any]:
         """
@@ -54,4 +57,33 @@ class GuardDutyClient:
             return self.client.get_detector(DetectorId=detector_id)
         except ClientError as e:
             logger.error(f"Error getting detector details for {detector_id} in {self.region}: {e}")
+            return {}
+    
+    def describe_organization_configuration(self, detector_id: str) -> Dict[str, Any]:
+        """
+        Get organization configuration for a specific detector.
+        
+        Args:
+            detector_id: GuardDuty detector ID
+            
+        Returns:
+            Dictionary containing organization configuration details
+        """
+        try:
+            return self.client.describe_organization_configuration(DetectorId=detector_id)
+        except ClientError as e:
+            logger.error(f"Error getting organization configuration for {detector_id} in {self.region}: {e}")
+            return {}
+            
+    def list_organization_admin_accounts(self) -> Dict[str, Any]:
+        """
+        List organization admin accounts for GuardDuty.
+        
+        Returns:
+            Dictionary containing organization admin accounts details
+        """
+        try:
+            return self.client.list_organization_admin_accounts()
+        except ClientError as e:
+            logger.error(f"Error listing organization admin accounts for GuardDuty in {self.region}: {e}")
             return {}

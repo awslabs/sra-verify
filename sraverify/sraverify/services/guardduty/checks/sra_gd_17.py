@@ -1,25 +1,23 @@
 """
-Check if GuardDuty finding frequency is set.
+Check if GuardDuty has Lambda protection enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_2(GuardDutyCheck):
-    """Check if GuardDuty finding frequency is set."""
+class SRA_GD_17(GuardDutyCheck):
+    """Check if GuardDuty has Lambda protection enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty enabled check."""
+        """Initialize GuardDuty Lambda protection check."""
         super().__init__()
-        self.check_id = "SRA-GD-2"
-        self.check_name = "GuardDuty finding frequency is set"
-        self.description = ("This check verifies that the GuardDuty finding frequency is set "
-                           "as per your organization requirement. This determines how often updates to active "
-                           "findings are exported to EventBridge, S3 (optional) and Detective (optional). "
-                           "By default, updated findings are exported every 6 hours but you can set to "
-                           "every 15 minutes or 1 hour.")
-        self.severity = "LOW"
-        self.check_logic = "Get detector details in each Region. Check value of FindingPublishingFrequency."
+        self.check_id = "SRA-GD-17"
+        self.check_name = "GuardDuty Lambda protection enabled"
+        self.description = ("This check verifies that GuardDuty Lambda protection is enabled. "
+                           "Lambda Protection helps identify potential security threats when an AWS Lambda "
+                           "function gets invoked in the AWS environment.")
+        self.severity = "HIGH"
+        self.check_logic = "Get detector details in each Region. Check if Lambda protection is enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -47,22 +45,27 @@ class SRA_GD_2(GuardDutyCheck):
                 ))
                 continue
                 
-            # Use helper method from the base class
+            # Get detector details
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                finding_frequency = detector_details.get('FindingPublishingFrequency', 'Not set')
+                # Check if Lambda protection is enabled in the Features array
+                lambda_protection_enabled = False
+                features = detector_details.get('Features', [])
                 
-                # Determine if the frequency is set to a valid value
-                valid_frequencies = ['FIFTEEN_MINUTES', 'ONE_HOUR', 'SIX_HOURS']
-                if finding_frequency in valid_frequencies:
+                for feature in features:
+                    if feature.get('Name') == 'LAMBDA_NETWORK_LOGS' and feature.get('Status') == 'ENABLED':
+                        lambda_protection_enabled = True
+                        break
+                
+                if lambda_protection_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Finding frequency is set to {finding_frequency}", 
-                        remediation="No remediation needed"
+                        actual_value="Lambda protection is enabled", 
+                        remediation=""
                     ))
                 else:
                     findings.append(self.create_finding(
@@ -70,8 +73,8 @@ class SRA_GD_2(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Finding frequency is not properly set: {finding_frequency}", 
-                        remediation="Set GuardDuty finding frequency to FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS"
+                        actual_value="Lambda protection is not enabled", 
+                        remediation=f"Enable Lambda protection for GuardDuty in {region} to identify potential security threats in Lambda function invocations"
                     ))
             else:
                 findings.append(self.create_finding(

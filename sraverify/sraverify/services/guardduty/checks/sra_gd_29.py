@@ -1,25 +1,24 @@
 """
-Check if GuardDuty finding frequency is set.
+Check if GuardDuty has EC2 agent management enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_2(GuardDutyCheck):
-    """Check if GuardDuty finding frequency is set."""
+class SRA_GD_29(GuardDutyCheck):
+    """Check if GuardDuty has EC2 agent management enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty enabled check."""
+        """Initialize GuardDuty EC2 agent management check."""
         super().__init__()
-        self.check_id = "SRA-GD-2"
-        self.check_name = "GuardDuty finding frequency is set"
-        self.description = ("This check verifies that the GuardDuty finding frequency is set "
-                           "as per your organization requirement. This determines how often updates to active "
-                           "findings are exported to EventBridge, S3 (optional) and Detective (optional). "
-                           "By default, updated findings are exported every 6 hours but you can set to "
-                           "every 15 minutes or 1 hour.")
-        self.severity = "LOW"
-        self.check_logic = "Get detector details in each Region. Check value of FindingPublishingFrequency."
+        self.check_id = "SRA-GD-29"
+        self.check_name = "GuardDuty EC2 agent management enabled"
+        self.description = ("This check verifies that GuardDuty has EC2 agent management enabled. "
+                           "EC2 agent management allows GuardDuty to automatically deploy and manage "
+                           "the security agent on your EC2 instances, simplifying the setup and maintenance "
+                           "of runtime monitoring for EC2 workloads.")
+        self.severity = "HIGH"
+        self.check_logic = "Get detector details in each Region. Check if EC2_AGENT_MANAGEMENT is enabled in the RUNTIME_MONITORING feature's AdditionalConfiguration."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -47,22 +46,34 @@ class SRA_GD_2(GuardDutyCheck):
                 ))
                 continue
                 
-            # Use helper method from the base class
+            # Get detector details
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                finding_frequency = detector_details.get('FindingPublishingFrequency', 'Not set')
+                # Check if EC2_AGENT_MANAGEMENT is enabled in any RUNTIME_MONITORING feature
+                ec2_agent_management_enabled = False
+                features = detector_details.get('Features', [])
                 
-                # Determine if the frequency is set to a valid value
-                valid_frequencies = ['FIFTEEN_MINUTES', 'ONE_HOUR', 'SIX_HOURS']
-                if finding_frequency in valid_frequencies:
+                for feature in features:
+                    if feature.get('Name') == 'RUNTIME_MONITORING':
+                        # Check AdditionalConfiguration for EC2_AGENT_MANAGEMENT
+                        additional_configs = feature.get('AdditionalConfiguration', [])
+                        for config in additional_configs:
+                            if config.get('Name') == 'EC2_AGENT_MANAGEMENT' and config.get('Status') == 'ENABLED':
+                                ec2_agent_management_enabled = True
+                                break
+                        
+                        if ec2_agent_management_enabled:
+                            break
+                
+                if ec2_agent_management_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Finding frequency is set to {finding_frequency}", 
-                        remediation="No remediation needed"
+                        actual_value="EC2 agent management is enabled", 
+                        remediation=""
                     ))
                 else:
                     findings.append(self.create_finding(
@@ -70,8 +81,8 @@ class SRA_GD_2(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Finding frequency is not properly set: {finding_frequency}", 
-                        remediation="Set GuardDuty finding frequency to FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS"
+                        actual_value="EC2 agent management is not enabled", 
+                        remediation=f"Enable EC2 agent management in the Runtime Monitoring configuration for GuardDuty in {region}"
                     ))
             else:
                 findings.append(self.create_finding(

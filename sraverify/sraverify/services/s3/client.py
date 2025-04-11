@@ -41,7 +41,9 @@ class S3Client:
             return response.get('PublicAccessBlockConfiguration', {})
         except ClientError as e:
             if 'NoSuchPublicAccessBlockConfiguration' in str(e):
-                logger.warning(f"No public access block configuration found for account {account_id} in {self.region}")
+                # Silently handle the case where no configuration exists
+                # This is a common case and not an error condition
+                logger.debug(f"No public access block configuration found for account {account_id} in {self.region}")
                 return {}
             logger.error(f"Error getting public access block configuration for account {account_id} in {self.region}: {e}")
             return {}

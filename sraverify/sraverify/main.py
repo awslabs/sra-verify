@@ -18,6 +18,7 @@ from sraverify.services.accessanalyzer import CHECKS as accessanalyzer_checks
 from sraverify.services.config import CHECKS as config_checks
 from sraverify.services.securityhub import CHECKS as securityhub_checks
 from sraverify.services.s3 import CHECKS as s3_checks
+from sraverify.services.inspector import CHECKS as inspector_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
@@ -26,7 +27,8 @@ ALL_CHECKS = {
     **accessanalyzer_checks,
     **config_checks,
     **securityhub_checks,
-    **s3_checks
+    **s3_checks,
+    **inspector_checks
     # Add more service checks here as they're implemented
     # **config_checks,
     # etc.

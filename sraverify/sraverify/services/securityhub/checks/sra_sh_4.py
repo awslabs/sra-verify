@@ -14,7 +14,7 @@ class SRA_SH_4(SecurityHubCheck):
         super().__init__()
         self.check_id = "SRA-SH-4"
         self.check_name = "Security Hub administrator account is enabled"
-        self.account_type = "audit"  # This check is for the audit account
+        self.account_type = "audit"
         self.severity = "HIGH"
         self.description = (
             "This check verifies whether Security Hub administrator account is enabled. "

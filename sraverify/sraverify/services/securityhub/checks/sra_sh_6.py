@@ -68,7 +68,7 @@ class SRA_SH_6(SecurityHubCheck):
                     resource_id=resource_id,
                     checked_value=(
                         "aws organizations list-delegated-administrators --service-principal securityhub.amazonaws.com - "
-                        "\"DelegatedAdministrators\": \"Id\": \"[ADMIN_ID]\"\n"
+                        "\"DelegatedAdministrators\": \"Id\": \"[ADMIN_ID]\""
                         "aws securityhub list-organization-admin-accounts - \"AdminAccounts\": \"AccountId\": \"[ADMIN_ID]\""
                     ),
                     actual_value=f"No Security Hub admin account or Organizations delegated admin found",
@@ -88,14 +88,14 @@ class SRA_SH_6(SecurityHubCheck):
                     resource_id=resource_id,
                     checked_value=(
                         "aws organizations list-delegated-administrators --service-principal securityhub.amazonaws.com - "
-                        "\"DelegatedAdministrators\": \"Id\": \"[ADMIN_ID]\"\n"
+                        "\"DelegatedAdministrators\": \"Id\": \"[ADMIN_ID]\""
                         "aws securityhub list-organization-admin-accounts - \"AdminAccounts\": \"AccountId\": \"[ADMIN_ID]\""
                     ),
                     actual_value=f"Organizations delegated admin for securityhub {org_admin_id} is different than the Security Hub Admin account {sh_admin_id}",
                     remediation=(
                         "Ensure the same account is used as both the Security Hub admin and the Organizations delegated admin. "
                         "First, remove the current delegated admin using: "
-                        f"aws organizations deregister-delegated-administrator --account-id {org_admin_id} --service-principal securityhub.amazonaws.com\n"
+                        f"aws organizations deregister-delegated-administrator --account-id {org_admin_id} --service-principal securityhub.amazonaws.com"
                         "Then, set the Security Hub admin account as the delegated admin: "
                         f"aws organizations register-delegated-administrator --account-id {sh_admin_id} --service-principal securityhub.amazonaws.com"
                     )

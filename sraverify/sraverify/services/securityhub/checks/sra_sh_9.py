@@ -1,5 +1,5 @@
 """
-SRA-SH-9: Security Hub member accounts has enabled status.
+SRA-SH-9: All Security Hub member accounts have Enabled status.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
@@ -7,25 +7,24 @@ from sraverify.core.logging import logger
 
 
 class SRA_SH_9(SecurityHubCheck):
-    """Check if Security Hub member accounts have enabled status."""
+    """Check if all Security Hub member accounts have Enabled status."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
         self.check_id = "SRA-SH-9"
-        self.check_name = "Security Hub member accounts has enabled status"
+        self.check_name = "All Security Hub member accounts have Enabled status"
         self.account_type = "audit"  # This check is for the audit account
         self.severity = "HIGH"
         self.description = (
-            "This check verifies whether each Security Hub member account member status enabled. "
-            "Indicates that the member account is currently active. For manually invited member accounts "
-            "indicates that the member account accepted the invitation."
+            "This check verifies whether each Security Hub member account has member status Enabled. "
+            "Enabled status indicates that the member account is currently active. For manually invited "
+            "member accounts, it indicates that the member account accepted the invitation."
         )
         self.check_logic = (
-            "Check that the status of each Security Hub member for \"MemberStatus\": \"Enabled\". "
-            "Check FAIL if any member accounts are not Enabled."
+            "Check runs aws securityhub list-members in each region and verifies that all members have "
+            "MemberStatus: Enabled. PASS if all members have Enabled status."
         )
-        self.resource_type = "AWS::SecurityHub::Member"
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -37,50 +36,69 @@ class SRA_SH_9(SecurityHubCheck):
         findings = []
         account_id = self.get_session_accountId(self.session)
         
-        # This is a global check, so we'll use a single region but report it as global
-        region = self.regions[0] if self.regions else "us-east-1"
-        
-        # Get all Security Hub members
-        sh_members = self.get_security_hub_members(region)
-        
-        # Check if all members are enabled
-        non_enabled_members = [
-            member for member in sh_members 
-            if member.get('MemberStatus') != 'ENABLED'
-        ]
-        
-        if non_enabled_members:
-            # Create a list of non-enabled member account IDs
-            non_enabled_account_ids = [member.get('AccountId') for member in non_enabled_members]
-            non_enabled_account_ids_str = ', '.join(non_enabled_account_ids)
+        # Check each region separately
+        for region in self.regions:
+            # Get Security Hub members
+            securityhub_members = self.get_security_hub_members(region)
             
-            findings.append(
-                self.create_finding(
-                    status="FAIL",
-                    region="global",  # Report as global
-                    account_id=account_id,
-                    resource_id=f"securityhub:member/{account_id}",
-                    checked_value="All Security Hub members are Enabled",
-                    actual_value=f"Security Hub member(s) [{non_enabled_account_ids_str}] is not enabled",
-                    remediation=(
-                        f"Enable the Security Hub member account(s). If the status is 'INVITED', the account(s) need to accept the invitation. "
-                        f"If using AWS Organizations integration, ensure the account(s) are properly configured. "
-                        f"You can update the member status using the AWS CLI command: "
-                        f"aws securityhub update-organization-configuration --auto-enable --region {region}"
+            resource_id = f"securityhub:members/{account_id}/{region}"
+            
+            # Check if there are any members
+            if not securityhub_members:
+                findings.append(
+                    self.create_finding(
+                        status="PASS",
+                        region=region,
+                        account_id=account_id,
+                        resource_id=resource_id,
+                        checked_value="All Security Hub member accounts have Enabled status",
+                        actual_value=f"No Security Hub member accounts found in region {region}",
+                        remediation="No remediation needed"
                     )
                 )
-            )
-        else:
-            findings.append(
-                self.create_finding(
-                    status="PASS",
-                    region="global",  # Report as global
-                    account_id=account_id,
-                    resource_id=f"securityhub:member/{account_id}",
-                    checked_value="All Security Hub members are Enabled",
-                    actual_value=f"All {len(sh_members)} Security Hub member accounts have ENABLED status",
-                    remediation="No remediation needed"
+                continue
+            
+            # Find members that don't have Enabled status
+            non_enabled_members = []
+            for member in securityhub_members:
+                member_id = member.get('AccountId')
+                member_status = member.get('MemberStatus')
+                
+                if member_status != 'Enabled':
+                    non_enabled_members.append(f"{member_id} (Status: {member_status})")
+            
+            if non_enabled_members:
+                findings.append(
+                    self.create_finding(
+                        status="FAIL",
+                        region=region,
+                        account_id=account_id,
+                        resource_id=resource_id,
+                        checked_value="All Security Hub member accounts have Enabled status",
+                        actual_value=(
+                            f"The following Security Hub member accounts do not have Enabled status in region {region}: "
+                            f"{', '.join(non_enabled_members)}"
+                        ),
+                        remediation=(
+                            f"Ensure all Security Hub member accounts have Enabled status in region {region}. "
+                            f"For manually invited accounts, the member account needs to accept the invitation. "
+                            f"For organization-based members, verify the account is properly configured. "
+                            f"In the AWS Console, navigate to Security Hub in the audit account, go to Settings > Accounts, "
+                            f"and check the status of each member account."
+                        )
+                    )
                 )
-            )
+            else:
+                findings.append(
+                    self.create_finding(
+                        status="PASS",
+                        region=region,
+                        account_id=account_id,
+                        resource_id=resource_id,
+                        checked_value="All Security Hub member accounts have Enabled status",
+                        actual_value=f"All {len(securityhub_members)} Security Hub member accounts have Enabled status in region {region}",
+                        remediation="No remediation needed"
+                    )
+                )
         
         return findings

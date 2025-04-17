@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-4: AWS Config has organization aggregator.
+SRA-CONFIG-04: AWS Config Recording Global Resources.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_4(ConfigCheck):
+class SRA_CONFIG_04(ConfigCheck):
     """Check if AWS Config has an organization aggregator."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-4"
+        self.check_id = "SRA-CONFIG-04"
         self.check_name = "AWS Config has organization aggregator"
         self.account_type = "audit"  # This check applies to audit account
         self.severity = "HIGH"

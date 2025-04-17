@@ -1,18 +1,18 @@
 """
-SRA-CT-11: Organization CloudTrail Logs Centralized in Log Archive Account.
+SRA-CLOUDTRAIL-11: Organization CloudTrail Logs Centralized in Log Archive Account.
 """
 from typing import List, Dict, Any
 from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_11(CloudTrailCheck):
+class SRA_CLOUDTRAIL_11(CloudTrailCheck):
     """Check if organization trails logs are delivered to a centralized S3 bucket in the Log Archive account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-11"
+        self.check_id = "SRA-CLOUDTRAIL-11"
         self.check_name = "Organization trail Logs are delivered to a centralized S3 bucket in the Log Archive Account"
         self.account_type = "management"
         self.severity = "HIGH"

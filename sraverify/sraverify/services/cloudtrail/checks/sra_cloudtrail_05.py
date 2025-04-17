@@ -1,18 +1,18 @@
 """
-SRA-CT-5: CloudTrail CloudWatch Logs Configuration.
+SRA-CLOUDTRAIL-05: CloudTrail CloudWatch Logs Configuration.
 """
 from typing import List, Dict, Any
 from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_5(CloudTrailCheck):
+class SRA_CLOUDTRAIL_05(CloudTrailCheck):
     """Check if trails have CloudWatch Logs configuration."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-5"
+        self.check_id = "SRA-CLOUDTRAIL-05"
         self.check_name = "CloudTrail has CloudWatch Logs configuration"
         self.account_type = "management"
         self.severity = "MEDIUM"

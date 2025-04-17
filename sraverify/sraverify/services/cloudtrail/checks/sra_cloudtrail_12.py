@@ -1,18 +1,18 @@
 """
-SRA-CT-12: CloudTrail Delegated Administrator Configuration.
+SRA-CLOUDTRAIL-12: CloudTrail Delegated Administrator Configuration.
 """
 from typing import List, Dict, Any
 from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_12(CloudTrailCheck):
+class SRA_CLOUDTRAIL_12(CloudTrailCheck):
     """Check if CloudTrail service administration is delegated out of AWS Organization management account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-12"
+        self.check_id = "SRA-CLOUDTRAIL-12"
         self.check_name = "Delegated Administrator set for CloudTrail"
         self.account_type = "management"
         self.severity = "MEDIUM"

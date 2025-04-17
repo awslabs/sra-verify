@@ -1,18 +1,18 @@
 """
-SRA-CT-2: Organization CloudTrail KMS Encryption.
+SRA-CLOUDTRAIL-02: Organization CloudTrail KMS Encryption.
 """
 from typing import List, Dict, Any
 from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_2(CloudTrailCheck):
+class SRA_CLOUDTRAIL_02(CloudTrailCheck):
     """Check if organization trails are encrypted with KMS."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-2"
+        self.check_id = "SRA-CLOUDTRAIL-02"
         self.check_name = "Organization trail is encrypted with KMS"
         self.account_type = "management"
         self.severity = "MEDIUM"

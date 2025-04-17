@@ -1,5 +1,5 @@
 """
-SRA-CT-10: Organization CloudTrail Log File Validation Digest Delivery.
+SRA-CLOUDTRAIL-10: Organization CloudTrail Log File Validation Digest Delivery.
 """
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -7,13 +7,13 @@ from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_10(CloudTrailCheck):
+class SRA_CLOUDTRAIL_10(CloudTrailCheck):
     """Check if organization trails are delivering log file validation digest files."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-10"
+        self.check_id = "SRA-CLOUDTRAIL-10"
         self.check_name = "Organization trail is configured to deliver Log file validation digest files to destination bucket"
         self.account_type = "management"
         self.severity = "MEDIUM"

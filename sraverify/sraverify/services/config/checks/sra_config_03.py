@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-3: AWS Config Latest Recording Event Processed Successfully.
+SRA-CONFIG-03: AWS Config Recording All Resource Types.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_3(ConfigCheck):
+class SRA_CONFIG_03(ConfigCheck):
     """Check if AWS Config latest recording event is processed successfully."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-3"
+        self.check_id = "SRA-CONFIG-03"
         self.check_name = "AWS Config latest recording event is processed successfully"
         self.account_type = "application"  # This check applies to all account types
         self.severity = "HIGH"

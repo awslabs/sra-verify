@@ -1,5 +1,5 @@
 """
-SRA-CONFIG-10: Config delegated admin account is the Security Tooling (Audit) account.
+SRA-CONFIG-10: AWS Config Aggregator Authorization.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck

@@ -1,5 +1,5 @@
 """
-SRA-CONFIG-7: AWS Config last config history delivery is successful.
+SRA-CONFIG-07: AWS Config Recording All Resource Types (duplicate).
 """
 from typing import List, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -7,13 +7,13 @@ from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_7(ConfigCheck):
+class SRA_CONFIG_07(ConfigCheck):
     """Check if AWS Config last config history delivery is successful."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-7"
+        self.check_id = "SRA-CONFIG-07"
         self.check_name = "AWS Config last config history delivery is successful"
         self.account_type = "application"  # This check applies to application accounts
         self.severity = "HIGH"

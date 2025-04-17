@@ -1,18 +1,18 @@
 """
-SRA-CT-13: CloudTrail Delegated Administrator is the Audit Account.
+SRA-CLOUDTRAIL-13: CloudTrail Delegated Administrator is the Audit Account.
 """
 from typing import List, Dict, Any
 from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_13(CloudTrailCheck):
+class SRA_CLOUDTRAIL_13(CloudTrailCheck):
     """Check if CloudTrail delegated administrator is the Audit account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-13"
+        self.check_id = "SRA-CLOUDTRAIL-13"
         self.check_name = "The audit account is the Delegated Administrator set for CloudTrail"
         self.account_type = "management"
         self.severity = "HIGH"

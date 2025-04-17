@@ -1,18 +1,18 @@
 """
-SRA-MACIE-6: Macie delegated admin account is the Security Tooling (Audit) account.
+SRA-MACIE-06: Macie delegated admin account is the Security Tooling (Audit) account.
 """
 from typing import List, Dict, Any
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_6(MacieCheck):
+class SRA_MACIE_06(MacieCheck):
     """Check if Macie delegated admin account is the Security Tooling (Audit) account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-6"
+        self.check_id = "SRA-MACIE-06"
         self.check_name = "Macie delegated admin account is the Security Tooling (Audit) account"
         self.description = (
             "This check verifies whether Macie delegated admin account is the audit account of your AWS organization. "

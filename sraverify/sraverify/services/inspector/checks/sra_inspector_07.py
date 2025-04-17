@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-7: All Active Member Accounts Have Inspector Enabled.
+SRA-INSPECTOR-07: All Active Member Accounts Have Inspector Enabled.
 """
 from typing import List, Dict, Any, Set
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_7(InspectorCheck):
+class SRA_INSPECTOR_07(InspectorCheck):
     """Check if all active member accounts have Inspector enabled."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-7"
+        self.check_id = "SRA-INSPECTOR-07"
         self.check_name = "All active member accounts have Inspector enabled"
         self.account_type = "audit"
         self.severity = "HIGH"

@@ -1,26 +1,28 @@
 """
-SRA-MACIE-1: Macie publish policy findings to Security Hub is enabled.
+SRA-MACIE-02: Macie publish classification findings to Security Hub is enabled.
 """
 from typing import List, Dict, Any
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_1(MacieCheck):
-    """Check if Macie publish policy findings to Security Hub is enabled."""
+class SRA_MACIE_02(MacieCheck):
+    """Check if Macie publish classification findings to Security Hub is enabled."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-1"
-        self.check_name = "Macie publish policy findings to Security Hub is enabled"
+        self.check_id = "SRA-MACIE-02"
+        self.check_name = "Macie publish classification findings to Security Hub is enabled"
         self.description = (
-            "This check verifies whether Macie is configured to publish new and updated policy findings to AWS Security Hub. "
-            "Policy findings denotes potential security or privacy issue with a S3 bucket."
+            "This check verifies whether Macie is configured to publish sensitive data findings to AWS Security Hub. "
+            "Sensitive data findings denotes potential sensitive data in as S3 object. Macie continually evaluates your "
+            "S3 bucket inventory and uses sampling techniques to identify and select representative S3 objects from your buckets. "
+            "Macie then retrieves and analyzes the selected objects, inspecting them for sensitive data."
         )
         self.severity = "HIGH"
         self.account_type = "application"
-        self.check_logic = "Check validates macie2 get-findings-publication-configuration. Check PASS if 'publishPolicyFindings': true"
+        self.check_logic = "Check validates macie2 get-findings-publication-configuration. Check PASS if 'publishClassificationFindings': true"
         self.resource_type = "AWS::Macie::Session"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -45,7 +47,7 @@ class SRA_MACIE_1(MacieCheck):
                         region=region,
                         account_id=account_id,
                         resource_id=f"macie2/{account_id}/{region}",
-                        checked_value="publishPolicyFindings: true",
+                        checked_value="publishClassificationFindings: true",
                         actual_value="Failed to retrieve Macie findings publication configuration",
                         remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie GetFindingsPublicationConfiguration API"
                     )
@@ -61,28 +63,28 @@ class SRA_MACIE_1(MacieCheck):
                         region=region,
                         account_id=account_id,
                         resource_id=f"macie2/{account_id}/{region}",
-                        checked_value="publishPolicyFindings: true",
+                        checked_value="publishClassificationFindings: true",
                         actual_value="Security Hub configuration not found in Macie findings publication configuration",
                         remediation=(
                             f"Configure Macie to publish findings to Security Hub in region {region} using the AWS CLI command: "
-                            f"aws macie2 put-findings-publication-configuration --security-hub-configuration publishPolicyFindings=true --region {region}"
+                            f"aws macie2 put-findings-publication-configuration --security-hub-configuration publishClassificationFindings=true --region {region}"
                         )
                     )
                 )
                 continue
             
-            # Check if policy findings are published to Security Hub
-            publish_policy_findings = security_hub_config.get('publishPolicyFindings', False)
+            # Check if classification findings are published to Security Hub
+            publish_classification_findings = security_hub_config.get('publishClassificationFindings', False)
             
-            if publish_policy_findings:
+            if publish_classification_findings:
                 findings.append(
                     self.create_finding(
                         status="PASS",
                         region=region,
                         account_id=account_id,
                         resource_id=f"macie2/{account_id}/{region}",
-                        checked_value="publishPolicyFindings: true",
-                        actual_value=f"Macie is configured to publish policy findings to Security Hub in region {region}",
+                        checked_value="publishClassificationFindings: true",
+                        actual_value=f"Macie is configured to publish classification findings to Security Hub in region {region}",
                         remediation="No remediation needed"
                     )
                 )
@@ -93,11 +95,11 @@ class SRA_MACIE_1(MacieCheck):
                         region=region,
                         account_id=account_id,
                         resource_id=f"macie2/{account_id}/{region}",
-                        checked_value="publishPolicyFindings: true",
-                        actual_value=f"Macie is not configured to publish policy findings to Security Hub in region {region}",
+                        checked_value="publishClassificationFindings: true",
+                        actual_value=f"Macie is not configured to publish classification findings to Security Hub in region {region}",
                         remediation=(
-                            f"Configure Macie to publish policy findings to Security Hub in region {region} using the AWS CLI command: "
-                            f"aws macie2 put-findings-publication-configuration --security-hub-configuration publishPolicyFindings=true --region {region}"
+                            f"Configure Macie to publish classification findings to Security Hub in region {region} using the AWS CLI command: "
+                            f"aws macie2 put-findings-publication-configuration --security-hub-configuration publishClassificationFindings=true --region {region}"
                         )
                     )
                 )

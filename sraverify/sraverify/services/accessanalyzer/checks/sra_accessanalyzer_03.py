@@ -6,13 +6,13 @@ from sraverify.services.accessanalyzer.base import AccessAnalyzerCheck
 from sraverify.core.logging import logger
 
 
-class SRA_IAA_3(AccessAnalyzerCheck):
+class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
     """Check if IAM Access Analyzer delegated admin is the Audit account."""
     
     def __init__(self):
         """Initialize IAM Access Analyzer check."""
         super().__init__()
-        self.check_id = "SRA-IAA-3"
+        self.check_id = "SRA-ACCESSANALYZER-03"
         self.check_name = "IAM Access Analyzer Delegated Admin is the Audit Account"
         self.description = ("This check verifies whether IAA delegated admin account is the "
                           "audit account of your AWS organization. Audit account is "

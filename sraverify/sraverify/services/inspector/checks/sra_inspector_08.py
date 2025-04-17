@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-8: Inspector EC2 Auto-Enable is Configured.
+SRA-INSPECTOR-08: Inspector EC2 Auto-Enable is Configured.
 """
 from typing import List, Dict, Any
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_8(InspectorCheck):
+class SRA_INSPECTOR_08(InspectorCheck):
     """Check if Inspector EC2 auto-enable is configured."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-8"
+        self.check_id = "SRA-INSPECTOR-08"
         self.check_name = "Inspector EC2 auto-enable is configured"
         self.account_type = "audit"
         self.severity = "HIGH"

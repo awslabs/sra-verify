@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-2: Inspector EC2 Vulnerability Scanning.
+SRA-INSPECTOR-02: Inspector EC2 Vulnerability Scanning.
 """
 from typing import List, Dict, Any
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_2(InspectorCheck):
+class SRA_INSPECTOR_02(InspectorCheck):
     """Check if Inspector EC2 vulnerability scanning is enabled for the account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-2"
+        self.check_id = "SRA-INSPECTOR-02"
         self.check_name = "Inspector EC2 vulnerability scanning is enabled"
         self.account_type = "application"
         self.severity = "HIGH"

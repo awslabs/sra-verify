@@ -1,18 +1,18 @@
 """
-SRA-MACIE-3: Macie findings exported to a S3 bucket in Log Archive account are encrypted at rest.
+SRA-MACIE-03: Macie findings exported to a S3 bucket in Log Archive account are encrypted at rest.
 """
 from typing import List, Dict, Any
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_3(MacieCheck):
+class SRA_MACIE_03(MacieCheck):
     """Check if Macie findings are exported to a S3 bucket in Log Archive account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-3"
+        self.check_id = "SRA-MACIE-03"
         self.check_name = "Macie findings exported to a S3 bucket in Log Archive account are encrypted at rest"
         self.description = (
             "This check verifies whether all Macie findings are being exported to a S3 bucket within the Log Archive account. "

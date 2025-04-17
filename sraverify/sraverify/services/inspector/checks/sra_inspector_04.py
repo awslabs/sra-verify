@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-4: Inspector Lambda Function and Layers Vulnerability Scanning.
+SRA-INSPECTOR-04: Inspector Lambda Function and Layers Vulnerability Scanning.
 """
 from typing import List, Dict, Any
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_4(InspectorCheck):
+class SRA_INSPECTOR_04(InspectorCheck):
     """Check if Inspector Lambda function and layers vulnerability scanning is enabled for the account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-4"
+        self.check_id = "SRA-INSPECTOR-04"
         self.check_name = "Inspector Lambda function and layers vulnerability scanning is enabled"
         self.account_type = "application"
         self.severity = "HIGH"

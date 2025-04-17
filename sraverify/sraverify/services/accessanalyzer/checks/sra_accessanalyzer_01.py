@@ -6,13 +6,13 @@ from sraverify.services.accessanalyzer.base import AccessAnalyzerCheck
 from sraverify.core.logging import logger
 
 
-class SRA_IAA_1(AccessAnalyzerCheck):
+class SRA_ACCESSANALYZER_01(AccessAnalyzerCheck):
     """Check if IAM Access Analyzer external access analyzer is configured with account zone of trust."""
 
     def __init__(self):
         """Initialize IAM Access Analyzer check."""
         super().__init__()
-        self.check_id = "SRA-IAA-1"
+        self.check_id = "SRA-ACCESSANALYZER-01"
         self.check_name = "IAM Access Analyzer Account Zone of trust"
         self.description = ("This check verifies whether IAA external access analyzer is configured with a zone of "
                           "trust of AWS account. IAM Access Analyzer generates a finding for each instance of a "

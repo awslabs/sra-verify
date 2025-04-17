@@ -1,18 +1,18 @@
 """
-SRA-MACIE-7: All active member accounts have relationship with delegated admin account enabled.
+SRA-MACIE-07: All active member accounts have relationship with delegated admin account enabled.
 """
 from typing import List, Dict, Any, Set
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_7(MacieCheck):
+class SRA_MACIE_07(MacieCheck):
     """Check if all active member accounts have relationship with delegated admin account enabled."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-7"
+        self.check_id = "SRA-MACIE-07"
         self.check_name = "All active member accounts have relationship with delegated admin account enabled"
         self.description = (
             "This check verifies whether all active members accounts of the AWS Organization have Macie member relationship "

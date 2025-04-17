@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-5: Inspector Delegated Admin Account is Configured.
+SRA-INSPECTOR-05: Inspector Delegated Admin Account is Configured.
 """
 from typing import List, Dict, Any
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_5(InspectorCheck):
+class SRA_INSPECTOR_05(InspectorCheck):
     """Check if Inspector delegated admin account is configured."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-5"
+        self.check_id = "SRA-INSPECTOR-05"
         self.check_name = "Inspector delegated admin account is configured"
         self.account_type = "management"
         self.severity = "HIGH"

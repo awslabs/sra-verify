@@ -1,18 +1,18 @@
 """
-SRA-MACIE-5: Macie administration for the AWS Organization has a delegated administrator.
+SRA-MACIE-05: Macie administration for the AWS Organization has a delegated administrator.
 """
 from typing import List, Dict, Any
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_5(MacieCheck):
+class SRA_MACIE_05(MacieCheck):
     """Check if Macie administration for the AWS Organization has a delegated administrator."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-5"
+        self.check_id = "SRA-MACIE-05"
         self.check_name = "Macie administration for the AWS Organization has a delegated administrator"
         self.description = (
             "This check verifies whether Macie service administration for the AWS Organization is delegated out to AWS Organization management account."

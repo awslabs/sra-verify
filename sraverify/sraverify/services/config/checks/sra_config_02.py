@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-2: AWS Config Recorder Running.
+SRA-CONFIG-02: AWS Config Delivery Channel Configured.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_2(ConfigCheck):
+class SRA_CONFIG_02(ConfigCheck):
     """Check if AWS Config recorder is running."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-2"
+        self.check_id = "SRA-CONFIG-02"
         self.check_name = "AWS Config recorder is running"
         self.account_type = "account"  # This check applies to all account types
         self.severity = "HIGH"

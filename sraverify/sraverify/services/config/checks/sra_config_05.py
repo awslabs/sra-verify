@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-5: AWS Config organization aggregator includes all regions.
+SRA-CONFIG-05: AWS Config Recorder Status.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_5(ConfigCheck):
+class SRA_CONFIG_05(ConfigCheck):
     """Check if AWS Config organization aggregator includes all regions."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-5"
+        self.check_id = "SRA-CONFIG-05"
         self.check_name = "AWS Config organization aggregator includes all regions"
         self.account_type = "audit"  # This check applies to audit account
         self.severity = "MEDIUM"

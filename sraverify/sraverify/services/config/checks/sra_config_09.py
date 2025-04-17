@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-9: Config administration for the AWS Organization has a delegated administrator.
+SRA-CONFIG-09: AWS Config Aggregator.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_9(ConfigCheck):
+class SRA_CONFIG_09(ConfigCheck):
     """Check if Config administration for the AWS Organization has a delegated administrator."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-9"
+        self.check_id = "SRA-CONFIG-09"
         self.check_name = "Config administration for the AWS Organization has a delegated administrator"
         self.account_type = "management"  # This check applies to management account
         self.severity = "MEDIUM"

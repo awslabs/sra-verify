@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-8: AWS Config rule exists in all member accounts.
+SRA-CONFIG-08: AWS Config Rules.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_8(ConfigCheck):
+class SRA_CONFIG_08(ConfigCheck):
     """Check if AWS Config rule exists in all member accounts."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-8"
+        self.check_id = "SRA-CONFIG-08"
         self.check_name = "AWS Config rule exists in all member accounts"
         self.account_type = "audit"  # This check applies to audit account
         self.severity = "MEDIUM"

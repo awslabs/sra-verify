@@ -1,18 +1,18 @@
 """
-SRA-CT-1: Organization CloudTrail Configuration.
+SRA-CLOUDTRAIL-01: Organization CloudTrail Configuration.
 """
 from typing import List, Dict, Any
 from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_1(CloudTrailCheck):
+class SRA_CLOUDTRAIL_01(CloudTrailCheck):
     """Check if an Organization trail is configured for the AWS Organization."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-1"
+        self.check_id = "SRA-CLOUDTRAIL-01"
         self.check_name = "An Organization trail is configured for the AWS Organization"
         self.account_type = "management"
         self.severity = "HIGH"

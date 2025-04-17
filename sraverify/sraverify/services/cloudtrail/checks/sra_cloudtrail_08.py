@@ -1,5 +1,5 @@
 """
-SRA-CT-8: Organization CloudTrail S3 Delivery.
+SRA-CLOUDTRAIL-08: Organization CloudTrail S3 Delivery.
 """
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -7,13 +7,13 @@ from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_8(CloudTrailCheck):
+class SRA_CLOUDTRAIL_08(CloudTrailCheck):
     """Check if organization trails are publishing logs to destination S3 bucket."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-8"
+        self.check_id = "SRA-CLOUDTRAIL-08"
         self.check_name = "Organization trail is publishing logs to destination S3 bucket"
         self.account_type = "management"
         self.severity = "HIGH"

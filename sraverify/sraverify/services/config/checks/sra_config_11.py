@@ -1,5 +1,5 @@
 """
-SRA-CONFIG-11: Config Organization aggregator is in a valid status.
+SRA-CONFIG-11: AWS Config Aggregator Status.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck

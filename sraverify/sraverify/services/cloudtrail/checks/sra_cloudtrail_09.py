@@ -1,5 +1,5 @@
 """
-SRA-CT-9: Organization CloudTrail CloudWatch Logs Delivery.
+SRA-CLOUDTRAIL-09: Organization CloudTrail CloudWatch Logs Delivery.
 """
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -7,13 +7,13 @@ from sraverify.services.cloudtrail.base import CloudTrailCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CT_9(CloudTrailCheck):
+class SRA_CLOUDTRAIL_09(CloudTrailCheck):
     """Check if organization trails are publishing logs to CloudWatch Logs."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CT-9"
+        self.check_id = "SRA-CLOUDTRAIL-09"
         self.check_name = "Organization trail is publishing logs to CloudWatch Logs"
         self.account_type = "management"
         self.severity = "MEDIUM"

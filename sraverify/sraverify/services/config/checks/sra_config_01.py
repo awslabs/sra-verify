@@ -1,18 +1,18 @@
 """
-SRA-CONFIG-1: AWS Config Recorder Configured.
+SRA-CONFIG-01: AWS Config Recorder Configured.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
-class SRA_CONFIG_1(ConfigCheck):
+class SRA_CONFIG_01(ConfigCheck):
     """Check if AWS Config recorder is configured in each region."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-CONFIG-1"
+        self.check_id = "SRA-CONFIG-01"
         self.check_name = "AWS Config recorder is configured in this region"
         self.account_type = "account"  # This check applies to all account types
         self.severity = "HIGH"

@@ -1,25 +1,24 @@
 """
-Check if GuardDuty EBS Malware Protection is configured for auto-enablement.
+Check if GuardDuty member account limit is reached.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_31(GuardDutyCheck):
-    """Check if GuardDuty EBS Malware Protection is configured for auto-enablement."""
+class SRA_GUARDDUTY_16(GuardDutyCheck):
+    """Check if GuardDuty member account limit is reached."""
 
     def __init__(self):
-        """Initialize GuardDuty EBS Malware Protection auto-enablement check."""
+        """Initialize GuardDuty member account limit check."""
         super().__init__()
-        self.check_id = "SRA-GD-31"
-        self.check_name = "GuardDuty EBS Malware Protection auto-enablement configured"
-        self.description = ("This check verifies whether EBS Malware Protection is configured for auto-enablement "
-                           "in GuardDuty for all member accounts. EBS Malware Protection scans EBS volumes for "
-                           "malware when GuardDuty detects a potential threat, helping to identify and remediate "
-                           "malware infections in your AWS environment.")
+        self.check_id = "SRA-GUARDDUTY-16"
+        self.check_name = "GuardDuty member account limit not reached"
+        self.description = ("This check verifies whether the maximum number of allowed member accounts are already "
+                           "associated with the delegated administrator account for the AWS Organization. "
+                           "Reaching the limit prevents adding new accounts to GuardDuty monitoring.")
         self.severity = "HIGH"
-        self.check_logic = "Check if EBS_MALWARE_PROTECTION feature is configured with AutoEnable set to ALL."
+        self.check_logic = "Check if MemberAccountLimitReached is false using describe-organization-configuration API."
         self.account_type = "audit"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -77,35 +76,17 @@ class SRA_GD_31(GuardDutyCheck):
                     ))
                 continue
             
-            # Check if EBS Malware Protection is configured for auto-enablement
-            # Look for EBS_MALWARE_PROTECTION in Features
-            ebs_malware_protection_found = False
-            ebs_malware_protection_auto_enable = "NOT_CONFIGURED"
-            features = org_config.get('Features', [])
+            # Check if member account limit is reached
+            member_account_limit_reached = org_config.get('MemberAccountLimitReached', False)
             
-            for feature in features:
-                if feature.get('Name') == 'EBS_MALWARE_PROTECTION':
-                    ebs_malware_protection_found = True
-                    ebs_malware_protection_auto_enable = feature.get('AutoEnable', 'NONE')
-                    break
-            
-            if ebs_malware_protection_found and ebs_malware_protection_auto_enable == 'ALL':
+            if not member_account_limit_reached:
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty EBS Malware Protection is configured for auto-enablement for all accounts (AutoEnable=ALL)", 
+                    actual_value="GuardDuty member account limit is not reached", 
                     remediation=""
-                ))
-            elif ebs_malware_protection_found:
-                findings.append(self.create_finding(
-                    status="FAIL", 
-                    region=region, 
-                    account_id=account_id,
-                    resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty EBS Malware Protection is configured with AutoEnable={ebs_malware_protection_auto_enable}, but should be ALL", 
-                    remediation=f"Configure EBS Malware Protection auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
                 ))
             else:
                 findings.append(self.create_finding(
@@ -113,8 +94,8 @@ class SRA_GD_31(GuardDutyCheck):
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty EBS Malware Protection feature is not configured", 
-                    remediation=f"Enable EBS Malware Protection feature and configure auto-enablement for all accounts in {region}"
+                    actual_value="GuardDuty member account limit is reached", 
+                    remediation=f"Contact AWS Support to request an increase in the GuardDuty member account limit for {region}"
                 ))
         
         return findings

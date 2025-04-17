@@ -1,24 +1,24 @@
 """
-Check if GuardDuty RDS Login Events are configured for auto-enablement.
+Check if GuardDuty auto-enablement is configured for member accounts.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_35(GuardDutyCheck):
-    """Check if GuardDuty RDS Login Events are configured for auto-enablement."""
+class SRA_GUARDDUTY_15(GuardDutyCheck):
+    """Check if GuardDuty auto-enablement is configured for member accounts."""
 
     def __init__(self):
-        """Initialize GuardDuty RDS Login Events auto-enablement check."""
+        """Initialize GuardDuty auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-35"
-        self.check_name = "GuardDuty RDS Login Events auto-enablement configured"
-        self.description = ("This check verifies whether RDS Login Events are configured for auto-enablement "
-                           "in GuardDuty for all member accounts. RDS Login Events monitoring analyzes database "
-                           "login activity to detect potentially suspicious login attempts to RDS databases.")
+        self.check_id = "SRA-GUARDDUTY-15"
+        self.check_name = "GuardDuty auto-enablement configured"
+        self.description = ("This check verifies whether auto-enablement configuration for GuardDuty is "
+                           " enabled for member accounts of the AWS Organization. This ensures that all  "
+                           "existing and new member accounts will have GuardDuty monitoring.")
         self.severity = "HIGH"
-        self.check_logic = "Check if RDS_LOGIN_EVENTS feature is configured with AutoEnable set to ALL."
+        self.check_logic = "Check if GuardDuty AutoEnableOrganizationMembers is set to ALL using describe-organization-configuration API."
         self.account_type = "audit"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -76,35 +76,17 @@ class SRA_GD_35(GuardDutyCheck):
                     ))
                 continue
             
-            # Check if RDS Login Events are configured for auto-enablement
-            # Look for RDS_LOGIN_EVENTS in Features
-            rds_login_events_found = False
-            rds_login_events_auto_enable = "NOT_CONFIGURED"
-            features = org_config.get('Features', [])
+            # Check if AutoEnableOrganizationMembers is set to ALL
+            auto_enable_org_members = org_config.get('AutoEnableOrganizationMembers', 'NONE')
             
-            for feature in features:
-                if feature.get('Name') == 'RDS_LOGIN_EVENTS':
-                    rds_login_events_found = True
-                    rds_login_events_auto_enable = feature.get('AutoEnable', 'NONE')
-                    break
-            
-            if rds_login_events_found and rds_login_events_auto_enable == 'ALL':
+            if auto_enable_org_members == 'ALL':
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty RDS Login Events are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
+                    actual_value="GuardDuty AutoEnableOrganizationMembers is set to ALL", 
                     remediation=""
-                ))
-            elif rds_login_events_found:
-                findings.append(self.create_finding(
-                    status="FAIL", 
-                    region=region, 
-                    account_id=account_id,
-                    resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty RDS Login Events are configured with AutoEnable={rds_login_events_auto_enable}, but should be ALL", 
-                    remediation=f"Configure RDS Login Events auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
                 ))
             else:
                 findings.append(self.create_finding(
@@ -112,8 +94,8 @@ class SRA_GD_35(GuardDutyCheck):
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty RDS Login Events feature is not configured", 
-                    remediation=f"Enable RDS Login Events feature and configure auto-enablement for all accounts in {region}"
+                    actual_value=f"GuardDuty AutoEnableOrganizationMembers is set to {auto_enable_org_members}", 
+                    remediation=f"Set AutoEnableOrganizationMembers to ALL in {region} to ensure GuardDuty is enabled for all organization members"
                 ))
         
         return findings

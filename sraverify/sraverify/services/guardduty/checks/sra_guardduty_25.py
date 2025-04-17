@@ -1,24 +1,24 @@
 """
-Check if GuardDuty S3 data events are configured for auto-enablement.
+Check if GuardDuty RDS Login Events are configured for auto-enablement.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_30(GuardDutyCheck):
-    """Check if GuardDuty S3 data events are configured for auto-enablement."""
+class SRA_GUARDDUTY_25(GuardDutyCheck):
+    """Check if GuardDuty RDS Login Events are configured for auto-enablement."""
 
     def __init__(self):
-        """Initialize GuardDuty S3 data events auto-enablement check."""
+        """Initialize GuardDuty RDS Login Events auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-30"
-        self.check_name = "GuardDuty S3 data events auto-enablement configured"
-        self.description = ("This check verifies whether S3 data events are configured for auto-enablement "
-                           "in GuardDuty for all member accounts. S3 data events provide visibility into "
-                           "object-level API operations, enhancing threat detection for S3 buckets.")
+        self.check_id = "SRA-GUARDDUTY-25"
+        self.check_name = "GuardDuty RDS Login Events auto-enablement configured"
+        self.description = ("This check verifies whether RDS Login Events are configured for auto-enablement "
+                           "in GuardDuty for all member accounts. RDS Login Events monitoring analyzes database "
+                           "login activity to detect potentially suspicious login attempts to RDS databases.")
         self.severity = "HIGH"
-        self.check_logic = "Check if S3_DATA_EVENTS feature is configured with AutoEnable set to ALL."
+        self.check_logic = "Check if RDS_LOGIN_EVENTS feature is configured with AutoEnable set to ALL."
         self.account_type = "audit"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -76,35 +76,35 @@ class SRA_GD_30(GuardDutyCheck):
                     ))
                 continue
             
-            # Check if S3 data events are configured for auto-enablement
-            # Look for S3_DATA_EVENTS in Features
-            s3_data_events_found = False
-            s3_data_events_auto_enable = "NOT_CONFIGURED"
+            # Check if RDS Login Events are configured for auto-enablement
+            # Look for RDS_LOGIN_EVENTS in Features
+            rds_login_events_found = False
+            rds_login_events_auto_enable = "NOT_CONFIGURED"
             features = org_config.get('Features', [])
             
             for feature in features:
-                if feature.get('Name') == 'S3_DATA_EVENTS':
-                    s3_data_events_found = True
-                    s3_data_events_auto_enable = feature.get('AutoEnable', 'NONE')
+                if feature.get('Name') == 'RDS_LOGIN_EVENTS':
+                    rds_login_events_found = True
+                    rds_login_events_auto_enable = feature.get('AutoEnable', 'NONE')
                     break
             
-            if s3_data_events_found and s3_data_events_auto_enable == 'ALL':
+            if rds_login_events_found and rds_login_events_auto_enable == 'ALL':
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty S3 data events are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
+                    actual_value="GuardDuty RDS Login Events are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
                     remediation=""
                 ))
-            elif s3_data_events_found:
+            elif rds_login_events_found:
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty S3 data events are configured with AutoEnable={s3_data_events_auto_enable}, but should be ALL", 
-                    remediation=f"Configure S3 data events auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
+                    actual_value=f"GuardDuty RDS Login Events are configured with AutoEnable={rds_login_events_auto_enable}, but should be ALL", 
+                    remediation=f"Configure RDS Login Events auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
                 ))
             else:
                 findings.append(self.create_finding(
@@ -112,8 +112,8 @@ class SRA_GD_30(GuardDutyCheck):
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty S3 data events feature is not configured", 
-                    remediation=f"Enable S3 data events feature and configure auto-enablement for all accounts in {region}"
+                    actual_value=f"GuardDuty RDS Login Events feature is not configured", 
+                    remediation=f"Enable RDS Login Events feature and configure auto-enablement for all accounts in {region}"
                 ))
         
         return findings

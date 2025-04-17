@@ -1,23 +1,23 @@
 """
-Check if GuardDuty has EKS runtime protection enabled.
+Check if GuardDuty has Lambda protection enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_16(GuardDutyCheck):
-    """Check if GuardDuty has EKS runtime protection enabled."""
+class SRA_GUARDDUTY_12(GuardDutyCheck):
+    """Check if GuardDuty has Lambda protection enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty EKS runtime protection check."""
+        """Initialize GuardDuty Lambda protection check."""
         super().__init__()
-        self.check_id = "SRA-GD-16"
-        self.check_name = "GuardDuty EKS runtime protection enabled"
-        self.description = ("This check verifies that GuardDuty EKS runtime (original) or runtime protection is enabled. "
-                           "Runtime Monitoring observes and analyzes operating system-level, networking, "
-                           "and file events to help you detect potential threats in specific AWS workloads")
+        self.check_id = "SRA-GUARDDUTY-12"
+        self.check_name = "GuardDuty Lambda protection enabled"
+        self.description = ("This check verifies that GuardDuty Lambda protection is enabled. "
+                           "Lambda Protection helps identify potential security threats when an AWS Lambda "
+                           "function gets invoked in the AWS environment.")
         self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if EKS runtime monitoring or runtime monitoring is enabled in the Features array."
+        self.check_logic = "Get detector details in each Region. Check if Lambda protection is enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -49,32 +49,22 @@ class SRA_GD_16(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if EKS runtime protection is enabled in the Features array
-                # We need to check both EKS_RUNTIME_MONITORING (original) and RUNTIME_MONITORING features
-                eks_runtime_protection_enabled = False
-                runtime_monitoring_enabled = False
+                # Check if Lambda protection is enabled in the Features array
+                lambda_protection_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
-                    if feature.get('Name') == 'EKS_RUNTIME_MONITORING' and feature.get('Status') == 'ENABLED':
-                        eks_runtime_protection_enabled = True
-                    if feature.get('Name') == 'RUNTIME_MONITORING' and feature.get('Status') == 'ENABLED':
-                        runtime_monitoring_enabled = True
+                    if feature.get('Name') == 'LAMBDA_NETWORK_LOGS' and feature.get('Status') == 'ENABLED':
+                        lambda_protection_enabled = True
+                        break
                 
-                # Consider the check passed if either of the runtime monitoring features is enabled
-                if eks_runtime_protection_enabled or runtime_monitoring_enabled:
-                    enabled_features = []
-                    if eks_runtime_protection_enabled:
-                        enabled_features.append("EKS_RUNTIME_MONITORING")
-                    if runtime_monitoring_enabled:
-                        enabled_features.append("RUNTIME_MONITORING")
-                    
+                if lambda_protection_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Runtime protection is enabled: {', '.join(enabled_features)}", 
+                        actual_value="Lambda protection is enabled", 
                         remediation=""
                     ))
                 else:
@@ -83,8 +73,8 @@ class SRA_GD_16(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="Runtime protection is not enabled", 
-                        remediation=f"Enable Runtime Monitoring for GuardDuty in {region} to monitor operating system-level, networking, and file events in workloads"
+                        actual_value="Lambda protection is not enabled", 
+                        remediation=f"Enable Lambda protection for GuardDuty in {region} to identify potential security threats in Lambda function invocations"
                     ))
             else:
                 findings.append(self.create_finding(

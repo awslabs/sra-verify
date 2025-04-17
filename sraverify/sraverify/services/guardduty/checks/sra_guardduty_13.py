@@ -5,13 +5,13 @@ from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_19(GuardDutyCheck):
+class SRA_GUARDDUTY_13(GuardDutyCheck):
     """Check if GuardDuty service administration is delegated to a different account."""
 
     def __init__(self):
         """Initialize GuardDuty service administration delegation check."""
         super().__init__()
-        self.check_id = "SRA-GD-19"
+        self.check_id = "SRA-GUARDDUTY-13"
         self.check_name = "GuardDuty service administration delegated"
         self.description = ("This check verifies whether GuardDuty service administration for the AWS Organization "
                            "is delegated. Centralized management of GuardDuty across the organization improves "

@@ -6,13 +6,13 @@ from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_32(GuardDutyCheck):
+class SRA_GUARDDUTY_22(GuardDutyCheck):
     """Check if GuardDuty EKS Audit Logs are configured for auto-enablement."""
 
     def __init__(self):
         """Initialize GuardDuty EKS Audit Logs auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-32"
+        self.check_id = "SRA-GUARDDUTY-22"
         self.check_name = "GuardDuty EKS Audit Logs auto-enablement configured"
         self.description = ("This check verifies whether EKS Audit Logs are configured for auto-enablement "
                            "in GuardDuty for all member accounts. EKS Audit Logs monitoring analyzes Kubernetes "

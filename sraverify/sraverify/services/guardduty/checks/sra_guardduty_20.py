@@ -1,24 +1,24 @@
 """
-Check if GuardDuty auto-enablement is configured for member accounts.
+Check if GuardDuty S3 data events are configured for auto-enablement.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_21(GuardDutyCheck):
-    """Check if GuardDuty auto-enablement is configured for member accounts."""
+class SRA_GUARDDUTY_20(GuardDutyCheck):
+    """Check if GuardDuty S3 data events are configured for auto-enablement."""
 
     def __init__(self):
-        """Initialize GuardDuty auto-enablement check."""
+        """Initialize GuardDuty S3 data events auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-21"
-        self.check_name = "GuardDuty auto-enablement configured"
-        self.description = ("This check verifies whether auto-enablement configuration for GuardDuty is "
-                           " enabled for member accounts of the AWS Organization. This ensures that all  "
-                           "existing and new member accounts will have GuardDuty monitoring.")
+        self.check_id = "SRA-GUARDDUTY-20"
+        self.check_name = "GuardDuty S3 data events auto-enablement configured"
+        self.description = ("This check verifies whether S3 data events are configured for auto-enablement "
+                           "in GuardDuty for all member accounts. S3 data events provide visibility into "
+                           "object-level API operations, enhancing threat detection for S3 buckets.")
         self.severity = "HIGH"
-        self.check_logic = "Check if GuardDuty AutoEnableOrganizationMembers is set to ALL using describe-organization-configuration API."
+        self.check_logic = "Check if S3_DATA_EVENTS feature is configured with AutoEnable set to ALL."
         self.account_type = "audit"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -76,17 +76,35 @@ class SRA_GD_21(GuardDutyCheck):
                     ))
                 continue
             
-            # Check if AutoEnableOrganizationMembers is set to ALL
-            auto_enable_org_members = org_config.get('AutoEnableOrganizationMembers', 'NONE')
+            # Check if S3 data events are configured for auto-enablement
+            # Look for S3_DATA_EVENTS in Features
+            s3_data_events_found = False
+            s3_data_events_auto_enable = "NOT_CONFIGURED"
+            features = org_config.get('Features', [])
             
-            if auto_enable_org_members == 'ALL':
+            for feature in features:
+                if feature.get('Name') == 'S3_DATA_EVENTS':
+                    s3_data_events_found = True
+                    s3_data_events_auto_enable = feature.get('AutoEnable', 'NONE')
+                    break
+            
+            if s3_data_events_found and s3_data_events_auto_enable == 'ALL':
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty AutoEnableOrganizationMembers is set to ALL", 
+                    actual_value="GuardDuty S3 data events are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
                     remediation=""
+                ))
+            elif s3_data_events_found:
+                findings.append(self.create_finding(
+                    status="FAIL", 
+                    region=region, 
+                    account_id=account_id,
+                    resource_id=f"guardduty:{region}:{detector_id}", 
+                    actual_value=f"GuardDuty S3 data events are configured with AutoEnable={s3_data_events_auto_enable}, but should be ALL", 
+                    remediation=f"Configure S3 data events auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
                 ))
             else:
                 findings.append(self.create_finding(
@@ -94,8 +112,8 @@ class SRA_GD_21(GuardDutyCheck):
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty AutoEnableOrganizationMembers is set to {auto_enable_org_members}", 
-                    remediation=f"Set AutoEnableOrganizationMembers to ALL in {region} to ensure GuardDuty is enabled for all organization members"
+                    actual_value=f"GuardDuty S3 data events feature is not configured", 
+                    remediation=f"Enable S3 data events feature and configure auto-enablement for all accounts in {region}"
                 ))
         
         return findings

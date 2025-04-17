@@ -1,24 +1,24 @@
 """
-Check if GuardDuty has EKS addon management enabled.
+Check if GuardDuty has EC2 agent management enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_27(GuardDutyCheck):
-    """Check if GuardDuty has EKS addon management enabled."""
+class SRA_GUARDDUTY_19(GuardDutyCheck):
+    """Check if GuardDuty has EC2 agent management enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty EKS addon management check."""
+        """Initialize GuardDuty EC2 agent management check."""
         super().__init__()
-        self.check_id = "SRA-GD-27"
-        self.check_name = "GuardDuty EKS addon management enabled"
-        self.description = ("This check verifies that GuardDuty has EKS addon management enabled. "
-                           "EKS addon management allows GuardDuty to automatically deploy and manage "
-                           "the security agent on your EKS clusters, simplifying the setup and maintenance "
-                           "of runtime monitoring for Kubernetes workloads.")
+        self.check_id = "SRA-GUARDDUTY-19"
+        self.check_name = "GuardDuty EC2 agent management enabled"
+        self.description = ("This check verifies that GuardDuty has EC2 agent management enabled. "
+                           "EC2 agent management allows GuardDuty to automatically deploy and manage "
+                           "the security agent on your EC2 instances, simplifying the setup and maintenance "
+                           "of runtime monitoring for EC2 workloads.")
         self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if EKS_ADDON_MANAGEMENT is enabled in the RUNTIME_MONITORING feature's AdditionalConfiguration."
+        self.check_logic = "Get detector details in each Region. Check if EC2_AGENT_MANAGEMENT is enabled in the RUNTIME_MONITORING feature's AdditionalConfiguration."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -50,29 +50,29 @@ class SRA_GD_27(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if EKS_ADDON_MANAGEMENT is enabled in any RUNTIME_MONITORING feature
-                eks_addon_management_enabled = False
+                # Check if EC2_AGENT_MANAGEMENT is enabled in any RUNTIME_MONITORING feature
+                ec2_agent_management_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
                     if feature.get('Name') == 'RUNTIME_MONITORING':
-                        # Check AdditionalConfiguration for EKS_ADDON_MANAGEMENT
+                        # Check AdditionalConfiguration for EC2_AGENT_MANAGEMENT
                         additional_configs = feature.get('AdditionalConfiguration', [])
                         for config in additional_configs:
-                            if config.get('Name') == 'EKS_ADDON_MANAGEMENT' and config.get('Status') == 'ENABLED':
-                                eks_addon_management_enabled = True
+                            if config.get('Name') == 'EC2_AGENT_MANAGEMENT' and config.get('Status') == 'ENABLED':
+                                ec2_agent_management_enabled = True
                                 break
                         
-                        if eks_addon_management_enabled:
+                        if ec2_agent_management_enabled:
                             break
                 
-                if eks_addon_management_enabled:
+                if ec2_agent_management_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="EKS addon management is enabled", 
+                        actual_value="EC2 agent management is enabled", 
                         remediation=""
                     ))
                 else:
@@ -81,8 +81,8 @@ class SRA_GD_27(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="EKS addon management is not enabled", 
-                        remediation=f"Enable EKS addon management in the Runtime Monitoring configuration for GuardDuty in {region}"
+                        actual_value="EC2 agent management is not enabled", 
+                        remediation=f"Enable EC2 agent management in the Runtime Monitoring configuration for GuardDuty in {region}"
                     ))
             else:
                 findings.append(self.create_finding(

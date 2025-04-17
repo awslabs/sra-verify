@@ -1,24 +1,23 @@
 """
-Check if GuardDuty has malware protection for EBS enabled.
+Check if GuardDuty has EKS runtime protection enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_14(GuardDutyCheck):
-    """Check if GuardDuty has malware protection for EBS enabled."""
+class SRA_GUARDDUTY_11(GuardDutyCheck):
+    """Check if GuardDuty has EKS runtime protection enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty malware protection for EBS check."""
+        """Initialize GuardDuty EKS runtime protection check."""
         super().__init__()
-        self.check_id = "SRA-GD-14"
-        self.check_name = "GuardDuty malware protection for EBS enabled"
-        self.description = ("This check verifies that GuardDuty malware protection for EBS is enabled. "
-                           "Malware Protection for EC2 helps you detect the potential presence of malware "
-                           "by scanning the Amazon EBS volumes that are attached to the Amazon EC2 instances "
-                           "and container workloads.")
+        self.check_id = "SRA-GUARDDUTY-11"
+        self.check_name = "GuardDuty EKS runtime protection enabled"
+        self.description = ("This check verifies that GuardDuty EKS runtime (original) or runtime protection is enabled. "
+                           "Runtime Monitoring observes and analyzes operating system-level, networking, "
+                           "and file events to help you detect potential threats in specific AWS workloads")
         self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if malware protection for EBS is enabled in the Features array."
+        self.check_logic = "Get detector details in each Region. Check if EKS runtime monitoring or runtime monitoring is enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -50,22 +49,32 @@ class SRA_GD_14(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if malware protection for EBS is enabled in the Features array
-                ebs_malware_protection_enabled = False
+                # Check if EKS runtime protection is enabled in the Features array
+                # We need to check both EKS_RUNTIME_MONITORING (original) and RUNTIME_MONITORING features
+                eks_runtime_protection_enabled = False
+                runtime_monitoring_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
-                    if feature.get('Name') == 'EBS_MALWARE_PROTECTION' and feature.get('Status') == 'ENABLED':
-                        ebs_malware_protection_enabled = True
-                        break
+                    if feature.get('Name') == 'EKS_RUNTIME_MONITORING' and feature.get('Status') == 'ENABLED':
+                        eks_runtime_protection_enabled = True
+                    if feature.get('Name') == 'RUNTIME_MONITORING' and feature.get('Status') == 'ENABLED':
+                        runtime_monitoring_enabled = True
                 
-                if ebs_malware_protection_enabled:
+                # Consider the check passed if either of the runtime monitoring features is enabled
+                if eks_runtime_protection_enabled or runtime_monitoring_enabled:
+                    enabled_features = []
+                    if eks_runtime_protection_enabled:
+                        enabled_features.append("EKS_RUNTIME_MONITORING")
+                    if runtime_monitoring_enabled:
+                        enabled_features.append("RUNTIME_MONITORING")
+                    
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="Malware protection for EBS is enabled", 
+                        actual_value=f"Runtime protection is enabled: {', '.join(enabled_features)}", 
                         remediation=""
                     ))
                 else:
@@ -74,8 +83,8 @@ class SRA_GD_14(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="Malware protection for EBS is not enabled", 
-                        remediation=f"Enable malware protection for EBS in GuardDuty in {region} to scan EC2 instances and container workloads for malware"
+                        actual_value="Runtime protection is not enabled", 
+                        remediation=f"Enable Runtime Monitoring for GuardDuty in {region} to monitor operating system-level, networking, and file events in workloads"
                     ))
             else:
                 findings.append(self.create_finding(

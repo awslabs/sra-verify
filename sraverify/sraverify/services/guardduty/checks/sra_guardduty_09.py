@@ -1,24 +1,24 @@
 """
-Check if GuardDuty detector is enabled.
+Check if GuardDuty has malware protection for EBS enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_3(GuardDutyCheck):
-    """Check if GuardDuty detector is enabled."""
+class SRA_GUARDDUTY_09(GuardDutyCheck):
+    """Check if GuardDuty has malware protection for EBS enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty enabled check."""
+        """Initialize GuardDuty malware protection for EBS check."""
         super().__init__()
-        self.check_id = "SRA-GD-3"
-        self.check_name = "GuardDuty detector is enabled"
-        self.description = ("This check verifies that the GuardDuty detector in the "
-                            "AWS account and AWS region is enabled. Detector represents " 
-                            "GuardDuty service in the AWS account and specific region, "
-                            "if disabled will not provided threat intelligence service.")
+        self.check_id = "SRA-GUARDDUTY-09"
+        self.check_name = "GuardDuty malware protection for EBS enabled"
+        self.description = ("This check verifies that GuardDuty malware protection for EBS is enabled. "
+                           "Malware Protection for EC2 helps you detect the potential presence of malware "
+                           "by scanning the Amazon EBS volumes that are attached to the Amazon EC2 instances "
+                           "and container workloads.")
         self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check value of FindingPublishingFrequency."
+        self.check_logic = "Get detector details in each Region. Check if malware protection for EBS is enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -46,20 +46,27 @@ class SRA_GD_3(GuardDutyCheck):
                 ))
                 continue
                 
-            # Use helper method from the base class
+            # Get detector details
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                detector_status = detector_details.get('Status', 'Not set')
+                # Check if malware protection for EBS is enabled in the Features array
+                ebs_malware_protection_enabled = False
+                features = detector_details.get('Features', [])
                 
-                if detector_status == 'ENABLED':
+                for feature in features:
+                    if feature.get('Name') == 'EBS_MALWARE_PROTECTION' and feature.get('Status') == 'ENABLED':
+                        ebs_malware_protection_enabled = True
+                        break
+                
+                if ebs_malware_protection_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Detector status is {detector_status}", 
-                        remediation="No remediation needed"
+                        actual_value="Malware protection for EBS is enabled", 
+                        remediation=""
                     ))
                 else:
                     findings.append(self.create_finding(
@@ -67,8 +74,8 @@ class SRA_GD_3(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Detector status is {detector_status}", 
-                        remediation="Enabled GuardDuty"
+                        actual_value="Malware protection for EBS is not enabled", 
+                        remediation=f"Enable malware protection for EBS in GuardDuty in {region} to scan EC2 instances and container workloads for malware"
                     ))
             else:
                 findings.append(self.create_finding(

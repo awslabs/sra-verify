@@ -1,18 +1,18 @@
 """
-SRA-SH-6: Security Hub administration for the AWS Organization has a delegated administrator.
+SRA-SECURITYHUB-06: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_6(SecurityHubCheck):
+class SRA_SECURITYHUB_06(SecurityHubCheck):
     """Check if Security Hub administration for the AWS Organization has a delegated administrator."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-6"
+        self.check_id = "SRA-SECURITYHUB-06"
         self.check_name = "Security Hub administration for the AWS Organization has a delegated administrator"
         self.account_type = "management"  # This check is for the management account
         self.severity = "HIGH"

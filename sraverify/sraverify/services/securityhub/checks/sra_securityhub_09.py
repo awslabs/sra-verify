@@ -1,18 +1,18 @@
 """
-SRA-SH-9: All Security Hub member accounts have Enabled status.
+SRA-SECURITYHUB-09: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_9(SecurityHubCheck):
+class SRA_SECURITYHUB_09(SecurityHubCheck):
     """Check if all Security Hub member accounts have Enabled status."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-9"
+        self.check_id = "SRA-SECURITYHUB-09"
         self.check_name = "All Security Hub member accounts have Enabled status"
         self.account_type = "audit"  # This check is for the audit account
         self.severity = "HIGH"

@@ -1,18 +1,18 @@
 """
-SRA-SH-8: All active organization accounts are Security Hub members.
+SRA-SECURITYHUB-08: Security Hub check.
 """
 from typing import List, Dict, Any, Set
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_8(SecurityHubCheck):
+class SRA_SECURITYHUB_08(SecurityHubCheck):
     """Check if all active organization accounts are Security Hub members."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-8"
+        self.check_id = "SRA-SECURITYHUB-08"
         self.check_name = "All active organization accounts are Security Hub members"
         self.account_type = "audit"  # This check is for the audit account
         self.severity = "HIGH"

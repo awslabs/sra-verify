@@ -1,18 +1,18 @@
 """
-SRA-SH-3: Security Hub administration for the account matches delegated administrator.
+SRA-SECURITYHUB-03: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_3(SecurityHubCheck):
+class SRA_SECURITYHUB_03(SecurityHubCheck):
     """Check if Security Hub administration for the account matches delegated administrator."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-3"
+        self.check_id = "SRA-SECURITYHUB-03"
         self.check_name = "Security Hub administration for the account matches delegated administrator"
         self.account_type = "management"  # This check is for the management account
         self.severity = "HIGH"

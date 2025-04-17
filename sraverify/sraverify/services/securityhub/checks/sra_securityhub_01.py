@@ -1,18 +1,18 @@
 """
-SRA-SH-1: Security Hub enabled account level standards exist.
+SRA-SECURITYHUB-01: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_1(SecurityHubCheck):
+class SRA_SECURITYHUB_01(SecurityHubCheck):
     """Check if Security Hub enabled account level standards exist."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-1"
+        self.check_id = "SRA-SECURITYHUB-01"
         self.check_name = "Security Hub enabled account level standards exist"
         self.account_type = "application"  # This check is for application accounts
         self.severity = "HIGH"

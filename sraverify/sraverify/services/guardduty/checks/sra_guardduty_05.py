@@ -1,24 +1,24 @@
 """
-Check if GuardDuty has DNS logs enabled as a log source.
+Check if GuardDuty has VPC flow logs enabled as a log source.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_4(GuardDutyCheck):
-    """Check if GuardDuty has DNS logs enabled as a log source."""
+class SRA_GUARDDUTY_05(GuardDutyCheck):
+    """Check if GuardDuty has VPC flow logs enabled as a log source."""
 
     def __init__(self):
-        """Initialize GuardDuty DNS logs check."""
+        """Initialize GuardDuty VPC flow logs check."""
         super().__init__()
-        self.check_id = "SRA-GD-4"
-        self.check_name = "GuardDuty DNS logs enabled"
-        self.description = ("This check verifies that GuardDuty has DNS logs as one of the log sources, enabled. "
-                            "If you use AWS DNS resolvers for your Amazon EC2 instances (the default setting), " 
-                            "then GuardDuty can access and process your request and response DNS logs through the " 
-                            "internal AWS DNS resolvers.")
+        self.check_id = "SRA-GUARDDUTY-05"
+        self.check_name = "GuardDuty VPC flow logs enabled"
+        self.description = ("This check verifies that GuardDuty has VPC flow logs as one of the log sources, "
+                            "enabled.GuardDuty analyzes your VPC flow logs from Amazon EC2 instances within your account. "
+                            "It consumes VPC flow log events directly from the VPC Flow Logs feature through an independent "
+                            "and duplicated stream of flow logs.")
         self.severity = "MEDIUM"
-        self.check_logic = "Get detector details in each Region. Check if DNS logs are enabled in the Features array."
+        self.check_logic = "Get detector details in each Region. Check if VPC Flow logs are enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -50,22 +50,22 @@ class SRA_GD_4(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if DNS logs are enabled in the Features array
-                dns_logs_enabled = False
+                # Check if VPC flow logs are enabled in the Features array
+                vpc_logs_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
-                    if feature.get('Name') == 'DNS_LOGS' and feature.get('Status') == 'ENABLED':
-                        dns_logs_enabled = True
+                    if feature.get('Name') == 'FLOW_LOGS' and feature.get('Status') == 'ENABLED':
+                        vpc_logs_enabled = True
                         break
                 
-                if dns_logs_enabled:
+                if vpc_logs_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="DNS logs are enabled as a data source", 
+                        actual_value="VPC flow logs are enabled as a data source", 
                         remediation=""
                     ))
                 else:
@@ -74,8 +74,8 @@ class SRA_GD_4(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="DNS logs are not enabled as a data source", 
-                        remediation=f"Enable DNS logs as a data source for GuardDuty in {region}"
+                        actual_value="VPC flow logs are not enabled as a data source", 
+                        remediation=f"Enable VPC flow logs as a data source for GuardDuty in {region}"
                     ))
             else:
                 findings.append(self.create_finding(

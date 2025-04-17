@@ -1,23 +1,24 @@
 """
-Check if GuardDuty has RDS protection enabled.
+Check if GuardDuty has EKS addon management enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_15(GuardDutyCheck):
-    """Check if GuardDuty has RDS protection enabled."""
+class SRA_GUARDDUTY_17(GuardDutyCheck):
+    """Check if GuardDuty has EKS addon management enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty RDS protection check."""
+        """Initialize GuardDuty EKS addon management check."""
         super().__init__()
-        self.check_id = "SRA-GD-15"
-        self.check_name = "GuardDuty RDS protection enabled"
-        self.description = ("This check verifies that GuardDuty RDS protection is enabled. "
-                           "RDS Protection in Amazon GuardDuty analyzes and profiles RDS login activity "
-                           "for potential access threats to Amazon Aurora databases and Amazon RDS for PostgreSQL.")
+        self.check_id = "SRA-GUARDDUTY-17"
+        self.check_name = "GuardDuty EKS addon management enabled"
+        self.description = ("This check verifies that GuardDuty has EKS addon management enabled. "
+                           "EKS addon management allows GuardDuty to automatically deploy and manage "
+                           "the security agent on your EKS clusters, simplifying the setup and maintenance "
+                           "of runtime monitoring for Kubernetes workloads.")
         self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if RDS protection is enabled in the Features array."
+        self.check_logic = "Get detector details in each Region. Check if EKS_ADDON_MANAGEMENT is enabled in the RUNTIME_MONITORING feature's AdditionalConfiguration."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -49,22 +50,29 @@ class SRA_GD_15(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if RDS protection is enabled in the Features array
-                rds_protection_enabled = False
+                # Check if EKS_ADDON_MANAGEMENT is enabled in any RUNTIME_MONITORING feature
+                eks_addon_management_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
-                    if feature.get('Name') == 'RDS_LOGIN_EVENTS' and feature.get('Status') == 'ENABLED':
-                        rds_protection_enabled = True
-                        break
+                    if feature.get('Name') == 'RUNTIME_MONITORING':
+                        # Check AdditionalConfiguration for EKS_ADDON_MANAGEMENT
+                        additional_configs = feature.get('AdditionalConfiguration', [])
+                        for config in additional_configs:
+                            if config.get('Name') == 'EKS_ADDON_MANAGEMENT' and config.get('Status') == 'ENABLED':
+                                eks_addon_management_enabled = True
+                                break
+                        
+                        if eks_addon_management_enabled:
+                            break
                 
-                if rds_protection_enabled:
+                if eks_addon_management_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="RDS protection is enabled", 
+                        actual_value="EKS addon management is enabled", 
                         remediation=""
                     ))
                 else:
@@ -73,8 +81,8 @@ class SRA_GD_15(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="RDS protection is not enabled", 
-                        remediation=f"Enable RDS protection for GuardDuty in {region} to monitor login activity for potential threats to Aurora and RDS for PostgreSQL databases"
+                        actual_value="EKS addon management is not enabled", 
+                        remediation=f"Enable EKS addon management in the Runtime Monitoring configuration for GuardDuty in {region}"
                     ))
             else:
                 findings.append(self.create_finding(

@@ -6,13 +6,13 @@ from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_33(GuardDutyCheck):
+class SRA_GUARDDUTY_23(GuardDutyCheck):
     """Check if GuardDuty Runtime Monitoring is configured for auto-enablement."""
 
     def __init__(self):
         """Initialize GuardDuty Runtime Monitoring auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-33"
+        self.check_id = "SRA-GUARDDUTY-23"
         self.check_name = "GuardDuty Runtime Monitoring auto-enablement configured"
         self.description = ("This check verifies whether Runtime Monitoring and its components (ECS Fargate Agent Management, "
                            "EC2 Agent Management, and EKS Addon Management) are configured for auto-enablement "

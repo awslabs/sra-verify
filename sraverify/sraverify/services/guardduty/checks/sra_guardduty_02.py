@@ -1,25 +1,25 @@
 """
-Check if GuardDuty has EKS protection enabled.
+Check if GuardDuty finding frequency is set.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_7(GuardDutyCheck):
-    """Check if GuardDuty has EKS protection enabled."""
+class SRA_GUARDDUTY_02(GuardDutyCheck):
+    """Check if GuardDuty finding frequency is set."""
 
     def __init__(self):
-        """Initialize GuardDuty EKS protection check."""
+        """Initialize GuardDuty enabled check."""
         super().__init__()
-        self.check_id = "SRA-GD-7"
-        self.check_name = "GuardDuty EKS protection enabled"
-        self.description = ("This check verifies that GuardDuty has EKS protection enabled. "
-                           "EKS Audit Log Monitoring helps you detect potentially suspicious activities "
-                           "in your EKS clusters within Amazon Elastic Kubernetes Service. It consumes "
-                           "Kubernetes audit log events directly from the Amazon EKS control plane logging "
-                           "feature through an independent and duplicated stream of audit logs.")
-        self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if EKS protection is enabled in the Features array."
+        self.check_id = "SRA-GUARDDUTY-02"
+        self.check_name = "GuardDuty finding frequency is set"
+        self.description = ("This check verifies that the GuardDuty finding frequency is set "
+                           "as per your organization requirement. This determines how often updates to active "
+                           "findings are exported to EventBridge, S3 (optional) and Detective (optional). "
+                           "By default, updated findings are exported every 6 hours but you can set to "
+                           "every 15 minutes or 1 hour.")
+        self.severity = "LOW"
+        self.check_logic = "Get detector details in each Region. Check value of FindingPublishingFrequency."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -47,27 +47,22 @@ class SRA_GD_7(GuardDutyCheck):
                 ))
                 continue
                 
-            # Get detector details
+            # Use helper method from the base class
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if EKS protection is enabled in the Features array
-                eks_protection_enabled = False
-                features = detector_details.get('Features', [])
+                finding_frequency = detector_details.get('FindingPublishingFrequency', 'Not set')
                 
-                for feature in features:
-                    if feature.get('Name') == 'EKS_AUDIT_LOGS' and feature.get('Status') == 'ENABLED':
-                        eks_protection_enabled = True
-                        break
-                
-                if eks_protection_enabled:
+                # Determine if the frequency is set to a valid value
+                valid_frequencies = ['FIFTEEN_MINUTES', 'ONE_HOUR', 'SIX_HOURS']
+                if finding_frequency in valid_frequencies:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="EKS protection is enabled", 
-                        remediation=""
+                        actual_value=f"Finding frequency is set to {finding_frequency}", 
+                        remediation="No remediation needed"
                     ))
                 else:
                     findings.append(self.create_finding(
@@ -75,8 +70,8 @@ class SRA_GD_7(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="EKS protection is not enabled", 
-                        remediation=f"Enable EKS protection for GuardDuty in {region} to monitor Kubernetes audit logs for suspicious activities"
+                        actual_value=f"Finding frequency is not properly set: {finding_frequency}", 
+                        remediation="Set GuardDuty finding frequency to FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS"
                     ))
             else:
                 findings.append(self.create_finding(

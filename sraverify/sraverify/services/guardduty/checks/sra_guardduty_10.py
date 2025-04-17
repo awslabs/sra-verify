@@ -1,24 +1,23 @@
 """
-Check if GuardDuty has ECS Fargate agent management enabled.
+Check if GuardDuty has RDS protection enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_28(GuardDutyCheck):
-    """Check if GuardDuty has ECS Fargate agent management enabled."""
+class SRA_GUARDDUTY_10(GuardDutyCheck):
+    """Check if GuardDuty has RDS protection enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty ECS Fargate agent management check."""
+        """Initialize GuardDuty RDS protection check."""
         super().__init__()
-        self.check_id = "SRA-GD-28"
-        self.check_name = "GuardDuty ECS Fargate agent management enabled"
-        self.description = ("This check verifies that GuardDuty has ECS Fargate agent management enabled. "
-                           "ECS Fargate agent management allows GuardDuty to automatically deploy and manage "
-                           "the security agent on your ECS Fargate tasks, simplifying the setup and maintenance "
-                           "of runtime monitoring for containerized workloads.")
+        self.check_id = "SRA-GUARDDUTY-10"
+        self.check_name = "GuardDuty RDS protection enabled"
+        self.description = ("This check verifies that GuardDuty RDS protection is enabled. "
+                           "RDS Protection in Amazon GuardDuty analyzes and profiles RDS login activity "
+                           "for potential access threats to Amazon Aurora databases and Amazon RDS for PostgreSQL.")
         self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if ECS_FARGATE_AGENT_MANAGEMENT is enabled in the RUNTIME_MONITORING feature's AdditionalConfiguration."
+        self.check_logic = "Get detector details in each Region. Check if RDS protection is enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -50,29 +49,22 @@ class SRA_GD_28(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if ECS_FARGATE_AGENT_MANAGEMENT is enabled in any RUNTIME_MONITORING feature
-                ecs_fargate_agent_management_enabled = False
+                # Check if RDS protection is enabled in the Features array
+                rds_protection_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
-                    if feature.get('Name') == 'RUNTIME_MONITORING':
-                        # Check AdditionalConfiguration for ECS_FARGATE_AGENT_MANAGEMENT
-                        additional_configs = feature.get('AdditionalConfiguration', [])
-                        for config in additional_configs:
-                            if config.get('Name') == 'ECS_FARGATE_AGENT_MANAGEMENT' and config.get('Status') == 'ENABLED':
-                                ecs_fargate_agent_management_enabled = True
-                                break
-                        
-                        if ecs_fargate_agent_management_enabled:
-                            break
+                    if feature.get('Name') == 'RDS_LOGIN_EVENTS' and feature.get('Status') == 'ENABLED':
+                        rds_protection_enabled = True
+                        break
                 
-                if ecs_fargate_agent_management_enabled:
+                if rds_protection_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="ECS Fargate agent management is enabled", 
+                        actual_value="RDS protection is enabled", 
                         remediation=""
                     ))
                 else:
@@ -81,8 +73,8 @@ class SRA_GD_28(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="ECS Fargate agent management is not enabled", 
-                        remediation=f"Enable ECS Fargate agent management in the Runtime Monitoring configuration for GuardDuty in {region}"
+                        actual_value="RDS protection is not enabled", 
+                        remediation=f"Enable RDS protection for GuardDuty in {region} to monitor login activity for potential threats to Aurora and RDS for PostgreSQL databases"
                     ))
             else:
                 findings.append(self.create_finding(

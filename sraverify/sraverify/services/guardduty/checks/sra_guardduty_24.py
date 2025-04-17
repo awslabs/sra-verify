@@ -1,24 +1,24 @@
 """
-Check if GuardDuty member account limit is reached.
+Check if GuardDuty Lambda Network Logs are configured for auto-enablement.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_22(GuardDutyCheck):
-    """Check if GuardDuty member account limit is reached."""
+class SRA_GUARDDUTY_24(GuardDutyCheck):
+    """Check if GuardDuty Lambda Network Logs are configured for auto-enablement."""
 
     def __init__(self):
-        """Initialize GuardDuty member account limit check."""
+        """Initialize GuardDuty Lambda Network Logs auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-22"
-        self.check_name = "GuardDuty member account limit not reached"
-        self.description = ("This check verifies whether the maximum number of allowed member accounts are already "
-                           "associated with the delegated administrator account for the AWS Organization. "
-                           "Reaching the limit prevents adding new accounts to GuardDuty monitoring.")
+        self.check_id = "SRA-GUARDDUTY-24"
+        self.check_name = "GuardDuty Lambda Network Logs auto-enablement configured"
+        self.description = ("This check verifies whether Lambda Network Logs are configured for auto-enablement "
+                           "in GuardDuty for all member accounts. Lambda Network Logs monitoring analyzes VPC flow logs "
+                           "for Lambda functions to detect potentially suspicious network activity.")
         self.severity = "HIGH"
-        self.check_logic = "Check if MemberAccountLimitReached is false using describe-organization-configuration API."
+        self.check_logic = "Check if LAMBDA_NETWORK_LOGS feature is configured with AutoEnable set to ALL."
         self.account_type = "audit"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -76,17 +76,35 @@ class SRA_GD_22(GuardDutyCheck):
                     ))
                 continue
             
-            # Check if member account limit is reached
-            member_account_limit_reached = org_config.get('MemberAccountLimitReached', False)
+            # Check if Lambda Network Logs are configured for auto-enablement
+            # Look for LAMBDA_NETWORK_LOGS in Features
+            lambda_network_logs_found = False
+            lambda_network_logs_auto_enable = "NOT_CONFIGURED"
+            features = org_config.get('Features', [])
             
-            if not member_account_limit_reached:
+            for feature in features:
+                if feature.get('Name') == 'LAMBDA_NETWORK_LOGS':
+                    lambda_network_logs_found = True
+                    lambda_network_logs_auto_enable = feature.get('AutoEnable', 'NONE')
+                    break
+            
+            if lambda_network_logs_found and lambda_network_logs_auto_enable == 'ALL':
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty member account limit is not reached", 
+                    actual_value="GuardDuty Lambda Network Logs are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
                     remediation=""
+                ))
+            elif lambda_network_logs_found:
+                findings.append(self.create_finding(
+                    status="FAIL", 
+                    region=region, 
+                    account_id=account_id,
+                    resource_id=f"guardduty:{region}:{detector_id}", 
+                    actual_value=f"GuardDuty Lambda Network Logs are configured with AutoEnable={lambda_network_logs_auto_enable}, but should be ALL", 
+                    remediation=f"Configure Lambda Network Logs auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
                 ))
             else:
                 findings.append(self.create_finding(
@@ -94,8 +112,8 @@ class SRA_GD_22(GuardDutyCheck):
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty member account limit is reached", 
-                    remediation=f"Contact AWS Support to request an increase in the GuardDuty member account limit for {region}"
+                    actual_value=f"GuardDuty Lambda Network Logs feature is not configured", 
+                    remediation=f"Enable Lambda Network Logs feature and configure auto-enablement for all accounts in {region}"
                 ))
         
         return findings

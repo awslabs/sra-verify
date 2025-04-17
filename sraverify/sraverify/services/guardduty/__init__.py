@@ -1,58 +1,58 @@
 """
 GuardDuty security checks.
 """
-from sraverify.services.guardduty.checks.sra_gd_1 import SRA_GD_1
-from sraverify.services.guardduty.checks.sra_gd_2 import SRA_GD_2
-from sraverify.services.guardduty.checks.sra_gd_3 import SRA_GD_3
-from sraverify.services.guardduty.checks.sra_gd_4 import SRA_GD_4
-from sraverify.services.guardduty.checks.sra_gd_5 import SRA_GD_5
-from sraverify.services.guardduty.checks.sra_gd_6 import SRA_GD_6
-from sraverify.services.guardduty.checks.sra_gd_7 import SRA_GD_7
-from sraverify.services.guardduty.checks.sra_gd_9 import SRA_GD_9
-from sraverify.services.guardduty.checks.sra_gd_14 import SRA_GD_14
-from sraverify.services.guardduty.checks.sra_gd_15 import SRA_GD_15
-from sraverify.services.guardduty.checks.sra_gd_16 import SRA_GD_16
-from sraverify.services.guardduty.checks.sra_gd_17 import SRA_GD_17
-from sraverify.services.guardduty.checks.sra_gd_19 import SRA_GD_19
-from sraverify.services.guardduty.checks.sra_gd_20 import SRA_GD_20
-from sraverify.services.guardduty.checks.sra_gd_21 import SRA_GD_21
-from sraverify.services.guardduty.checks.sra_gd_22 import SRA_GD_22
-from sraverify.services.guardduty.checks.sra_gd_27 import SRA_GD_27
-from sraverify.services.guardduty.checks.sra_gd_28 import SRA_GD_28
-from sraverify.services.guardduty.checks.sra_gd_29 import SRA_GD_29
-from sraverify.services.guardduty.checks.sra_gd_30 import SRA_GD_30
-from sraverify.services.guardduty.checks.sra_gd_31 import SRA_GD_31
-from sraverify.services.guardduty.checks.sra_gd_32 import SRA_GD_32
-from sraverify.services.guardduty.checks.sra_gd_33 import SRA_GD_33
-from sraverify.services.guardduty.checks.sra_gd_34 import SRA_GD_34
-from sraverify.services.guardduty.checks.sra_gd_35 import SRA_GD_35
+from sraverify.services.guardduty.checks.sra_guardduty_01 import SRA_GUARDDUTY_01
+from sraverify.services.guardduty.checks.sra_guardduty_02 import SRA_GUARDDUTY_02
+from sraverify.services.guardduty.checks.sra_guardduty_03 import SRA_GUARDDUTY_03
+from sraverify.services.guardduty.checks.sra_guardduty_04 import SRA_GUARDDUTY_04
+from sraverify.services.guardduty.checks.sra_guardduty_05 import SRA_GUARDDUTY_05
+from sraverify.services.guardduty.checks.sra_guardduty_06 import SRA_GUARDDUTY_06
+from sraverify.services.guardduty.checks.sra_guardduty_07 import SRA_GUARDDUTY_07
+from sraverify.services.guardduty.checks.sra_guardduty_08 import SRA_GUARDDUTY_08
+from sraverify.services.guardduty.checks.sra_guardduty_09 import SRA_GUARDDUTY_09
+from sraverify.services.guardduty.checks.sra_guardduty_10 import SRA_GUARDDUTY_10
+from sraverify.services.guardduty.checks.sra_guardduty_11 import SRA_GUARDDUTY_11
+from sraverify.services.guardduty.checks.sra_guardduty_12 import SRA_GUARDDUTY_12
+from sraverify.services.guardduty.checks.sra_guardduty_13 import SRA_GUARDDUTY_13
+from sraverify.services.guardduty.checks.sra_guardduty_14 import SRA_GUARDDUTY_14
+from sraverify.services.guardduty.checks.sra_guardduty_15 import SRA_GUARDDUTY_15
+from sraverify.services.guardduty.checks.sra_guardduty_16 import SRA_GUARDDUTY_16
+from sraverify.services.guardduty.checks.sra_guardduty_17 import SRA_GUARDDUTY_17
+from sraverify.services.guardduty.checks.sra_guardduty_18 import SRA_GUARDDUTY_18
+from sraverify.services.guardduty.checks.sra_guardduty_19 import SRA_GUARDDUTY_19
+from sraverify.services.guardduty.checks.sra_guardduty_20 import SRA_GUARDDUTY_20
+from sraverify.services.guardduty.checks.sra_guardduty_21 import SRA_GUARDDUTY_21
+from sraverify.services.guardduty.checks.sra_guardduty_22 import SRA_GUARDDUTY_22
+from sraverify.services.guardduty.checks.sra_guardduty_23 import SRA_GUARDDUTY_23
+from sraverify.services.guardduty.checks.sra_guardduty_24 import SRA_GUARDDUTY_24
+from sraverify.services.guardduty.checks.sra_guardduty_25 import SRA_GUARDDUTY_25
 
 # Map check IDs to check classes for easy lookup
 CHECKS = {
-    "SRA-GD-1": SRA_GD_1,
-    "SRA-GD-2": SRA_GD_2,
-    "SRA-GD-3": SRA_GD_3,
-    "SRA-GD-4": SRA_GD_4,
-    "SRA-GD-5": SRA_GD_5,
-    "SRA-GD-6": SRA_GD_6,
-    "SRA-GD-7": SRA_GD_7,
-    "SRA-GD-9": SRA_GD_9,
-    "SRA-GD-14": SRA_GD_14,
-    "SRA-GD-15": SRA_GD_15,
-    "SRA-GD-16": SRA_GD_16,
-    "SRA-GD-17": SRA_GD_17,
-    "SRA-GD-19": SRA_GD_19,
-    "SRA-GD-20": SRA_GD_20,
-    "SRA-GD-21": SRA_GD_21,
-    "SRA-GD-22": SRA_GD_22,
-    "SRA-GD-27": SRA_GD_27,
-    "SRA-GD-28": SRA_GD_28,
-    "SRA-GD-29": SRA_GD_29,
-    "SRA-GD-30": SRA_GD_30,
-    "SRA-GD-31": SRA_GD_31,
-    "SRA-GD-32": SRA_GD_32,
-    "SRA-GD-33": SRA_GD_33,
-    "SRA-GD-34": SRA_GD_34,
-    "SRA-GD-35": SRA_GD_35
+    "SRA-GUARDDUTY-01": SRA_GUARDDUTY_01,
+    "SRA-GUARDDUTY-02": SRA_GUARDDUTY_02,
+    "SRA-GUARDDUTY-03": SRA_GUARDDUTY_03,
+    "SRA-GUARDDUTY-04": SRA_GUARDDUTY_04,
+    "SRA-GUARDDUTY-05": SRA_GUARDDUTY_05,
+    "SRA-GUARDDUTY-06": SRA_GUARDDUTY_06,
+    "SRA-GUARDDUTY-07": SRA_GUARDDUTY_07,
+    "SRA-GUARDDUTY-08": SRA_GUARDDUTY_08,
+    "SRA-GUARDDUTY-09": SRA_GUARDDUTY_09,
+    "SRA-GUARDDUTY-10": SRA_GUARDDUTY_10,
+    "SRA-GUARDDUTY-11": SRA_GUARDDUTY_11,
+    "SRA-GUARDDUTY-12": SRA_GUARDDUTY_12,
+    "SRA-GUARDDUTY-13": SRA_GUARDDUTY_13,
+    "SRA-GUARDDUTY-14": SRA_GUARDDUTY_14,
+    "SRA-GUARDDUTY-15": SRA_GUARDDUTY_15,
+    "SRA-GUARDDUTY-16": SRA_GUARDDUTY_16,
+    "SRA-GUARDDUTY-17": SRA_GUARDDUTY_17,
+    "SRA-GUARDDUTY-18": SRA_GUARDDUTY_18,
+    "SRA-GUARDDUTY-19": SRA_GUARDDUTY_19,
+    "SRA-GUARDDUTY-20": SRA_GUARDDUTY_20,
+    "SRA-GUARDDUTY-21": SRA_GUARDDUTY_21,
+    "SRA-GUARDDUTY-22": SRA_GUARDDUTY_22,
+    "SRA-GUARDDUTY-23": SRA_GUARDDUTY_23,
+    "SRA-GUARDDUTY-24": SRA_GUARDDUTY_24,
+    "SRA-GUARDDUTY-25": SRA_GUARDDUTY_25
     # Add more checks here as they are implemented
 }

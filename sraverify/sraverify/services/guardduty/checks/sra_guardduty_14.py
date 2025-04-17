@@ -6,13 +6,13 @@ from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_20(GuardDutyCheck):
+class SRA_GUARDDUTY_14(GuardDutyCheck):
     """Check if GuardDuty delegated admin account is the audit account."""
 
     def __init__(self):
         """Initialize GuardDuty delegated admin check."""
         super().__init__()
-        self.check_id = "SRA-GD-20"
+        self.check_id = "SRA-GUARDDUTY-14"
         self.check_name = "GuardDuty delegated admin is audit account"
         self.description = ("This check verifies whether GuardDuty delegated admin account is the audit account "
                            "of your AWS organization. The audit account is dedicated to operating security services, "

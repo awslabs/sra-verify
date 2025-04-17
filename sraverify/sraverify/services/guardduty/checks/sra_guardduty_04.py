@@ -1,24 +1,24 @@
 """
-Check if GuardDuty has S3 protection enabled.
+Check if GuardDuty has DNS logs enabled as a log source.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_6(GuardDutyCheck):
-    """Check if GuardDuty has S3 protection enabled."""
+class SRA_GUARDDUTY_04(GuardDutyCheck):
+    """Check if GuardDuty has DNS logs enabled as a log source."""
 
     def __init__(self):
-        """Initialize GuardDuty S3 protection check."""
+        """Initialize GuardDuty DNS logs check."""
         super().__init__()
-        self.check_id = "SRA-GD-6"
-        self.check_name = "GuardDuty S3 protection enabled"
-        self.description = ("This check verifies that GuardDuty has S3 protection enabled. "
-                           "GuardDuty provides enhanced visibility through S3 protection. "
-                           "GuardDuty monitors both AWS CloudTrail management events and AWS CloudTrail "
-                           "S3 data events to identify potential threats in your Amazon S3 resources.")
-        self.severity = "HIGH"
-        self.check_logic = "Get detector details in each Region. Check if S3 protection is enabled in the Features array."
+        self.check_id = "SRA-GUARDDUTY-04"
+        self.check_name = "GuardDuty DNS logs enabled"
+        self.description = ("This check verifies that GuardDuty has DNS logs as one of the log sources, enabled. "
+                            "If you use AWS DNS resolvers for your Amazon EC2 instances (the default setting), " 
+                            "then GuardDuty can access and process your request and response DNS logs through the " 
+                            "internal AWS DNS resolvers.")
+        self.severity = "MEDIUM"
+        self.check_logic = "Get detector details in each Region. Check if DNS logs are enabled in the Features array."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -50,22 +50,22 @@ class SRA_GD_6(GuardDutyCheck):
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if S3 protection is enabled in the Features array
-                s3_protection_enabled = False
+                # Check if DNS logs are enabled in the Features array
+                dns_logs_enabled = False
                 features = detector_details.get('Features', [])
                 
                 for feature in features:
-                    if feature.get('Name') == 'S3_DATA_EVENTS' and feature.get('Status') == 'ENABLED':
-                        s3_protection_enabled = True
+                    if feature.get('Name') == 'DNS_LOGS' and feature.get('Status') == 'ENABLED':
+                        dns_logs_enabled = True
                         break
                 
-                if s3_protection_enabled:
+                if dns_logs_enabled:
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="S3 protection is enabled", 
+                        actual_value="DNS logs are enabled as a data source", 
                         remediation=""
                     ))
                 else:
@@ -74,8 +74,8 @@ class SRA_GD_6(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="S3 protection is not enabled", 
-                        remediation=f"Enable S3 protection for GuardDuty in {region} to monitor CloudTrail management and S3 data events"
+                        actual_value="DNS logs are not enabled as a data source", 
+                        remediation=f"Enable DNS logs as a data source for GuardDuty in {region}"
                     ))
             else:
                 findings.append(self.create_finding(

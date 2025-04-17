@@ -5,13 +5,13 @@ from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_1(GuardDutyCheck):
+class SRA_GUARDDUTY_01(GuardDutyCheck):
     """Check if GuardDuty detector exists."""
 
     def __init__(self):
         """Initialize GuardDuty enabled check."""
         super().__init__()
-        self.check_id = "SRA-GD-1"
+        self.check_id = "SRA-GUARDDUTY-01"
         self.check_name = "GuardDuty detector exists"
         self.description = "This check verifies that an GuardDuty detector exists in the AWS Region.\
               A detector is a resource that represents the GuardDuty service and should be present \

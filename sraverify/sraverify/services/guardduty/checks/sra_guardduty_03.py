@@ -1,24 +1,24 @@
 """
-Check if GuardDuty has VPC flow logs enabled as a log source.
+Check if GuardDuty detector is enabled.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_5(GuardDutyCheck):
-    """Check if GuardDuty has VPC flow logs enabled as a log source."""
+class SRA_GUARDDUTY_03(GuardDutyCheck):
+    """Check if GuardDuty detector is enabled."""
 
     def __init__(self):
-        """Initialize GuardDuty VPC flow logs check."""
+        """Initialize GuardDuty enabled check."""
         super().__init__()
-        self.check_id = "SRA-GD-5"
-        self.check_name = "GuardDuty VPC flow logs enabled"
-        self.description = ("SRA-GD-5 This check verifies that GuardDuty has VPC flow logs as one of the log sources, "
-                            "enabled.GuardDuty analyzes your VPC flow logs from Amazon EC2 instances within your account. "
-                            "It consumes VPC flow log events directly from the VPC Flow Logs feature through an independent "
-                            "and duplicated stream of flow logs.")
-        self.severity = "MEDIUM"
-        self.check_logic = "Get detector details in each Region. Check if VPC Flow logs are enabled in the Features array."
+        self.check_id = "SRA-GUARDDUTY-03"
+        self.check_name = "GuardDuty detector is enabled"
+        self.description = ("This check verifies that the GuardDuty detector in the "
+                            "AWS account and AWS region is enabled. Detector represents " 
+                            "GuardDuty service in the AWS account and specific region, "
+                            "if disabled will not provided threat intelligence service.")
+        self.severity = "HIGH"
+        self.check_logic = "Get detector details in each Region. Check value of FindingPublishingFrequency."
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -46,27 +46,20 @@ class SRA_GD_5(GuardDutyCheck):
                 ))
                 continue
                 
-            # Get detector details
+            # Use helper method from the base class
             detector_details = self.get_detector_details(region)
             
             if detector_details:
-                # Check if VPC flow logs are enabled in the Features array
-                vpc_logs_enabled = False
-                features = detector_details.get('Features', [])
+                detector_status = detector_details.get('Status', 'Not set')
                 
-                for feature in features:
-                    if feature.get('Name') == 'FLOW_LOGS' and feature.get('Status') == 'ENABLED':
-                        vpc_logs_enabled = True
-                        break
-                
-                if vpc_logs_enabled:
+                if detector_status == 'ENABLED':
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="VPC flow logs are enabled as a data source", 
-                        remediation=""
+                        actual_value=f"Detector status is {detector_status}", 
+                        remediation="No remediation needed"
                     ))
                 else:
                     findings.append(self.create_finding(
@@ -74,8 +67,8 @@ class SRA_GD_5(GuardDutyCheck):
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value="VPC flow logs are not enabled as a data source", 
-                        remediation=f"Enable VPC flow logs as a data source for GuardDuty in {region}"
+                        actual_value=f"Detector status is {detector_status}", 
+                        remediation="Enabled GuardDuty"
                     ))
             else:
                 findings.append(self.create_finding(

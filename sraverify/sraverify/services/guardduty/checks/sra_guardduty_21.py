@@ -1,24 +1,25 @@
 """
-Check if GuardDuty Lambda Network Logs are configured for auto-enablement.
+Check if GuardDuty EBS Malware Protection is configured for auto-enablement.
 """
 from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 from sraverify.core.logging import logger
 
 
-class SRA_GD_34(GuardDutyCheck):
-    """Check if GuardDuty Lambda Network Logs are configured for auto-enablement."""
+class SRA_GUARDDUTY_21(GuardDutyCheck):
+    """Check if GuardDuty EBS Malware Protection is configured for auto-enablement."""
 
     def __init__(self):
-        """Initialize GuardDuty Lambda Network Logs auto-enablement check."""
+        """Initialize GuardDuty EBS Malware Protection auto-enablement check."""
         super().__init__()
-        self.check_id = "SRA-GD-34"
-        self.check_name = "GuardDuty Lambda Network Logs auto-enablement configured"
-        self.description = ("This check verifies whether Lambda Network Logs are configured for auto-enablement "
-                           "in GuardDuty for all member accounts. Lambda Network Logs monitoring analyzes VPC flow logs "
-                           "for Lambda functions to detect potentially suspicious network activity.")
+        self.check_id = "SRA-GUARDDUTY-21"
+        self.check_name = "GuardDuty EBS Malware Protection auto-enablement configured"
+        self.description = ("This check verifies whether EBS Malware Protection is configured for auto-enablement "
+                           "in GuardDuty for all member accounts. EBS Malware Protection scans EBS volumes for "
+                           "malware when GuardDuty detects a potential threat, helping to identify and remediate "
+                           "malware infections in your AWS environment.")
         self.severity = "HIGH"
-        self.check_logic = "Check if LAMBDA_NETWORK_LOGS feature is configured with AutoEnable set to ALL."
+        self.check_logic = "Check if EBS_MALWARE_PROTECTION feature is configured with AutoEnable set to ALL."
         self.account_type = "audit"
     
     def execute(self) -> List[Dict[str, Any]]:
@@ -76,35 +77,35 @@ class SRA_GD_34(GuardDutyCheck):
                     ))
                 continue
             
-            # Check if Lambda Network Logs are configured for auto-enablement
-            # Look for LAMBDA_NETWORK_LOGS in Features
-            lambda_network_logs_found = False
-            lambda_network_logs_auto_enable = "NOT_CONFIGURED"
+            # Check if EBS Malware Protection is configured for auto-enablement
+            # Look for EBS_MALWARE_PROTECTION in Features
+            ebs_malware_protection_found = False
+            ebs_malware_protection_auto_enable = "NOT_CONFIGURED"
             features = org_config.get('Features', [])
             
             for feature in features:
-                if feature.get('Name') == 'LAMBDA_NETWORK_LOGS':
-                    lambda_network_logs_found = True
-                    lambda_network_logs_auto_enable = feature.get('AutoEnable', 'NONE')
+                if feature.get('Name') == 'EBS_MALWARE_PROTECTION':
+                    ebs_malware_protection_found = True
+                    ebs_malware_protection_auto_enable = feature.get('AutoEnable', 'NONE')
                     break
             
-            if lambda_network_logs_found and lambda_network_logs_auto_enable == 'ALL':
+            if ebs_malware_protection_found and ebs_malware_protection_auto_enable == 'ALL':
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty Lambda Network Logs are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
+                    actual_value="GuardDuty EBS Malware Protection is configured for auto-enablement for all accounts (AutoEnable=ALL)", 
                     remediation=""
                 ))
-            elif lambda_network_logs_found:
+            elif ebs_malware_protection_found:
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty Lambda Network Logs are configured with AutoEnable={lambda_network_logs_auto_enable}, but should be ALL", 
-                    remediation=f"Configure Lambda Network Logs auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
+                    actual_value=f"GuardDuty EBS Malware Protection is configured with AutoEnable={ebs_malware_protection_auto_enable}, but should be ALL", 
+                    remediation=f"Configure EBS Malware Protection auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
                 ))
             else:
                 findings.append(self.create_finding(
@@ -112,8 +113,8 @@ class SRA_GD_34(GuardDutyCheck):
                     region=region, 
                     account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value=f"GuardDuty Lambda Network Logs feature is not configured", 
-                    remediation=f"Enable Lambda Network Logs feature and configure auto-enablement for all accounts in {region}"
+                    actual_value=f"GuardDuty EBS Malware Protection feature is not configured", 
+                    remediation=f"Enable EBS Malware Protection feature and configure auto-enablement for all accounts in {region}"
                 ))
         
         return findings

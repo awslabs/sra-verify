@@ -5,13 +5,13 @@ from typing import Dict, List, Any
 from sraverify.services.guardduty.base import GuardDutyCheck
 
 
-class SRA_GD_9(GuardDutyCheck):
+class SRA_GUARDDUTY_08(GuardDutyCheck):
     """Check if GuardDuty has CloudTrail event and management logs enabled."""
 
     def __init__(self):
         """Initialize GuardDuty CloudTrail logs check."""
         super().__init__()
-        self.check_id = "SRA-GD-9"
+        self.check_id = "SRA-GUARDDUTY-08"
         self.check_name = "GuardDuty CloudTrail logs enabled"
         self.description = ("This check verifies that GuardDuty has CloudTrail event and management logs as one of the feature, enabled. "
                            "GuardDuty consumes CloudTrail management events directly from CloudTrail through an independent and "

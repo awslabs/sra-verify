@@ -36,3 +36,13 @@ Resources:
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/SecurityAudit'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess'
+      Policies:
+      # SRA Verify requires these additional read-only permissions. They are not present in SecurityAudit or ViewOnlyAccess.
+        - PolicyName: SRAVerifyAdditions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - guardduty:DescribeOrganizationConfiguration
+                Effect: Allow
+                Resource: '*'

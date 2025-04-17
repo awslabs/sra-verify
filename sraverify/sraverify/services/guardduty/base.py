@@ -2,7 +2,6 @@
 Base class for GuardDuty security checks.
 """
 from typing import List, Optional, Dict, Any
-import boto3
 from sraverify.core.check import SecurityCheck
 from sraverify.services.guardduty.client import GuardDutyClient
 from sraverify.core.logging import logger

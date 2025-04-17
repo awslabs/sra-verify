@@ -1,27 +1,27 @@
 """SecurityHub service checks."""
 
-from sraverify.services.securityhub.checks.sra_sh_1 import SRA_SH_1
-from sraverify.services.securityhub.checks.sra_sh_2 import SRA_SH_2
-from sraverify.services.securityhub.checks.sra_sh_3 import SRA_SH_3
-from sraverify.services.securityhub.checks.sra_sh_4 import SRA_SH_4
-from sraverify.services.securityhub.checks.sra_sh_5 import SRA_SH_5
-from sraverify.services.securityhub.checks.sra_sh_6 import SRA_SH_6
-from sraverify.services.securityhub.checks.sra_sh_7 import SRA_SH_7
-from sraverify.services.securityhub.checks.sra_sh_8 import SRA_SH_8
-from sraverify.services.securityhub.checks.sra_sh_9 import SRA_SH_9
-from sraverify.services.securityhub.checks.sra_sh_10 import SRA_SH_10
-from sraverify.services.securityhub.checks.sra_sh_11 import SRA_SH_11
+from sraverify.services.securityhub.checks.sra_securityhub_01 import SRA_SECURITYHUB_01
+from sraverify.services.securityhub.checks.sra_securityhub_02 import SRA_SECURITYHUB_02
+from sraverify.services.securityhub.checks.sra_securityhub_03 import SRA_SECURITYHUB_03
+from sraverify.services.securityhub.checks.sra_securityhub_04 import SRA_SECURITYHUB_04
+from sraverify.services.securityhub.checks.sra_securityhub_05 import SRA_SECURITYHUB_05
+from sraverify.services.securityhub.checks.sra_securityhub_06 import SRA_SECURITYHUB_06
+from sraverify.services.securityhub.checks.sra_securityhub_07 import SRA_SECURITYHUB_07
+from sraverify.services.securityhub.checks.sra_securityhub_08 import SRA_SECURITYHUB_08
+from sraverify.services.securityhub.checks.sra_securityhub_09 import SRA_SECURITYHUB_09
+from sraverify.services.securityhub.checks.sra_securityhub_10 import SRA_SECURITYHUB_10
+from sraverify.services.securityhub.checks.sra_securityhub_11 import SRA_SECURITYHUB_11
 
 CHECKS = {
-    "SRA-SH-1": SRA_SH_1,
-    "SRA-SH-2": SRA_SH_2,
-    "SRA-SH-3": SRA_SH_3,
-    "SRA-SH-4": SRA_SH_4,
-    "SRA-SH-5": SRA_SH_5,
-    "SRA-SH-6": SRA_SH_6,
-    "SRA-SH-7": SRA_SH_7,
-    "SRA-SH-8": SRA_SH_8,
-    "SRA-SH-9": SRA_SH_9,
-    "SRA-SH-10": SRA_SH_10,
-    "SRA-SH-11": SRA_SH_11,
+    "SRA-SECURITYHUB-01": SRA_SECURITYHUB_01,
+    "SRA-SECURITYHUB-02": SRA_SECURITYHUB_02,
+    "SRA-SECURITYHUB-03": SRA_SECURITYHUB_03,
+    "SRA-SECURITYHUB-04": SRA_SECURITYHUB_04,
+    "SRA-SECURITYHUB-05": SRA_SECURITYHUB_05,
+    "SRA-SECURITYHUB-06": SRA_SECURITYHUB_06,
+    "SRA-SECURITYHUB-07": SRA_SECURITYHUB_07,
+    "SRA-SECURITYHUB-08": SRA_SECURITYHUB_08,
+    "SRA-SECURITYHUB-09": SRA_SECURITYHUB_09,
+    "SRA-SECURITYHUB-10": SRA_SECURITYHUB_10,
+    "SRA-SECURITYHUB-11": SRA_SECURITYHUB_11,
 }

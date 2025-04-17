@@ -1,18 +1,18 @@
 """
-SRA-SH-2: Security Hub auto-enable new controls is enabled.
+SRA-SECURITYHUB-02: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_2(SecurityHubCheck):
+class SRA_SECURITYHUB_02(SecurityHubCheck):
     """Check if Security Hub is configured to auto-enable new security controls."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-2"
+        self.check_id = "SRA-SECURITYHUB-02"
         self.check_name = "Security Hub auto-enable new standards is enabled"
         self.account_type = "audit"  # This check is for the audit account
         self.severity = "MEDIUM"

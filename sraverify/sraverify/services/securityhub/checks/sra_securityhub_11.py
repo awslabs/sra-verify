@@ -1,18 +1,18 @@
 """
-SRA-SH-11: Security Hub member account limit not reached.
+SRA-SECURITYHUB-11: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_11(SecurityHubCheck):
+class SRA_SECURITYHUB_11(SecurityHubCheck):
     """Check if Security Hub member account limit has not been reached."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-11"
+        self.check_id = "SRA-SECURITYHUB-11"
         self.check_name = "Security Hub member account limit not reached"
         self.account_type = "audit"  # This check is for the audit account
         self.severity = "HIGH"

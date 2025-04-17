@@ -1,18 +1,18 @@
 """
-SRA-SH-4: Security Hub administrator account is enabled.
+SRA-SECURITYHUB-04: Security Hub check.
 """
 from typing import List, Dict, Any
 from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.core.logging import logger
 
 
-class SRA_SH_4(SecurityHubCheck):
+class SRA_SECURITYHUB_04(SecurityHubCheck):
     """Check if Security Hub administrator account is enabled."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-SH-4"
+        self.check_id = "SRA-SECURITYHUB-04"
         self.check_name = "Security Hub administrator account is enabled"
         self.account_type = "audit"
         self.severity = "HIGH"

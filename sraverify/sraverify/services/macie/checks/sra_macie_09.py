@@ -1,18 +1,18 @@
 """
-SRA-MACIE-9: All active member accounts have Macie enabled.
+SRA-MACIE-09: All active member accounts have Macie enabled.
 """
 from typing import List, Dict, Any
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_9(MacieCheck):
+class SRA_MACIE_09(MacieCheck):
     """Check if all active member accounts have Macie enabled."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-9"
+        self.check_id = "SRA-MACIE-09"
         self.check_name = "All active member accounts have Macie enabled"
         self.description = (
             "This check verifies whether all active members accounts of the AWS Organization have Macie enabled. "

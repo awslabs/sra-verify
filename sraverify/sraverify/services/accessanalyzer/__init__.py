@@ -1,15 +1,15 @@
 """
-IAM Access Analyzer service checks.
+Accessanalyzer security checks.
 """
-from sraverify.services.accessanalyzer.checks.sra_iaa_1 import SRA_IAA_1
-from sraverify.services.accessanalyzer.checks.sra_iaa_2 import SRA_IAA_2
-from sraverify.services.accessanalyzer.checks.sra_iaa_3 import SRA_IAA_3
-from sraverify.services.accessanalyzer.checks.sra_iaa_4 import SRA_IAA_4
+from sraverify.services.accessanalyzer.checks.sra_accessanalyzer_01 import SRA_ACCESSANALYZER_01
+from sraverify.services.accessanalyzer.checks.sra_accessanalyzer_02 import SRA_ACCESSANALYZER_02
+from sraverify.services.accessanalyzer.checks.sra_accessanalyzer_03 import SRA_ACCESSANALYZER_03
+from sraverify.services.accessanalyzer.checks.sra_accessanalyzer_04 import SRA_ACCESSANALYZER_04
 
-# Map check IDs to check classes for easy lookup
+# Register checks
 CHECKS = {
-    "SRA-IAA-1": SRA_IAA_1,
-    "SRA-IAA-2": SRA_IAA_2,
-    "SRA-IAA-3": SRA_IAA_3,
-    "SRA-IAA-4": SRA_IAA_4
+    "SRA-ACCESSANALYZER-01": SRA_ACCESSANALYZER_01,
+    "SRA-ACCESSANALYZER-02": SRA_ACCESSANALYZER_02,
+    "SRA-ACCESSANALYZER-03": SRA_ACCESSANALYZER_03,
+    "SRA-ACCESSANALYZER-04": SRA_ACCESSANALYZER_04,
 }

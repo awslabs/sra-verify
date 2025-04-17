@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-9: Inspector ECR Auto-Enable is Configured.
+SRA-INSPECTOR-09: Inspector ECR Auto-Enable is Configured.
 """
 from typing import List, Dict, Any
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_9(InspectorCheck):
+class SRA_INSPECTOR_09(InspectorCheck):
     """Check if Inspector ECR auto-enable is configured."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-9"
+        self.check_id = "SRA-INSPECTOR-09"
         self.check_name = "Inspector ECR auto-enable is configured"
         self.account_type = "audit"
         self.severity = "HIGH"

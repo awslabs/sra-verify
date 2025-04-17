@@ -1,26 +1,27 @@
 """
 Macie security checks.
 """
-from sraverify.services.macie.checks.sra_macie_1 import SRA_MACIE_1
-from sraverify.services.macie.checks.sra_macie_2 import SRA_MACIE_2
-from sraverify.services.macie.checks.sra_macie_3 import SRA_MACIE_3
-from sraverify.services.macie.checks.sra_macie_4 import SRA_MACIE_4
-from sraverify.services.macie.checks.sra_macie_5 import SRA_MACIE_5
-from sraverify.services.macie.checks.sra_macie_6 import SRA_MACIE_6
-from sraverify.services.macie.checks.sra_macie_7 import SRA_MACIE_7
-from sraverify.services.macie.checks.sra_macie_8 import SRA_MACIE_8
-from sraverify.services.macie.checks.sra_macie_9 import SRA_MACIE_9
+from sraverify.services.macie.checks.sra_macie_01 import SRA_MACIE_01
+from sraverify.services.macie.checks.sra_macie_02 import SRA_MACIE_02
+from sraverify.services.macie.checks.sra_macie_03 import SRA_MACIE_03
+from sraverify.services.macie.checks.sra_macie_04 import SRA_MACIE_04
+from sraverify.services.macie.checks.sra_macie_05 import SRA_MACIE_05
+from sraverify.services.macie.checks.sra_macie_06 import SRA_MACIE_06
+from sraverify.services.macie.checks.sra_macie_07 import SRA_MACIE_07
+from sraverify.services.macie.checks.sra_macie_08 import SRA_MACIE_08
+from sraverify.services.macie.checks.sra_macie_09 import SRA_MACIE_09
 from sraverify.services.macie.checks.sra_macie_10 import SRA_MACIE_10
 
+# Register checks
 CHECKS = {
-    "SRA-MACIE-1": SRA_MACIE_1,
-    "SRA-MACIE-2": SRA_MACIE_2,
-    "SRA-MACIE-3": SRA_MACIE_3,
-    "SRA-MACIE-4": SRA_MACIE_4,
-    "SRA-MACIE-5": SRA_MACIE_5,
-    "SRA-MACIE-6": SRA_MACIE_6,
-    "SRA-MACIE-7": SRA_MACIE_7,
-    "SRA-MACIE-8": SRA_MACIE_8,
-    "SRA-MACIE-9": SRA_MACIE_9,
+    "SRA-MACIE-01": SRA_MACIE_01,
+    "SRA-MACIE-02": SRA_MACIE_02,
+    "SRA-MACIE-03": SRA_MACIE_03,
+    "SRA-MACIE-04": SRA_MACIE_04,
+    "SRA-MACIE-05": SRA_MACIE_05,
+    "SRA-MACIE-06": SRA_MACIE_06,
+    "SRA-MACIE-07": SRA_MACIE_07,
+    "SRA-MACIE-08": SRA_MACIE_08,
+    "SRA-MACIE-09": SRA_MACIE_09,
     "SRA-MACIE-10": SRA_MACIE_10,
 }

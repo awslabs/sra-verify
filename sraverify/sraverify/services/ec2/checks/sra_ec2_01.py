@@ -1,18 +1,18 @@
 """
-SRA-EC2-1: AWS account level EBS encryption by default is enabled.
+SRA-EC2-01: AWS account level EBS encryption by default is enabled.
 """
 from typing import List, Dict, Any
 from sraverify.services.ec2.base import EC2Check
 from sraverify.core.logging import logger
 
 
-class SRA_EC2_1(EC2Check):
+class SRA_EC2_01(EC2Check):
     """Check if AWS account level EBS encryption by default is enabled."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-EC2-1"
+        self.check_id = "SRA-EC2-01"
         self.check_name = "AWS account level EBS encryption by default is enabled"
         self.description = (
             "This check verifies that the AWS account level configuration to encrypt EBS volumes by default "

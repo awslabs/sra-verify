@@ -1,18 +1,18 @@
 """
-SRA-INSPECTOR-1: Inspector Service Status.
+SRA-INSPECTOR-01: Inspector Service Status.
 """
 from typing import List, Dict, Any
 from sraverify.services.inspector.base import InspectorCheck
 from sraverify.core.logging import logger
 
 
-class SRA_INSPECTOR_1(InspectorCheck):
+class SRA_INSPECTOR_01(InspectorCheck):
     """Check if Inspector service is enabled for the account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-INSPECTOR-1"
+        self.check_id = "SRA-INSPECTOR-01"
         self.check_name = "Inspector service is enabled"
         self.account_type = "application"
         self.severity = "HIGH"

@@ -1,18 +1,18 @@
 """
-SRA-MACIE-8: Macie AutoEnable configuration is enabled for new member accounts.
+SRA-MACIE-08: Macie AutoEnable configuration is enabled for new member accounts.
 """
 from typing import List, Dict, Any
 from sraverify.services.macie.base import MacieCheck
 from sraverify.core.logging import logger
 
 
-class SRA_MACIE_8(MacieCheck):
+class SRA_MACIE_08(MacieCheck):
     """Check if Macie AutoEnable configuration is enabled for new member accounts."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-MACIE-8"
+        self.check_id = "SRA-MACIE-08"
         self.check_name = "Macie AutoEnable configuration is enabled for new member accounts"
         self.description = (
             "This check verifies whether auto-enablement configuration for Macie is enabled for member accounts of the AWS Organization. "

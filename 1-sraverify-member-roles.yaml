@@ -44,5 +44,12 @@ Resources:
             Statement:
               - Action:
                 - guardduty:DescribeOrganizationConfiguration
+                - macie2:GetFindingsPublicationConfiguration
+                - macie2:GetClassificationExportConfiguration
+                - macie2:ListMembers
+                - macie2:DescribeOrganizationConfiguration
+                - macie2:GetAdministratorAccount
+                - organizations:ListDelegatedAdministrators
+                - organizations:ListAccounts
                 Effect: Allow
                 Resource: '*'

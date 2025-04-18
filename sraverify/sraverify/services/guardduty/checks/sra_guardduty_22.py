@@ -56,14 +56,14 @@ class SRA_GUARDDUTY_22(GuardDutyCheck):
                 error_message = org_config["Error"].get("Message", "Unknown error")
                 
                 # Handle BadRequestException specifically for non-management accounts
-                if error_code == "BadRequestException" and "not the master account" in error_message:
+                if error_code == "BadRequestException":
                     findings.append(self.create_finding(
-                        status="ERROR", 
+                        status="FAIL", 
                         region=region, 
                         account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"This check must be run from the organization management account", 
-                        remediation="Run this check from the AWS Organizations management account"
+                        actual_value=f"{error_code} {error_message}", 
+                        remediation="Verify that GuardDuty is the delegated admin in this Region and run the check again."
                     ))
                 else:
                     findings.append(self.create_finding(

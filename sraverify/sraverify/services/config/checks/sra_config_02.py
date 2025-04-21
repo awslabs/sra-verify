@@ -14,7 +14,7 @@ class SRA_CONFIG_02(ConfigCheck):
         super().__init__()
         self.check_id = "SRA-CONFIG-02"
         self.check_name = "AWS Config recorder is running"
-        self.account_type = "account"  # This check applies to all account types
+        self.account_type = "application"  
         self.severity = "HIGH"
         self.description = (
             "This check verifies that configuration recorder is running. AWS Config configuration "

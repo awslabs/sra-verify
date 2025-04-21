@@ -1,5 +1,5 @@
 """
-SRA-CONFIG-09: AWS Config Aggregator.
+SRA-CONFIG-09: AWS Config Aggregator Status.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
@@ -7,41 +7,25 @@ from sraverify.core.logging import logger
 
 
 class SRA_CONFIG_09(ConfigCheck):
-    """Check if Config administration for the AWS Organization has a delegated administrator."""
+    """Check if Config Organization aggregator is in a valid status."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
         self.check_id = "SRA-CONFIG-09"
-        self.check_name = "Config administration for the AWS Organization has a delegated administrator"
-        self.account_type = "management"  # This check applies to management account
+        self.check_name = "Config Organization aggregator is in a valid status"
+        self.account_type = "audit"  # This check applies to audit account
         self.severity = "MEDIUM"
         self.description = (
-            "This check verifies whether Config service administration for your AWS Organization "
-            "is delegated out of the AWS Organization management account."
+            "This check verifies whether Config Organization aggregator has a valid status. "
+            "A value of FAILED indicates errors while moving data and value OUTDATED indicates "
+            "the data is not the most recent."
         )
         self.check_logic = (
-            "Checks if a delegated administrator exists for the Config service using the "
-            "list-delegated-administrators API with service principals config.amazonaws.com "
-            "and config-multiaccountsetup.amazonaws.com."
+            "Checks if all aggregator sources have a status of SUCCEEDED using "
+            "describe-configuration-aggregator-sources-status API."
         )
-        self.resource_type = "AWS::Organizations::Account"
-        # Initialize parameters as an empty dict
-        self.params = {}
-    
-    def initialize(self, session, regions=None, **kwargs):
-        """
-        Initialize check with AWS session, regions, and parameters.
-        
-        Args:
-            session: AWS session to use for the check
-            regions: List of AWS regions to check
-            **kwargs: Additional parameters for the check
-        """
-        super().initialize(session, regions)
-        # Store parameters
-        self.params = kwargs
-        logger.debug(f"Initialized {self.check_id} with parameters: {self.params}")
+        self.resource_type = "AWS::Config::ConfigurationAggregator"
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -53,114 +37,148 @@ class SRA_CONFIG_09(ConfigCheck):
         findings = []
         account_id = self.get_session_accountId(self.session)
         
-        # Get delegated administrators for both Config service principals
-        delegated_admins = self.get_delegated_administrators()
+        if not self.regions:
+            findings.append(
+                self.create_finding(
+                    status="ERROR",
+                    region="global",
+                    account_id=account_id,
+                    resource_id="config:global",
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value="No regions specified for check",
+                    remediation="Specify at least one region when running the check"
+                )
+            )
+            return findings
         
-        if not delegated_admins:
-            # No delegated administrator found for either service principal
+        # First, find an organization aggregator in any region
+        found_org_aggregator = False
+        org_aggregator_region = None
+        org_aggregator_name = None
+        org_aggregator_arn = None
+        
+        for region in self.regions:
+            # Get configuration aggregators for the region using the cache
+            aggregators = self.get_configuration_aggregators(region)
+            
+            # Check if any of the aggregators is an organization aggregator
+            for aggregator in aggregators:
+                if 'OrganizationAggregationSource' in aggregator:
+                    found_org_aggregator = True
+                    org_aggregator_region = region
+                    org_aggregator_name = aggregator.get('ConfigurationAggregatorName', 'Unknown')
+                    org_aggregator_arn = aggregator.get('ConfigurationAggregatorArn', 
+                                                      f"arn:aws:config:{region}:{account_id}:config-aggregator/{org_aggregator_name}")
+                    break
+            
+            if found_org_aggregator:
+                break
+        
+        # If no organization aggregator found in any region, return a global failure
+        if not found_org_aggregator:
             findings.append(
                 self.create_finding(
                     status="FAIL",
                     region="global",
                     account_id=account_id,
-                    resource_id="delegated-admin/none",
-                    checked_value="Delegated administrator exists for Config service",
-                    actual_value="No delegated administrator found for Config service",
+                    resource_id=f"arn:aws:config:global:{account_id}:config-aggregator/none",
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value="No organization aggregator found in any region",
                     remediation=(
-                        "Register a delegated administrator for Config using both service principals:\n"
-                        "1. aws organizations register-delegated-administrator "
-                        "--service-principal config.amazonaws.com "
-                        "--account-id <AUDIT_ACCOUNT_ID>\n"
-                        "2. aws organizations register-delegated-administrator "
-                        "--service-principal config-multiaccountsetup.amazonaws.com "
-                        "--account-id <AUDIT_ACCOUNT_ID>"
+                        "Create an organization configuration aggregator in at least one region using: aws configservice put-configuration-aggregator "
+                        "--configuration-aggregator-name organization-aggregator --organization-aggregation-source "
+                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
+                        "--region <region>"
                     )
                 )
             )
             return findings
         
-        # Group delegated admins by service principal to check coverage
-        service_principals_covered = set()
-        admin_accounts = {}
-        
-        for admin in delegated_admins:
-            admin_id = admin.get('Id', 'Unknown')
-            admin_name = admin.get('Name', 'Unknown')
-            
-            # In a real implementation, we would know which service principal this admin is for
-            # For now, we'll just track unique admin accounts
-            if admin_id not in admin_accounts:
-                admin_accounts[admin_id] = {
-                    'name': admin_name,
-                    'count': 1
-                }
-            else:
-                admin_accounts[admin_id]['count'] += 1
-        
-        # Check if we have full coverage of service principals
-        if len(delegated_admins) >= 2:
-            # We have at least one delegated admin for each service principal
-            for admin_id, info in admin_accounts.items():
-                admin_name = info['name']
-                service_count = info['count']
-                
-                if service_count == 2:
-                    # This account is delegated for both service principals
-                    findings.append(
-                        self.create_finding(
-                            status="PASS",
-                            region="global",
-                            account_id=account_id,
-                            resource_id=f"delegated-admin/{admin_id}",
-                            checked_value="Delegated administrator exists for Config service",
-                            actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) for both service principals",
-                            remediation="No remediation needed"
-                        )
-                    )
-                else:
-                    # This account is delegated for only one service principal
-                    findings.append(
-                        self.create_finding(
-                            status="WARN",
-                            region="global",
-                            account_id=account_id,
-                            resource_id=f"delegated-admin/{admin_id}",
-                            checked_value="Delegated administrator exists for all Config service principals",
-                            actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) but not for all required service principals",
-                            remediation=(
-                                f"Ensure the same account is registered as a delegated administrator for both Config service principals:\n"
-                                f"1. aws organizations register-delegated-administrator "
-                                f"--service-principal config.amazonaws.com "
-                                f"--account-id {admin_id}\n"
-                                f"2. aws organizations register-delegated-administrator "
-                                f"--service-principal config-multiaccountsetup.amazonaws.com "
-                                f"--account-id {admin_id}"
-                            )
-                        )
-                    )
-        else:
-            # We don't have full coverage of service principals
-            admin_list = []
-            for admin_id, info in admin_accounts.items():
-                admin_list.append(f"{admin_id} ({info['name']})")
-            
+        # Get client for the region where we found the organization aggregator
+        client = self.get_client(org_aggregator_region)
+        if not client:
             findings.append(
                 self.create_finding(
-                    status="WARN",
+                    status="ERROR",
                     region="global",
                     account_id=account_id,
-                    resource_id=f"delegated-admin/{','.join(admin_accounts.keys())}",
-                    checked_value="Delegated administrator exists for all Config service principals",
-                    actual_value=f"Config service has delegated administrators ({', '.join(admin_list)}) but not for all required service principals",
+                    resource_id=org_aggregator_arn,
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value=f"No Config client available for region {org_aggregator_region}",
+                    remediation="Ensure AWS Config service is available in the region and you have proper permissions"
+                )
+            )
+            return findings
+        
+        # Get aggregator sources status
+        try:
+            source_statuses = client.describe_configuration_aggregator_sources_status(org_aggregator_name)
+        except Exception as e:
+            findings.append(
+                self.create_finding(
+                    status="ERROR",
+                    region="global",
+                    account_id=account_id,
+                    resource_id=org_aggregator_arn,
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value=f"Error getting source statuses for aggregator '{org_aggregator_name}' in region {org_aggregator_region}: {str(e)}",
+                    remediation="Ensure you have proper permissions to check aggregator status"
+                )
+            )
+            return findings
+        
+        if not source_statuses:
+            # No source statuses found
+            findings.append(
+                self.create_finding(
+                    status="FAIL",
+                    region="global",
+                    account_id=account_id,
+                    resource_id=org_aggregator_arn,
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value=f"No source statuses found for organization aggregator '{org_aggregator_name}' in region {org_aggregator_region}",
+                    remediation=f"Check the aggregator configuration in {org_aggregator_region} and ensure it has valid sources"
+                )
+            )
+            return findings
+        
+        # Check if all sources have SUCCEEDED status
+        failed_sources = []
+        for source in source_statuses:
+            source_id = source.get('SourceId', 'Unknown')
+            source_type = source.get('SourceType', 'Unknown')
+            source_status = source.get('LastUpdateStatus', 'UNKNOWN')
+            
+            if source_status != "SUCCEEDED":
+                failed_sources.append(f"{source_type}:{source_id} ({source_status})")
+        
+        if failed_sources:
+            # Some sources have failed
+            findings.append(
+                self.create_finding(
+                    status="FAIL",
+                    region="global",
+                    account_id=account_id,
+                    resource_id=org_aggregator_arn,
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value=f"Organization aggregator '{org_aggregator_name}' in region {org_aggregator_region} has sources with status: {', '.join(failed_sources)}",
                     remediation=(
-                        "Ensure a delegated administrator is registered for both Config service principals:\n"
-                        "1. aws organizations register-delegated-administrator "
-                        "--service-principal config.amazonaws.com "
-                        "--account-id <AUDIT_ACCOUNT_ID>\n"
-                        "2. aws organizations register-delegated-administrator "
-                        "--service-principal config-multiaccountsetup.amazonaws.com "
-                        "--account-id <AUDIT_ACCOUNT_ID>"
+                        f"Check the AWS Config logs for errors related to the aggregator sources. "
+                        f"Ensure the aggregator has the necessary permissions to access the source accounts."
                     )
+                )
+            )
+        else:
+            # All sources have succeeded
+            findings.append(
+                self.create_finding(
+                    status="PASS",
+                    region="global",
+                    account_id=account_id,
+                    resource_id=org_aggregator_arn,
+                    checked_value="All source statuses are SUCCEEDED",
+                    actual_value=f"Organization aggregator '{org_aggregator_name}' in region {org_aggregator_region} has all sources with status SUCCEEDED",
+                    remediation="No remediation needed"
                 )
             )
         

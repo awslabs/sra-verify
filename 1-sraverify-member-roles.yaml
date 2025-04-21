@@ -13,12 +13,8 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W11
-            reason: Role allows * in resource policy. The role needs broad, read-only privileges to review all resources. Only the CodeBuild role created as part of this solution can assume this role.
           - id: W28
             reason: Resource has an explicit name so SRAVerify can loop through and assume it in each account.
-          - id: W76
-            reason: SPCM for IAM policy is higher than 25 due to managed polices, and additional polices. Each section of the role has a comment with the SRAVerify documentation describing the need for the privileges. 
     Type: 'AWS::IAM::Role'
     Properties:
       RoleName: SRAMemberRole
@@ -34,22 +30,96 @@ Resources:
               ArnEquals:
                 aws:PrincipalArn: !Sub arn:${AWS::Partition}:iam::${SRAVerifyAccountID}:role/SRAVerifyCodeBuildServiceRole
       ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/SecurityAudit'
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess'
-      Policies:
-      # SRA Verify requires these additional read-only permissions. They are not present in SecurityAudit or ViewOnlyAccess.
-        - PolicyName: SRAVerifyAdditions
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Action:
-                - guardduty:DescribeOrganizationConfiguration
-                - macie2:GetFindingsPublicationConfiguration
-                - macie2:GetClassificationExportConfiguration
-                - macie2:ListMembers
-                - macie2:DescribeOrganizationConfiguration
-                - macie2:GetAdministratorAccount
-                - organizations:ListDelegatedAdministrators
-                - organizations:ListAccounts
-                Effect: Allow
-                Resource: '*'
+        - !Ref SRAVerifyLeastPrivilege
+
+  # This policy is automatically generated from generate_iam_policy.py by extracting the boto3 calls used.
+  SRAVerifyLeastPrivilege:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Policy is automatically generated from generate_iam_policy.py
+          - id: W13
+            reason: SRA Verify needs read only * resource to evaluate configuration against SRA best practices.
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: SRAVerifyLeastPrivilege
+      Description: Least privilege policy for SRA Verify tool
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: S3Permissions
+          Effect: Allow
+          Action:
+          - s3:GetAccountPublicAccessBlock
+          - s3:GetBucketLocation
+          - s3:GetBucketPolicy
+          Resource: '*'
+        - Sid: Macie2Permissions
+          Effect: Allow
+          Action:
+          - macie2:DescribeOrganizationConfiguration
+          - macie2:GetAdministratorAccount
+          - macie2:GetClassificationExportConfiguration
+          - macie2:GetFindingsPublicationConfiguration
+          - macie2:ListMembers
+          Resource: '*'
+        - Sid: OrganizationsPermissions
+          Effect: Allow
+          Action:
+          - organizations:DescribeOrganization
+          - organizations:ListAccounts
+          - organizations:ListDelegatedAdministrators
+          Resource: '*'
+        - Sid: ConfigPermissions
+          Effect: Allow
+          Action:
+          - config:DescribeConfigurationAggregatorSourcesStatus
+          - config:DescribeConfigurationAggregators
+          - config:DescribeConfigurationRecorderStatus
+          - config:DescribeConfigurationRecorders
+          - config:DescribeDeliveryChannelStatus
+          - config:DescribeDeliveryChannels
+          Resource: '*'
+        - Sid: Inspector2Permissions
+          Effect: Allow
+          Action:
+          - inspector2:BatchGetAccountStatus
+          - inspector2:DescribeOrganizationConfiguration
+          - inspector2:GetDelegatedAdminAccount
+          Resource: '*'
+        - Sid: AccessanalyzerPermissions
+          Effect: Allow
+          Action:
+          - access-analyzer:GetAnalyzer
+          - access-analyzer:ListAnalyzers
+          Resource: '*'
+        - Sid: CloudtrailPermissions
+          Effect: Allow
+          Action:
+          - cloudtrail:DescribeTrails
+          - cloudtrail:GetTrailStatus
+          Resource: '*'
+        - Sid: GuarddutyPermissions
+          Effect: Allow
+          Action:
+          - guardduty:DescribeOrganizationConfiguration
+          - guardduty:GetDetector
+          - guardduty:ListDetectors
+          - guardduty:ListOrganizationAdminAccounts
+          Resource: '*'
+        - Sid: SecurityhubPermissions
+          Effect: Allow
+          Action:
+          - securityhub:DescribeOrganizationConfiguration
+          - securityhub:GetAdministratorAccount
+          - securityhub:GetEnabledStandards
+          - securityhub:ListEnabledProductsForImport
+          - securityhub:ListMembers
+          - securityhub:ListOrganizationAdminAccounts
+          Resource: '*'
+        - Sid: Ec2Permissions
+          Effect: Allow
+          Action:
+          - ec2:GetEbsEncryptionByDefault
+          Resource: '*'

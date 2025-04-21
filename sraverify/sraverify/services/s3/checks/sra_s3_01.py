@@ -1,18 +1,18 @@
 """
-SRA-S3-05: S3 restrict public bucket is enabled.
+SRA-S3-01: S3 restrict public bucket is enabled.
 """
 from typing import List, Dict, Any
 from sraverify.services.s3.base import S3Check
 from sraverify.core.logging import logger
 
 
-class SRA_S3_05(S3Check):
+class SRA_S3_01(S3Check):
     """Check if S3 restrict public bucket is enabled for the account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
-        self.check_id = "SRA-S3-05"
+        self.check_id = "SRA-S3-01"
         self.check_name = "S3 restrict public bucket is enabled"
         self.account_type = "application"
         self.severity = "HIGH"

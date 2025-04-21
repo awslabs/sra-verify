@@ -1,30 +1,47 @@
 """
-SRA-CONFIG-07: AWS Config Recording All Resource Types (duplicate).
+SRA-CONFIG-07: AWS Config Aggregator.
 """
 from typing import List, Dict, Any
-from datetime import datetime, timezone, timedelta
 from sraverify.services.config.base import ConfigCheck
 from sraverify.core.logging import logger
 
 
 class SRA_CONFIG_07(ConfigCheck):
-    """Check if AWS Config last config history delivery is successful."""
+    """Check if Config administration for the AWS Organization has a delegated administrator."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
         self.check_id = "SRA-CONFIG-07"
-        self.check_name = "AWS Config last config history delivery is successful"
-        self.account_type = "application"  # This check applies to application accounts
-        self.severity = "HIGH"
+        self.check_name = "Config administration for the AWS Organization has a delegated administrator"
+        self.account_type = "management"  # This check applies to management account
+        self.severity = "MEDIUM"
         self.description = (
-            "This check verifies that the last delivery of resource config history by AWS config "
-            "into the delivery channel was successful."
+            "This check verifies whether Config service administration for your AWS Organization "
+            "is delegated out of the AWS Organization management account."
         )
         self.check_logic = (
-            "Checks if the last delivery of config history was successful and within the last 24 hours."
+            "Checks if a delegated administrator exists for the Config service using the "
+            "list-delegated-administrators API with service principals config.amazonaws.com "
+            "and config-multiaccountsetup.amazonaws.com."
         )
-        self.resource_type = "AWS::Config::DeliveryChannel"
+        self.resource_type = "AWS::Organizations::Account"
+        # Initialize parameters as an empty dict
+        self.params = {}
+    
+    def initialize(self, session, regions=None, **kwargs):
+        """
+        Initialize check with AWS session, regions, and parameters.
+        
+        Args:
+            session: AWS session to use for the check
+            regions: List of AWS regions to check
+            **kwargs: Additional parameters for the check
+        """
+        super().initialize(session, regions)
+        # Store parameters
+        self.params = kwargs
+        logger.debug(f"Initialized {self.check_id} with parameters: {self.params}")
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -36,130 +53,115 @@ class SRA_CONFIG_07(ConfigCheck):
         findings = []
         account_id = self.get_session_accountId(self.session)
         
-        if not self.regions:
+        # Get delegated administrators for both Config service principals
+        delegated_admins = self.get_delegated_administrators()
+        
+        if not delegated_admins:
+            # No delegated administrator found for either service principal
             findings.append(
                 self.create_finding(
-                    status="ERROR",
+                    status="FAIL",
                     region="global",
                     account_id=account_id,
-                    resource_id="config:global",
-                    checked_value="configHistoryDeliveryInfo.lastStatus: SUCCESS, lastSuccessfulTime within 24 hours",
-                    actual_value="No regions specified for check",
-                    remediation="Specify at least one region when running the check"
+                    resource_id="delegated-admin/none",
+                    checked_value="Delegated administrator exists for Config service",
+                    actual_value="No delegated administrator found for Config service",
+                    remediation=(
+                        "Register a delegated administrator for Config using both service principals:\n"
+                        "1. aws organizations register-delegated-administrator "
+                        "--service-principal config.amazonaws.com "
+                        "--account-id <AUDIT_ACCOUNT_ID>\n"
+                        "2. aws organizations register-delegated-administrator "
+                        "--service-principal config-multiaccountsetup.amazonaws.com "
+                        "--account-id <AUDIT_ACCOUNT_ID>"
+                    )
                 )
             )
             return findings
         
-        # Check each region for delivery channel status
-        for region in self.regions:
-            # Get delivery channel status for the region
-            channel_statuses = self.get_delivery_channel_status(region)
+        # Group delegated admins by service principal to check coverage
+        service_principals_covered = set()
+        admin_accounts = {}
+        
+        for admin in delegated_admins:
+            admin_id = admin.get('Id', 'Unknown')
+            admin_name = admin.get('Name', 'Unknown')
             
-            if not channel_statuses:
-                # No delivery channel status found in this region
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        account_id=account_id,
-                        resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/default",
-                        checked_value="configHistoryDeliveryInfo.lastStatus: SUCCESS, lastSuccessfulTime within 24 hours",
-                        actual_value="No delivery channel status found in this region",
-                        remediation=(
-                            f"Ensure a delivery channel is configured in {region} and check its status using: "
-                            f"aws configservice describe-delivery-channel-status --region {region}"
-                        )
-                    )
-                )
-                continue
-            
-            # Check each delivery channel status
-            for status in channel_statuses:
-                channel_name = status.get('name', 'default')
-                resource_id = f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}"
+            # In a real implementation, we would know which service principal this admin is for
+            # For now, we'll just track unique admin accounts
+            if admin_id not in admin_accounts:
+                admin_accounts[admin_id] = {
+                    'name': admin_name,
+                    'count': 1
+                }
+            else:
+                admin_accounts[admin_id]['count'] += 1
+        
+        # Check if we have full coverage of service principals
+        if len(delegated_admins) >= 2:
+            # We have at least one delegated admin for each service principal
+            for admin_id, info in admin_accounts.items():
+                admin_name = info['name']
+                service_count = info['count']
                 
-                # Check configHistoryDeliveryInfo
-                history_info = status.get('configHistoryDeliveryInfo', {})
-                history_status = history_info.get('lastStatus', 'UNKNOWN')
-                history_success_time_str = history_info.get('lastSuccessfulTime')
-                
-                if not history_success_time_str:
-                    # No successful delivery time found
-                    findings.append(
-                        self.create_finding(
-                            status="FAIL",
-                            region=region,
-                            account_id=account_id,
-                            resource_id=resource_id,
-                            checked_value="configHistoryDeliveryInfo.lastStatus: SUCCESS, lastSuccessfulTime within 24 hours",
-                            actual_value=f"No successful delivery time found for channel '{channel_name}'",
-                            remediation=(
-                                f"Check the AWS Config logs and permissions in {region}. "
-                                f"Ensure the Config service role has the necessary permissions to deliver to the S3 bucket."
-                            )
-                        )
-                    )
-                    continue
-                
-                # Convert the timestamp to datetime
-                try:
-                    history_success_time = datetime.fromisoformat(history_success_time_str.replace('Z', '+00:00'))
-                except (ValueError, TypeError):
-                    # Invalid timestamp format
-                    findings.append(
-                        self.create_finding(
-                            status="FAIL",
-                            region=region,
-                            account_id=account_id,
-                            resource_id=resource_id,
-                            checked_value="configHistoryDeliveryInfo.lastStatus: SUCCESS, lastSuccessfulTime within 24 hours",
-                            actual_value=f"Invalid timestamp format: {history_success_time_str}",
-                            remediation=(
-                                f"Check the AWS Config logs and permissions in {region}. "
-                                f"Ensure the Config service role has the necessary permissions to deliver to the S3 bucket."
-                            )
-                        )
-                    )
-                    continue
-                
-                # Check if the last successful delivery was within the last 24 hours
-                now = datetime.now(timezone.utc)
-                time_diff = now - history_success_time
-                
-                if history_status == "SUCCESS" and time_diff < timedelta(hours=24):
-                    # Last delivery was successful and within the last 24 hours
+                if service_count == 2:
+                    # This account is delegated for both service principals
                     findings.append(
                         self.create_finding(
                             status="PASS",
-                            region=region,
+                            region="global",
                             account_id=account_id,
-                            resource_id=resource_id,
-                            checked_value="configHistoryDeliveryInfo.lastStatus: SUCCESS, lastSuccessfulTime within 24 hours",
-                            actual_value=f"Last config history delivery was successful at {history_success_time_str}",
-                            remediation=""
+                            resource_id=f"delegated-admin/{admin_id}",
+                            checked_value="Delegated administrator exists for Config service",
+                            actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) for both service principals",
+                            remediation="No remediation needed"
                         )
                     )
                 else:
-                    # Last delivery was not successful or not within the last 24 hours
-                    if history_status != "SUCCESS":
-                        actual_value = f"Last config history delivery status: {history_status}, time: {history_success_time_str}"
-                    else:
-                        actual_value = f"Last config history delivery was successful but outdated: {history_success_time_str} ({time_diff.total_seconds() / 3600:.1f} hours ago)"
-                    
+                    # This account is delegated for only one service principal
                     findings.append(
                         self.create_finding(
-                            status="FAIL",
-                            region=region,
+                            status="WARN",
+                            region="global",
                             account_id=account_id,
-                            resource_id=resource_id,
-                            checked_value="configHistoryDeliveryInfo.lastStatus: SUCCESS, lastSuccessfulTime within 24 hours",
-                            actual_value=actual_value,
+                            resource_id=f"delegated-admin/{admin_id}",
+                            checked_value="Delegated administrator exists for all Config service principals",
+                            actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) but not for all required service principals",
                             remediation=(
-                                f"Check the AWS Config logs and permissions in {region}. "
-                                f"Ensure the Config service role has the necessary permissions to deliver to the S3 bucket. "
-                                f"If the delivery is outdated, check if there are any configuration changes to record."
+                                f"Ensure the same account is registered as a delegated administrator for both Config service principals:\n"
+                                f"1. aws organizations register-delegated-administrator "
+                                f"--service-principal config.amazonaws.com "
+                                f"--account-id {admin_id}\n"
+                                f"2. aws organizations register-delegated-administrator "
+                                f"--service-principal config-multiaccountsetup.amazonaws.com "
+                                f"--account-id {admin_id}"
                             )
                         )
                     )
+        else:
+            # We don't have full coverage of service principals
+            admin_list = []
+            for admin_id, info in admin_accounts.items():
+                admin_list.append(f"{admin_id} ({info['name']})")
+            
+            findings.append(
+                self.create_finding(
+                    status="WARN",
+                    region="global",
+                    account_id=account_id,
+                    resource_id=f"delegated-admin/{','.join(admin_accounts.keys())}",
+                    checked_value="Delegated administrator exists for all Config service principals",
+                    actual_value=f"Config service has delegated administrators ({', '.join(admin_list)}) but not for all required service principals",
+                    remediation=(
+                        "Ensure a delegated administrator is registered for both Config service principals:\n"
+                        "1. aws organizations register-delegated-administrator "
+                        "--service-principal config.amazonaws.com "
+                        "--account-id <AUDIT_ACCOUNT_ID>\n"
+                        "2. aws organizations register-delegated-administrator "
+                        "--service-principal config-multiaccountsetup.amazonaws.com "
+                        "--account-id <AUDIT_ACCOUNT_ID>"
+                    )
+                )
+            )
         
         return findings

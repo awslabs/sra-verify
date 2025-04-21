@@ -1,5 +1,5 @@
 """
-SRA-CONFIG-08: AWS Config Rules.
+SRA-CONFIG-08: AWS Config Aggregator Authorization.
 """
 from typing import List, Dict, Any
 from sraverify.services.config.base import ConfigCheck
@@ -7,25 +7,26 @@ from sraverify.core.logging import logger
 
 
 class SRA_CONFIG_08(ConfigCheck):
-    """Check if AWS Config rule exists in all member accounts."""
+    """Check if Config delegated admin account is the Security Tooling (Audit) account."""
     
     def __init__(self):
         """Initialize the check."""
         super().__init__()
         self.check_id = "SRA-CONFIG-08"
-        self.check_name = "AWS Config rule exists in all member accounts"
-        self.account_type = "audit"  # This check applies to audit account
+        self.check_name = "Config delegated admin account is the Security Tooling (Audit) account"
+        self.account_type = "management"  # This check applies to management account
         self.severity = "MEDIUM"
         self.description = (
-            "This check verifies the presence of specific AWS Config rule/s across all member accounts "
-            "in the AWS Organization. To specify the list of config rules to check, update the utils.py file."
+            "This check verifies whether Config delegated admin account is the audit account of your "
+            "AWS organization. The audit account is dedicated to operating security services, monitoring "
+            "AWS accounts, and automating security alerting and response."
         )
         self.check_logic = (
-            "Checks if specified AWS Config rules exist in all member accounts using describe-config-rules API."
+            "Compares the delegated admin account ID with the provided audit account ID."
         )
-        self.resource_type = "AWS::Config::ConfigRule"
-        # Initialize parameters as an empty dict
-        self.params = {}
+        self.resource_type = "AWS::Organizations::Account"
+        # Initialize audit account attribute
+        self._audit_accounts = []
     
     def initialize(self, session, regions=None, **kwargs):
         """
@@ -37,9 +38,18 @@ class SRA_CONFIG_08(ConfigCheck):
             **kwargs: Additional parameters for the check
         """
         super().initialize(session, regions)
-        # Store parameters
-        self.params = kwargs
-        logger.debug(f"Initialized {self.check_id} with parameters: {self.params}")
+        
+        # Extract audit-account from kwargs
+        if 'audit-account' in kwargs:
+            # Handle both single value and list
+            audit_account = kwargs['audit-account']
+            if isinstance(audit_account, list):
+                self._audit_accounts = audit_account
+            else:
+                self._audit_accounts = [audit_account]
+            logger.debug(f"Audit account IDs set to: {self._audit_accounts}")
+        else:
+            logger.debug("No Audit account ID provided in parameters")
     
     def execute(self) -> List[Dict[str, Any]]:
         """
@@ -51,138 +61,131 @@ class SRA_CONFIG_08(ConfigCheck):
         findings = []
         account_id = self.get_session_accountId(self.session)
         
-        # Get rule names from parameters
-        rule_names = self.params.get('rule-names')
-        if not rule_names:
+        # Check if Audit account ID is provided
+        if not self._audit_accounts:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
                     account_id=account_id,
-                    resource_id="config:rules:global",
-                    checked_value="Config rule exists in all member accounts",
-                    actual_value="No rule names provided",
-                    remediation="Provide the rule names to check using the --rule-names parameter"
+                    resource_id="delegated-admin/none",
+                    checked_value="Delegated administrator is audit account",
+                    actual_value="No audit account ID provided",
+                    remediation="Provide the audit account ID using the --audit-account parameter"
                 )
             )
             return findings
         
-        # Convert rule_names to list if it's a string
-        if isinstance(rule_names, str):
-            rule_names = [rule_name.strip() for rule_name in rule_names.split(',')]
+        # Get delegated administrators for both Config service principals
+        delegated_admins = self.get_delegated_administrators()
         
-        if not self.regions:
+        if not delegated_admins:
+            # No delegated administrator found for either service principal
             findings.append(
                 self.create_finding(
-                    status="ERROR",
+                    status="FAIL",
                     region="global",
                     account_id=account_id,
-                    resource_id="config:rules:global",
-                    checked_value="Config rule exists in all member accounts",
-                    actual_value="No regions specified for check",
-                    remediation="Specify at least one region when running the check"
+                    resource_id=f"delegated-admin/none",
+                    checked_value=f"Delegated administrator is audit account {', '.join(self._audit_accounts)}",
+                    actual_value=f"No delegated administrator found for Config service",
+                    remediation=(
+                        f"Register the audit account as a delegated administrator for Config using both service principals:\n"
+                        f"1. aws organizations register-delegated-administrator "
+                        f"--service-principal config.amazonaws.com "
+                        f"--account-id {self._audit_accounts[0]}\n"
+                        f"2. aws organizations register-delegated-administrator "
+                        f"--service-principal config-multiaccountsetup.amazonaws.com "
+                        f"--account-id {self._audit_accounts[0]}"
+                    )
                 )
             )
             return findings
         
-        # Since this check requires access to all member accounts, we need to implement
-        # a mechanism to query config rules across accounts. This would typically involve
-        # using AWS Organizations API to list accounts and then assuming roles in each account
-        # to check config rules.
-        #
-        # For this implementation, we'll simulate the check by assuming we're running in the
-        # audit account and have the necessary permissions to query all member accounts.
-        
-        # Get client for the primary region
-        primary_region = self.regions[0]
-        client = self.get_client(primary_region)
-        if not client:
-            logger.warning(f"No Config client available for region {primary_region}")
-            findings.append(
-                self.create_finding(
-                    status="ERROR",
-                    region=primary_region,
-                    account_id=account_id,
-                    resource_id="config:rules:global",
-                    checked_value="Config rule exists in all member accounts",
-                    actual_value="Could not initialize Config client",
-                    remediation="Check AWS credentials and permissions"
-                )
-            )
-            return findings
-        
-        # In a real implementation, we would:
-        # 1. List all accounts in the organization
-        # 2. For each account, assume a role that allows us to query Config
-        # 3. Check if the specified rules exist in each account
-        
-        # For this example, we'll simulate checking a few accounts
-        # In a real implementation, this would be replaced with actual account data
-        test_accounts = [
-            {"id": "111111111111", "name": "Member Account 1", "status": "ACTIVE"},
-            {"id": "222222222222", "name": "Member Account 2", "status": "ACTIVE"},
-            {"id": "333333333333", "name": "Member Account 3", "status": "SUSPENDED"}
-        ]
-        
-        # Simulate rule existence in accounts
-        # In a real implementation, this would be replaced with actual API calls
-        rule_existence = {
-            "111111111111": {"required-tags": True, "s3-bucket-public-read-prohibited": True},
-            "222222222222": {"required-tags": False, "s3-bucket-public-read-prohibited": True},
-            "333333333333": {"required-tags": False, "s3-bucket-public-read-prohibited": False}
-        }
-        
-        # Check each rule in each active account
-        for rule_name in rule_names:
-            missing_accounts = []
+        # Group delegated admins by account ID to check if the same account is used for both service principals
+        admin_accounts = {}
+        for admin in delegated_admins:
+            admin_id = admin.get('Id', 'Unknown')
+            admin_name = admin.get('Name', 'Unknown')
             
-            for account in test_accounts:
-                if account["status"] != "ACTIVE":
-                    # Skip suspended accounts
-                    continue
+            if admin_id not in admin_accounts:
+                admin_accounts[admin_id] = {
+                    'name': admin_name,
+                    'count': 1
+                }
+            else:
+                admin_accounts[admin_id]['count'] += 1
+        
+        # Check if any of the audit accounts is a delegated administrator
+        audit_account_found = False
+        for audit_account_id in self._audit_accounts:
+            if audit_account_id in admin_accounts:
+                admin_info = admin_accounts[audit_account_id]
+                admin_name = admin_info['name']
+                service_count = admin_info['count']
                 
-                account_id = account["id"]
-                account_name = account["name"]
-                
-                # Check if the rule exists in this account
-                # In a real implementation, this would be an actual API call
-                rule_exists = rule_existence.get(account_id, {}).get(rule_name, False)
-                
-                if not rule_exists:
-                    missing_accounts.append(f"{account_id} ({account_name})")
-            
-            # Create finding for this rule
-            resource_id = f"arn:aws:config:global:{account_id}:config-rule/{rule_name}"
-            
-            if missing_accounts:
-                # Rule is missing in some accounts
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region="global",
-                        account_id=account_id,
-                        resource_id=resource_id,
-                        checked_value=f"Config rule {rule_name} exists in all member accounts",
-                        actual_value=f"Config rule '{rule_name}' is missing in accounts: {', '.join(missing_accounts)}",
-                        remediation=(
-                            f"Create the Config rule '{rule_name}' in the missing accounts using: "
-                            f"aws configservice put-config-rule --config-rule <rule-definition> "
-                            f"--region <region>"
+                # Check if the audit account is delegated for both service principals
+                if service_count == 2:
+                    audit_account_found = True
+                    findings.append(
+                        self.create_finding(
+                            status="PASS",
+                            region="global",
+                            account_id=account_id,
+                            resource_id=f"delegated-admin/{audit_account_id}",
+                            checked_value=f"Delegated administrator is audit account {audit_account_id}",
+                            actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) for both service principals",
+                            remediation="No remediation needed"
                         )
                     )
-                )
-            else:
-                # Rule exists in all accounts
-                findings.append(
-                    self.create_finding(
-                        status="PASS",
-                        region="global",
-                        account_id=account_id,
-                        resource_id=resource_id,
-                        checked_value=f"Config rule {rule_name} exists in all member accounts",
-                        actual_value=f"Config rule '{rule_name}' exists in all member accounts",
-                        remediation="No remediation needed"
+                else:
+                    audit_account_found = True
+                    findings.append(
+                        self.create_finding(
+                            status="WARN",
+                            region="global",
+                            account_id=account_id,
+                            resource_id=f"delegated-admin/{audit_account_id}",
+                            checked_value=f"Delegated administrator is audit account {audit_account_id} for both service principals",
+                            actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) but not for all required service principals",
+                            remediation=(
+                                f"Ensure the audit account is registered as a delegated administrator for both Config service principals:\n"
+                                f"1. aws organizations register-delegated-administrator "
+                                f"--service-principal config.amazonaws.com "
+                                f"--account-id {audit_account_id}\n"
+                                f"2. aws organizations register-delegated-administrator "
+                                f"--service-principal config-multiaccountsetup.amazonaws.com "
+                                f"--account-id {audit_account_id}"
+                            )
+                        )
+                    )
+        
+        # If no audit account is a delegated administrator
+        if not audit_account_found:
+            # List all accounts that are delegated administrators
+            other_admins = []
+            for admin_id, info in admin_accounts.items():
+                other_admins.append(f"{admin_id} ({info['name']})")
+            
+            findings.append(
+                self.create_finding(
+                    status="FAIL",
+                    region="global",
+                    account_id=account_id,
+                    resource_id=f"delegated-admin/none",
+                    checked_value=f"Delegated administrator is audit account {', '.join(self._audit_accounts)}",
+                    actual_value=f"Config delegated administrator(s) {', '.join(other_admins)} are not the audit account {', '.join(self._audit_accounts)}",
+                    remediation=(
+                        f"1. Deregister the current delegated administrator(s).\n"
+                        f"2. Register the audit account as a delegated administrator for both Config service principals:\n"
+                        f"   aws organizations register-delegated-administrator "
+                        f"--service-principal config.amazonaws.com "
+                        f"--account-id {self._audit_accounts[0]}\n"
+                        f"   aws organizations register-delegated-administrator "
+                        f"--service-principal config-multiaccountsetup.amazonaws.com "
+                        f"--account-id {self._audit_accounts[0]}"
                     )
                 )
+            )
         
         return findings

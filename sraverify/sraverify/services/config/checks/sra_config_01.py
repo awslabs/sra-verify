@@ -14,7 +14,7 @@ class SRA_CONFIG_01(ConfigCheck):
         super().__init__()
         self.check_id = "SRA-CONFIG-01"
         self.check_name = "AWS Config recorder is configured in this region"
-        self.account_type = "account"  # This check applies to all account types
+        self.account_type = "application"  
         self.severity = "HIGH"
         self.description = (
             "This check verifies that a configuration recorder exists in the AWS Region. "

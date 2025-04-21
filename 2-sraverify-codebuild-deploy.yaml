@@ -29,52 +29,16 @@ Parameters:
     Description: Comma-separated list of AWS regions to include in the scan
     Default: 'us-east-1,us-east-2,us-west-2'
 
-  MultiAccountScan:
-    Description: 'Set this to true if you want to scan all accounts in your organization. You must have deployed the prerequisite template to provision a role, or specify a different SRAVerifyRole with the appropriate permissions.'
-    Type: String
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Default: 'true'
-
-Conditions:
-  CreateMemberRole: !Equals
-    - !Ref MultiAccountScan
-    - false
-
 Resources:
-  # This is the role that CodeBuild assumes to perform the SRAVerify scan
-  SRAMemberRole:
-    Condition: CreateMemberRole
+  # This is the role that Codebuild uses
+  SRAVerifyCodeBuildServiceRole:
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: Role allows * in resource policy. The role needs broad, read-only privileges to review all resources. Only the CodeBuild role created as part of this solution can assume this role.
+            reason: Star resource required for actions
           - id: W28
-            reason: Resource has an explicit name so SRAVerify can loop through and assume it in each account.
-          - id: W76
-            reason: SPCM for IAM policy is higher than 25 due to managed polices, and additional polices. Each section of the role has a comment with the SRAVerify documentation describing the need for the privileges. 
-    Type: 'AWS::IAM::Role'
-    Properties:
-      RoleName: SRAMemberRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' 
-            Action:
-              - 'sts:AssumeRole'
-            Condition:
-              ArnEquals:
-                aws:PrincipalArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SRAVerifyCodeBuildServiceRole
-      ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/SecurityAudit'
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess'
-
-  # This is the role that Codebuild uses
-  SRAVerifyCodeBuildServiceRole:
+            reason: Explicit name used for role for easy identification. 
     Type: AWS::IAM::Role
     Properties:
       RoleName: SRAVerifyCodeBuildServiceRole
@@ -85,9 +49,9 @@ Resources:
             Principal:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
-        - arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/SRAVerify-Security-Assessment'
       Policies:
         - PolicyName: CodeBuildServiceRolePolicy
           PolicyDocument:
@@ -101,17 +65,34 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub '${bucketSRAVerifyFindings.Arn}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${S3SRASourceBucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${bucketSRAVerifyFindings.Arn}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${S3SRASourceBucket}'
+              - Effect: Allow
+                Action:
                   - sts:AssumeRole
-                Resource: 'arn:aws:iam::*:role/SRAMemberRole'
+                Resource: !Sub 'arn:${AWS::Partition}:iam::*:role/SRAMemberRole'
               - Effect: Allow
                 Action:
                   - organizations:ListAccounts
+                  - organizations:DescribeOrganization
                 Resource: '*'
               - Effect: Allow
                 Action:
                   - ec2:DescribeRegions
                 Resource: '*'
 
+  # S3 bucket for the SRA Verify findings. 
+  # Amazon Q suggests S3 bucket encryption, S3 Object Lock, and S3 Bucket replication. These features are not required for SRA Verify.
+  # amazonq-ignore-next-line
   bucketSRAVerifyFindings:
     Metadata:
       cfn_nag:
@@ -152,6 +133,11 @@ Resources:
 
   # CodeBuild Project
   SRAVerifyCodeBuildProject:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: No KMS keys are specified. This project uses the default AWS managed keys.
     Type: AWS::CodeBuild::Project
     Properties:
       Name: SRAVerify-Security-Assessment
@@ -329,4 +315,96 @@ Resources:
           cache:
             paths:
               - '/root/.cache/pip/**/*'
-          
+
+  # Custom resource to start the CodeBuild job after the CloudFormation template is deployed.
+  CodeBuildStartBuild:
+    Type: Custom::CodeBuildStartBuild
+    Properties:
+      ServiceToken: !GetAtt CodeBuildStartBuildLambda.Arn
+      ProjectName: !Ref SRAVerifyCodeBuildProject
+
+  CodeBuildStartBuildLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: StartBuildInline
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codebuild:StartBuild'
+                Resource: !GetAtt SRAVerifyCodeBuildProject.Arn
+
+  CodeBuildStartBuildLogsGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: CloudWatch Logs protects data at rest using encryption. All log groups are encrypted. By default, the CloudWatch Logs service manages the server-side encryption keys.
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${CodeBuildStartBuildLambda}'
+      RetentionInDays: 7
+
+  CodeBuildStartBuildLambda:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: The CodeBuildStartBuildLambdaRole gives Lambda access to write CloudWatch logs.
+          - id: W89
+            reason: Lambda is not deployed inside of a VPC. The Lambda function is used to start the CodeBuild job as a custom CloudFormation resource.
+          - id: W92
+            reason: Reserved concurrent executions is not set.
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !Sub ${CodeBuildStartBuildLambdaRole.Arn}
+      Timeout: 120
+      Runtime: python3.13
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          from botocore.exceptions import ClientError
+          import cfnresponse
+                    
+          def startBuild(event, context):
+            responseData = {}
+            cb = boto3.client('codebuild')
+            try:
+              print("Starting build...")
+              response = cb.start_build(projectName=event['ResourceProperties']['ProjectName'])
+              responseData['buildID'] = response['build']['id']
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            except ClientError as e:
+              print("Failed to start build")
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, e.response)
+
+          def no_op(event, context):
+            responseData = {}
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+
+          def lambda_handler(event,context):
+            print(event)
+            if event['RequestType'] == 'Create':
+              startBuild(event, context)
+            else:
+              no_op(event,context)

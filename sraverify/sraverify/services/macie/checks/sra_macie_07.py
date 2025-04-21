@@ -16,7 +16,7 @@ class SRA_MACIE_07(MacieCheck):
         self.check_name = "All active member accounts have relationship with delegated admin account enabled"
         self.description = (
             "This check verifies whether all active members accounts of the AWS Organization have Macie member relationship "
-            "enabled with Macie delgated admin account. Amazon Macie is a data security service that discovers sensitive data "
+            "enabled with Macie delegated admin account. Amazon Macie is a data security service that discovers sensitive data "
             "by using machine learning and pattern matching, provides visibility into data security risks, and enables automated "
             "protection against those risks."
         )

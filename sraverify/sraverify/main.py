@@ -1,5 +1,10 @@
 """
 SRA Verify - Security Reference Architecture Verification Tool
+
+This module provides both the library interface and CLI functionality.
+The SRAVerify class implements the core functionality that can be used
+as a library, while the CLI functions use this class to provide the
+command-line interface.
 """
 import argparse
 import datetime
@@ -38,6 +43,190 @@ ALL_CHECKS = {
     # etc.
 }
 
+class SRAVerify:
+    """Main class for SRA Verify functionality."""
+    
+    def __init__(self, profile: Optional[str] = None, role_arn: Optional[str] = None,
+                 regions: Optional[List[str]] = None, session: Optional[Session] = None,
+                 debug: bool = False):
+        """
+        Initialize SRA Verify.
+        
+        Args:
+            profile: AWS profile to use
+            role_arn: ARN of IAM role to assume
+            regions: List of AWS regions to check
+            session: Existing AWS session to use (if provided)
+            debug: Enable debug logging
+        """
+        configure_logging(debug)
+        self.regions = regions
+        self.session = session if session else get_session(profile=profile, role_arn=role_arn)
+        self.progress = None
+        
+    def get_available_checks(self, account_type: str = 'all') -> Dict[str, Dict[str, str]]:
+        """
+        Get all available checks, optionally filtered by account type.
+        
+        Args:
+            account_type: Type of accounts to list checks for ('application', 'audit', 'log-archive', 'management', or 'all')
+            
+        Returns:
+            Dictionary mapping check IDs to check information
+        """
+        checks = {}
+        for check_id, check_class in sorted(ALL_CHECKS.items()):
+            check = check_class()
+            if account_type == 'all' or check.account_type == account_type:
+                checks[check_id] = {
+                    'name': check.check_name,
+                    'service': check.service,
+                    'account_type': check.account_type,
+                    'description': check.description,
+                    'severity': check.severity
+                }
+        return checks
+    
+    def get_available_services(self) -> List[str]:
+        """
+        Get all available services.
+        
+        Returns:
+            List of service names
+        """
+        services = set()
+        for check_class in ALL_CHECKS.values():
+            check = check_class()
+            services.add(check.service)
+        return sorted(list(services))
+    
+    def run_checks(self, account_type: str = 'all', service: Optional[str] = None,
+                  check_id: Optional[str] = None, audit_accounts: Optional[List[str]] = None,
+                  log_archive_accounts: Optional[List[str]] = None,
+                  show_progress: bool = False) -> List[Dict[str, Any]]:
+        """
+        Run security checks.
+        
+        Args:
+            account_type: Type of accounts to check ('application', 'audit', 'log-archive', 'management', or 'all')
+            service: Run checks for a specific service
+            check_id: Run a specific check
+            audit_accounts: List of AWS accounts used for Audit/Security Tooling
+            log_archive_accounts: List of AWS accounts used for Logging
+            show_progress: Whether to show progress bar
+            
+        Returns:
+            List of findings
+        """
+        # Start with all checks or filtered by account type
+        if account_type == 'all':
+            checks_to_run = ALL_CHECKS.copy()
+        else:
+            logger.debug(f"Filtering checks by account type: {account_type}")
+            checks_to_run = {
+                check_id: check_class for check_id, check_class in ALL_CHECKS.items()
+                if check_class().account_type == account_type
+            }
+        
+        # Filter by specific check if provided
+        if check_id:
+            logger.debug(f"Filtering for specific check: {check_id}")
+            if check_id not in ALL_CHECKS:
+                logger.error(f"Check {check_id} not found")
+                return []
+            
+            check = ALL_CHECKS[check_id]()
+            if account_type != 'all' and check.account_type != account_type:
+                logger.error(f"Check {check_id} is for {check.account_type} accounts, but account_type is set to {account_type}")
+                return []
+                
+            checks_to_run = {check_id: ALL_CHECKS[check_id]}
+        
+        # Filter by service if provided
+        if service:
+            logger.debug(f"Filtering checks by service: {service}")
+            service_checks = {}
+            for check_id, check_class in checks_to_run.items():
+                check = check_class()
+                if check.service.lower() == service.lower():
+                    service_checks[check_id] = check_class
+            
+            if not service_checks:
+                logger.error(f"No {account_type} checks found for service {service}")
+                return []
+            
+            checks_to_run = service_checks
+        
+        # Check if there are any checks after filtering
+        if not checks_to_run:
+            logger.error("No checks found with selected filters")
+            return []
+            
+        all_findings = []
+        
+        # Group checks by service for better organization
+        service_checks = {}
+        for check_id, check_class in checks_to_run.items():
+            check = check_class()
+            if check.service not in service_checks:
+                service_checks[check.service] = []
+            service_checks[check.service].append((check_id, check_class))
+        
+        # Set up progress tracking if requested
+        if show_progress:
+            self.progress = ScanProgress(len(checks_to_run))
+        
+        # Run checks by service
+        for service_name, checks in service_checks.items():
+            if self.progress:
+                self.progress.update(service_name)
+            logger.debug(f"Running {len(checks)} checks for service {service_name}")
+
+            for check_id, check_class in checks:
+                logger.debug(f"Initializing check {check_id}")
+                check = check_class()
+                check.initialize(self.session, regions=self.regions)
+                
+                # Pass audit and log archive accounts to the check if it needs them
+                if audit_accounts:
+                    check._audit_accounts = audit_accounts
+                if log_archive_accounts:
+                    check._log_archive_accounts = log_archive_accounts
+                
+                try:
+                    logger.debug(f"Executing check {check_id}: {check.check_name}")
+                    findings = check.execute()
+                    all_findings.extend(findings)
+                    logger.debug(f"Check {check_id} completed with {len(findings)} findings")
+                except Exception as e:
+                    logger.error(f"Error running check {check_id}: {e}", exc_info=True)
+                    # Add a failure finding
+                    all_findings.append({
+                        "CheckId": check_id,
+                        "Status": "ERROR",
+                        "Region": "global",
+                        "Severity": "UNKNOWN",
+                        "Title": f"Error running {check_id}",
+                        "Description": f"An error occurred while running check {check_id}",
+                        "ResourceId": None,
+                        "ResourceType": None,
+                        "AccountId": None,
+                        "CheckedValue": None,
+                        "ActualValue": str(e),
+                        "Remediation": "Check the error message and try again",
+                        "Service": service_name,
+                        "CheckLogic": None,
+                        "AccountType": check.account_type
+                    })
+                
+                if self.progress:
+                    self.progress.increment()
+        
+        if self.progress:
+            self.progress.finish()
+            
+        return all_findings
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -64,204 +253,27 @@ def parse_args():
     return parser.parse_args()
 
 
-def list_checks(account_type='all'):
-    """
-    List all available checks, optionally filtered by account type.
-    
-    Args:
-        account_type: Type of accounts to list checks for ('application', 'audit', 'log-archive', 'management', or 'all')
-    """
-    logger.info("Listing available checks")
-    print("Available checks:")
-    for check_id, check_class in sorted(ALL_CHECKS.items()):
-        check = check_class()
-        if account_type == 'all' or check.account_type == account_type:
-            print(f"  {check_id}: {check.check_name} ({check.service}) [{check.account_type}]")
-
-
-def list_services():
-    """List all available services."""
-    logger.info("Listing available services")
-    services = set()
-    for check_class in ALL_CHECKS.values():
-        check = check_class()
-        services.add(check.service)
-    
-    print("Available services:")
-    for service in sorted(services):
-        print(f"  {service}")
-
-
-def get_checks_to_run(args) -> Dict[str, Any]:
-    """
-    Determine which checks to run based on command line arguments.
-    
-    Args:
-        args: Command line arguments
-        
-    Returns:
-        Dictionary mapping check IDs to check classes
-    """
-    logger.debug("Determining checks to run based on command line arguments")
-    
-    # Start with all checks or filtered by account type
-    if args.account_type == 'all':
-        checks_to_run = ALL_CHECKS.copy()
-    else:
-        logger.debug(f"Filtering checks by account type: {args.account_type}")
-        checks_to_run = {
-            check_id: check_class for check_id, check_class in ALL_CHECKS.items()
-            if check_class().account_type == args.account_type
-        }
-    
-    # Filter by specific check if provided
-    if args.check:
-        logger.debug(f"Filtering for specific check: {args.check}")
-        if args.check not in ALL_CHECKS:
-            logger.error(f"Check {args.check} not found")
-            sys.exit(1)
-        
-        check = ALL_CHECKS[args.check]()
-        if args.account_type != 'all' and check.account_type != args.account_type:
-            logger.error(f"Check {args.check} is for {check.account_type} accounts, but --account-type is set to {args.account_type}")
-            sys.exit(1)
-            
-        return {args.check: ALL_CHECKS[args.check]}
-    
-    # Filter by service if provided
-    if args.service:
-        logger.debug(f"Filtering checks by service: {args.service}")
-        service_checks = {}
-        for check_id, check_class in checks_to_run.items():
-            check = check_class()
-            if check.service.lower() == args.service.lower():
-                service_checks[check_id] = check_class
-        
-        if not service_checks:
-            logger.error(f"No {args.account_type} checks found for service {args.service}")
-            sys.exit(1)
-        
-        return service_checks
-    
-    # Check if there are any checks after filtering
-    if checks_to_run is None or len(checks_to_run) == 0:
-        logger.error("No checks found with selected filters")
-        sys.exit(1)
-
-    logger.debug(f"Selected {len(checks_to_run)} checks to run")
-    return checks_to_run
-
-
-def run_checks(checks_to_run: Dict[str, Any], regions: Optional[List[str]] = None, 
-               profile: Optional[str] = None, role_arn: Optional[str] = None,
-               session: Optional[Session] = None, audit_accounts: Optional[List[str]] = None,
-               log_archive_accounts: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """
-    Run the specified checks.
-    
-    Args:
-        checks_to_run: Dictionary mapping check IDs to check classes
-        regions: List of AWS regions to check
-        profile: AWS profile to use
-        role_arn: ARN of IAM role to assume
-        session: Existing AWS session to use (if provided)
-        audit_accounts: List of AWS accounts used for Audit/Security Tooling
-        log_archive_accounts: List of AWS accounts used for Logging
-        
-    Returns:
-        List of findings
-    """
-    all_findings = []
-    # Use provided session or create a new one
-    if session:
-        aws_session = session
-    else:
-        logger.debug("Creating new AWS session")
-        aws_session = get_session(profile=profile, role_arn=role_arn)
-    
-    logger.debug(f"Running {len(checks_to_run)} checks")
-    if regions:
-        logger.debug(f"Checking regions: {', '.join(regions)}")
-    
-    # Group checks by service for better progress reporting
-    service_checks = {}
-    for check_id, check_class in checks_to_run.items():
-        check = check_class()
-        if check.service not in service_checks:
-            service_checks[check.service] = []
-        service_checks[check.service].append((check_id, check_class))
-    
-    # Set up progress tracking
-    progress = ScanProgress(len(checks_to_run))
-    
-    # Run checks by service
-    for service, checks in service_checks.items():
-        progress.update(service)
-        logger.debug(f"Running {len(checks)} checks for service {service}")
-
-        for check_id, check_class in checks:
-            logger.debug(f"Initializing check {check_id}")
-            check = check_class()
-            check.initialize(aws_session, regions=regions)
-            
-            # Pass audit and log archive accounts to the check if it needs them
-            if audit_accounts:
-                check._audit_accounts = audit_accounts
-            if log_archive_accounts:
-                check._log_archive_accounts = log_archive_accounts
-            
-            try:
-                logger.debug(f"Executing check {check_id}: {check.check_name}")
-                findings = check.execute()
-                all_findings.extend(findings)
-                logger.debug(f"Check {check_id} completed with {len(findings)} findings")
-            except Exception as e:
-                logger.error(f"Error running check {check_id}: {e}", exc_info=True)
-                # Add a failure finding
-                all_findings.append({
-                    "CheckId": check_id,
-                    "Status": "ERROR",
-                    "Region": "global",
-                    "Severity": "UNKNOWN",
-                    "Title": f"Error running {check_id}",
-                    "Description": f"An error occurred while running check {check_id}",
-                    "ResourceId": None,
-                    "ResourceType": None,
-                    "AccountId": None,
-                    "CheckedValue": None,
-                    "ActualValue": str(e),
-                    "Remediation": "Check the error message and try again",
-                    "Service": service,
-                    "CheckLogic": None,
-                    "AccountType": check.account_type
-                })
-            
-            progress.increment()
-    
-    progress.finish()
-    logger.debug(f"All checks completed with {len(all_findings)} total findings")
-    return all_findings
-
-
 def main():
     """Main entry point."""
     args = parse_args()
     
-    # Configure logging based on debug flag
-    configure_logging(args.debug)
+    # Create SRAVerify instance
+    regions = [r.strip() for r in args.regions.split(',')] if args.regions else None
+    sra = SRAVerify(profile=args.profile, role_arn=args.role, regions=regions, debug=args.debug)
     
     if args.list_checks:
-        list_checks(args.account_type)
+        checks = sra.get_available_checks(args.account_type)
+        print("Available checks:")
+        for check_id, info in checks.items():
+            print(f"  {check_id}: {info['name']} ({info['service']}) [{info['account_type']}]")
         return
     
     if args.list_services:
-        list_services()
+        services = sra.get_available_services()
+        print("Available services:")
+        for service in services:
+            print(f"  {service}")
         return
-    
-    # Parse regions if provided
-    regions = None
-    if args.regions:
-        regions = [r.strip() for r in args.regions.split(',')]
     
     # Parse audit accounts if provided
     audit_accounts = None
@@ -275,40 +287,32 @@ def main():
         log_archive_accounts = [a.strip() for a in args.log_archive_account.split(',')]
         logger.debug(f"Using log archive accounts: {', '.join(log_archive_accounts)}")
     
-    # Determine which checks to run
-    checks_to_run = get_checks_to_run(args)
-    
     # Generate output filename with timestamp if not specified
     output_file = args.output
     if output_file == 'sraverify_findings.csv':
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         output_file = f"sraverify_findings_{timestamp}.csv"
     
-    # Create session for banner display and reuse for checks
-    logger.debug("Creating AWS session")
-    session = get_session(profile=args.profile, role_arn=args.role)
-    
     # Display banner with session information
     print_banner(
         profile=args.profile or 'default', 
-        region=session.region_name, 
-        session=session,
+        region=sra.session.region_name, 
+        session=sra.session,
         regions=regions,
         account_type=args.account_type,
-        checks_count=len(checks_to_run),
+        checks_count=len(sra.get_available_checks(args.account_type)),
         output_file=output_file,
         role=args.role
     )
     
-    # Run checks (reusing the session we already created)
-    findings = run_checks(
-        checks_to_run, 
-        regions, 
-        args.profile, 
-        args.role, 
-        session=session,
+    # Run checks
+    findings = sra.run_checks(
+        account_type=args.account_type,
+        service=args.service,
+        check_id=args.check,
         audit_accounts=audit_accounts,
-        log_archive_accounts=log_archive_accounts
+        log_archive_accounts=log_archive_accounts,
+        show_progress=True
     )
     
     # Write output
@@ -327,6 +331,7 @@ def main():
     print(f"  · Fail: {fail_count}")
     print(f"  · Error: {error_count}")
     print(f"  · Output: {output_file}")
+
 
 if __name__ == "__main__":
     main()

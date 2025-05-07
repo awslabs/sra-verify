@@ -63,7 +63,7 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
 2. To download the template, open AWS CloudShell in the **Audit account** and enter the following command.
 
     ```bash
-    wget https://raw.githubusercontent.com/awslabs/aws-sraverify/main/2-sraverify-codebuild-prowler.yaml
+    wget https://raw.githubusercontent.com/awslabs/aws-sraverify/main/2-sraverify-codebuild.yaml
     ```
 
 3. Use the following command to deploy the template in the Audit account. Update the following parameters
@@ -165,7 +165,7 @@ You can monitor the progress from the [CodeBuild console](https://console.aws.am
 
 To review the results, follow these steps.
 
-1. Navigate to the Amazon S3 console in the account you deployed Prowler.
+1. Navigate to the Amazon S3 console in the account you deployed SRA Verify.
 
 2. Select the bucket that contains **bucketsraverifyfindings**
 

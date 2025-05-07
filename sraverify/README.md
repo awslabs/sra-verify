@@ -113,6 +113,25 @@ classDiagram
     GuardDutyCheck --> GuardDutyClient :  uses
 ```
 
+## Data Flow
+SRA Verify performs security assessments by analyzing AWS service configurations and generating findings.
+
+```ascii
+[AWS Account] --> [SRAVerify Tool] --> [Security Checks] --> [Findings]
+     |               |                       |                    |
+     |               |                       |                    |
+     v               v                       v                    v
+[IAM Roles] --> [AWS Session] --> [Service Clients] --> [CSV Reports]
+```
+
+Component Interactions:
+- SRAVerify assumes IAM roles in target accounts
+- Executes service-specific security checks
+- Generates findings with status and remediation steps
+- Outputs results to CSV format
+- Supports parallel execution across accounts
+- Handles regional service availability
+
 ### Best Practices for Check Implementation
 
 1. Meaningful IDs: Use a consistent naming scheme (SRA-XX-#) where XX is a service abbreviation
@@ -329,3 +348,152 @@ Examples:
 - Check for an organization CloudTrail
 
 When SRA Verify is deployed and run via CodeBuild, management checks will be ran on the management account. Account checks will be ran on each member.
+
+## Library Usage
+### Installation as a Library
+```bash
+ pip install git+https://github.com/yourusername/sraverify.git
+```
+
+### Code Examples
+
+Here's a comprehensive example demonstrating all major features of the SRAVerify library:
+
+```python
+#!/usr/bin/env python3
+"""
+Comprehensive example of using SRA Verify as a library.
+
+This example demonstrates all the major functionality provided by the SRAVerify library,
+including initialization, listing available checks and services, and running checks with
+various filtering options.
+"""
+
+import json
+from typing import Dict, Any
+from sraverify import SRAVerify
+
+# Configuration
+AWS_PROFILE = 'default'  # Change this to your AWS profile if needed
+AWS_REGIONS = ['us-east-1', 'us-west-2']  # Regions to check
+AUDIT_ACCOUNTS = ['123456789012']  # Replace with your audit account IDs
+LOG_ARCHIVE_ACCOUNTS = ['987654321098']  # Replace with your log archive account IDs
+
+def print_section(title: str):
+    """Print a section header."""
+    print("\n" + "=" * 80)
+    print(f" {title} ".center(80, "="))
+    print("=" * 80 + "\n")
+
+def pretty_print(data: Dict[str, Any]):
+    """Print data in a formatted way."""
+    print(json.dumps(data, indent=2))
+
+def main():
+    """Run the comprehensive example."""
+    print_section("SRAVerify Library Usage Example")
+    
+    # Initialize SRAVerify with configuration
+    print("Initializing SRAVerify...")
+    sra = SRAVerify(
+        profile=AWS_PROFILE,
+        regions=AWS_REGIONS,
+        debug=True  # Enable debug logging
+    )
+    print("✓ SRAVerify initialized\n")
+
+    # Example 1: List all available services
+    print_section("Available Services")
+    services = sra.get_available_services()
+    print("Services that can be checked:")
+    for service in services:
+        print(f"  • {service}")
+
+    # Example 2: List all available checks
+    print_section("Available Checks")
+    all_checks = sra.get_available_checks()
+    print("All available security checks:")
+    for check_id, info in all_checks.items():
+        print(f"\n{check_id}:")
+        print(f"  Name: {info['name']}")
+        print(f"  Service: {info['service']}")
+        print(f"  Account Type: {info['account_type']}")
+        print(f"  Severity: {info['severity']}")
+
+    # Example 3: Get checks for specific account types
+    print_section("Account-Specific Checks")
+    account_types = ['management', 'audit', 'log-archive', 'application']
+    
+    for acc_type in account_types:
+        checks = sra.get_available_checks(account_type=acc_type)
+        print(f"\nChecks for {acc_type} accounts:")
+        for check_id, info in checks.items():
+            print(f"  • {check_id}: {info['name']}")
+
+    # Example 4: Run all checks
+    print_section("Running All Checks")
+    print("Running all security checks...")
+    findings = sra.run_checks(
+        account_type='all',
+        audit_accounts=AUDIT_ACCOUNTS,
+        log_archive_accounts=LOG_ARCHIVE_ACCOUNTS,
+        show_progress=True
+    )
+    
+    # Process and display findings
+    pass_count = sum(1 for f in findings if f['Status'] == 'PASS')
+    fail_count = sum(1 for f in findings if f['Status'] == 'FAIL')
+    error_count = sum(1 for f in findings if f['Status'] == 'ERROR')
+    
+    print("\nResults Summary:")
+    print(f"  Total Findings: {len(findings)}")
+    print(f"  Pass: {pass_count}")
+    print(f"  Fail: {fail_count}")
+    print(f"  Error: {error_count}")
+
+    # Example 5: Run checks for specific service
+    print_section("Service-Specific Checks")
+    print("Running GuardDuty checks...")
+    gd_findings = sra.run_checks(
+        service='GuardDuty',
+        show_progress=True
+    )
+    
+    print(f"\nGuardDuty Findings: {len(gd_findings)}")
+    for finding in gd_findings:
+        print(f"\nCheck: {finding['CheckId']}")
+        print(f"Status: {finding['Status']}")
+        print(f"Title: {finding['Title']}")
+        if finding['Status'] == 'FAIL':
+            print(f"Remediation: {finding['Remediation']}")
+
+    # Example 6: Run specific check
+    print_section("Single Check Example")
+    print("Running specific CloudTrail check (SRA-CT-1)...")
+    ct_findings = sra.run_checks(
+        check_id='SRA-CT-1',
+        show_progress=True
+    )
+    
+    print("\nCloudTrail Check Results:")
+    pretty_print(ct_findings)
+
+if __name__ == "__main__":
+    main()
+```
+
+This example demonstrates:
+1. Initializing SRA Verify with custom configuration
+2. Listing available services
+3. Listing all security checks
+4. Getting account-specific checks
+5. Running all security checks
+6. Running service-specific checks
+7. Running individual checks
+
+To use this example:
+1. Save it as `example_sraverify.py`
+2. Update the AWS configuration variables at the top
+3. Run with `python example_sraverify.py`
+
+The example demonstrates all major features of the library with proper error handling and formatted output.

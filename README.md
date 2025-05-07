@@ -6,32 +6,6 @@ The tool performs automated security checks across multiple AWS services includi
 
 >Note: SRA Verify contains checks for several services, but may not contain a check for every consideration of the AWS Security Reference Architecture. Review the [AWS Prescriptive Guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/welcome.html) for more information on AWS Security Reference Architecture.
 
-## Repository Structure
-```
-├── README.md
-├── 1-sraverify-member-roles.yaml    # CloudFormation template for member roles
-├── 2-sraverify-codebuild-deploy.yaml # CloudFormation template for CodeBuild
-├── s3_sync_command.sh               # Script to sync files to S3
-├── sraverify/                       # Main package directory
-│   ├── setup.py                     # Package setup configuration
-│   ├── requirements.txt             # Dependencies
-│   ├── readme.md                    # SRA Verify Core / Library readme
-│   ├── sraverify/                   # Core code
-│   │   ├── main.py                  # Entry point
-│   │   ├── core/                    # Core functionality
-│   │   │   ├── check.py             # Base security check class
-│   │   │   ├── session.py           # AWS session management
-│   │   │   └── logging.py           # Logging configuration
-│   │   ├── services/                # Service-specific modules
-│   │   │   ├── guardduty/           # GuardDuty checks
-│   │   │   │   ├── base.py          # GuardDuty base check class
-│   │   │   │   ├── client.py        # GuardDuty API client
-│   │   │   │   └── checks/          # Individual GuardDuty checks
-│   │   │   └── cloudtrail/          # CloudTrail checks
-│   │   └── utils/                   # Utility functions
-│   └── tests/                       # Test cases
-```
-
 ## Usage Instructions
 SRA Verify is designed to run in AWS CodeBuild in the Organization Audit (Security Tooling) account.  
 

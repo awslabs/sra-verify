@@ -175,8 +175,7 @@ Resources:
               commands:
                 - echo "Setting up SRAVerify environment..."
                 - pip3 install --upgrade pip
-                - pip3 install boto3 click pandas
-                - yum install -y parallel
+                - pip3 install boto3 pandas
                 - aws s3 sync s3://$S3_SRA_SOURCE_BUCKET/ .
                 - pip install ./sraverify
           

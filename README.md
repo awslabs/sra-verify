@@ -25,7 +25,7 @@ In this step you will deploy the SRAMemberRole to each account in your AWS Organ
 4. To download the CloudFormation template, enter the following command.
 
     ```bash
-    wget https://raw.githubusercontent.com/awslabs/aws-sraverify/main/1-sraverify-member-roles.yaml
+    wget https://raw.githubusercontent.com/awslabs/sra-verify/refs/heads/main/1-sraverify-member-roles.yaml
     ```
 
 5. Deploy the CloudFormation template via CloudFormation StackSets. Update the following parameters:
@@ -53,6 +53,18 @@ In this step you will deploy the SRAMemberRole to each account in your AWS Organ
     --region <region>
     ```
 
+7. StackSets don't deploy to the Organization management account. To deploy the role to the Organization management account, deploy the CloudFormation template separately in the management account.
+   - Replace **\<aws-account-id\>** with the account ID you will run SRA Verify from.
+
+    ```bash
+    aws cloudformation deploy \
+    --template-file 1-sraverify-member-roles.yaml \
+    --stack-name sraverify-member-roles \
+    --parameter-overrides \
+    SRAVerifyAccountID=<aws-account-id>
+    --capabilities CAPABILITY_NAMED_IAM
+    ```
+
 #### Step 2: Deploy the SRA Verify solution
 In this step, you will deploy the Cloudformation template to create the CodeBuild job to run SRA Verify. After the CloudFormation template is deployed, the CodeBuild job will be automatically started.
 
@@ -63,7 +75,7 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
 2. To download the template, open AWS CloudShell in the **Audit account** and enter the following command.
 
     ```bash
-    wget https://raw.githubusercontent.com/awslabs/aws-sraverify/main/2-sraverify-codebuild.yaml
+    wget https://raw.githubusercontent.com/awslabs/sra-verify/refs/heads/main/2-sraverify-codebuild-deploy.yaml
     ```
 
 3. Use the following command to deploy the template in the Audit account. Update the following parameters
@@ -71,7 +83,7 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
    - Replace **\<log-account-id\>** with the log archive account id
 
     ```bash
-    aws cloudformation deploy 
+    aws cloudformation deploy \
     --template-file 2-sraverify-codebuild-deploy.yaml \
     --stack-name sra \
     --parameter-overrides \

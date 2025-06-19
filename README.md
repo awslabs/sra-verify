@@ -75,7 +75,6 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
     --template-file 2-sraverify-codebuild-deploy.yaml \
     --stack-name sra \
     --parameter-overrides \
-    S3SRASourceBucket=sra-source-schiefj \
     AuditAccountID=<audit-account-id> \
     LogArchiveAccountID=<log-account-id> \
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM

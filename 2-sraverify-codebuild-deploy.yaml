@@ -2,13 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'CloudFormation template to deploy SRAVerify CodeBuild project'
 
 Parameters:
-  
-  # Using a bucket for SRA source until published on GitHub
-  # ./s3_sync_command.sh
-  S3SRASourceBucket:
-    Type: String
-    Description: S3 bucket name for storing SRA files
-  
+
   AuditAccountID:
     Type: String
     Description: The AWS account ID for the audit account. If you have multiple audit accounts, use a comma separated list.
@@ -69,13 +63,11 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub '${bucketSRAVerifyFindings.Arn}/*'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${S3SRASourceBucket}/*'
               - Effect: Allow
                 Action:
                   - s3:ListBucket
                 Resource:
                   - !Sub '${bucketSRAVerifyFindings.Arn}'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${S3SRASourceBucket}'
               - Effect: Allow
                 Action:
                   - sts:AssumeRole
@@ -158,8 +150,6 @@ Resources:
             Value: !Ref IncludeRegions
           - Name: S3_SRA_RESULTS_BUCKET
             Value: !Ref bucketPolicySRAVerifyFindings
-          - Name: S3_SRA_SOURCE_BUCKET
-            Value: !Ref S3SRASourceBucket
           - Name: AWS_AUDIT_ACCOUNTS
             Value: !Ref AuditAccountID
           - Name: AWS_LOG_ARCHIVE_ACCOUNTS
@@ -176,8 +166,8 @@ Resources:
                 - echo "Setting up SRAVerify environment..."
                 - pip3 install --upgrade pip
                 - pip3 install boto3 pandas
-                - aws s3 sync s3://$S3_SRA_SOURCE_BUCKET/ .
-                - pip install ./sraverify
+                - git clone https://github.com/awslabs/sra-verify.git
+                - pip install ./sra-verify
           
             build:
               commands:

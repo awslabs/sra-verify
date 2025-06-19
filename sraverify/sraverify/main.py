@@ -8,7 +8,6 @@ command-line interface.
 """
 import argparse
 import datetime
-import sys
 from boto3 import Session
 from typing import Dict, List, Any, Optional
 

@@ -165,7 +165,7 @@ Resources:
               commands:
                 - echo "Setting up SRAVerify environment..."
                 - pip3 install --upgrade pip
-                - pip3 install boto3 click pandas
+                - pip3 install boto3 pandas
                 - git clone https://github.com/awslabs/sra-verify.git
                 - pip install ./sra-verify
           

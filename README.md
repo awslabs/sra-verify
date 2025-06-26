@@ -30,6 +30,7 @@ In this step you will deploy the SRAMemberRole to each account in your AWS Organ
 
 5. Deploy the CloudFormation template via CloudFormation StackSets. Update the following parameters:
    - Replace **\<aws-account-id\>** with the account ID you will run SRA Verify from.
+   - Replace **\<caller\>** with **DELEGATED_ADMIN** if you are deploying the StackSet from the CloudFormation delegated admin. If you are deploying the CloudFormation from the management account, replace with **SELF**.
 
     ```bash
     aws cloudformation create-stack-set --template-body file://1-sraverify-member-roles.yaml \
@@ -38,19 +39,22 @@ In this step you will deploy the SRAMemberRole to each account in your AWS Organ
     --auto-deployment Enabled=true,RetainStacksOnAccountRemoval=false \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameters ParameterKey=SRAVerifyAccountID,ParameterValue=<aws-account-id> \
-    --region <region>
+    --region <region> \
+    --call-as <caller>
     ```
 
 6. Use the following command to create stack instances for each account in your organization. You can target a specific OU, or the root OU. Update the following parameters:
    - Replace **\<root-ou\>** with the [organization root ID](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_org_details.html#orgs_view_root). 
    - Replace **\<region\>** with the Region you want to deploy the template to.
+   - Replace **\<caller\>** with **DELEGATED_ADMIN** if you are deploying the StackSet from the CloudFormation delegated admin. If you are deploying the CloudFormation from the management account, replace with **SELF**.
 
     ```bash
     aws cloudformation create-stack-instances --stack-set-name sraverify-member-roles \
     --deployment-targets OrganizationalUnitIds='["<root-ou>"]' \
     --regions '["<region>"]' \
     --operation-preferences FailureTolerancePercentage=100,MaxConcurrentPercentage=100 \
-    --region <region>
+    --region <region> \
+    --call-as <caller>
     ```
 
 7. StackSets don't deploy to the Organization management account. To deploy the role to the Organization management account, deploy the CloudFormation template separately in the management account.
@@ -61,7 +65,7 @@ In this step you will deploy the SRAMemberRole to each account in your AWS Organ
     --template-file 1-sraverify-member-roles.yaml \
     --stack-name sraverify-member-roles \
     --parameter-overrides \
-    SRAVerifyAccountID=<aws-account-id>
+    SRAVerifyAccountID=<aws-account-id> \
     --capabilities CAPABILITY_NAMED_IAM
     ```
 
@@ -92,10 +96,27 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
     ```
 
-### Run SRA Verify locally
+## Review the results
+After the solution is deployed, a Lambda function starts the CodeBuild project. After the CodeBuild project is finished building, the SRA Verify results will be uploaded to the created Amazon S3 bucket.
+
+You can monitor the progress from the [CodeBuild console](https://console.aws.amazon.com/codesuite/codebuild/projects).
+
+To review the results, follow these steps.
+
+1. Navigate to the Amazon S3 console in the account you deployed SRA Verify.
+
+2. Select the bucket that contains **bucketsraverifyfindings**
+
+3. Choose the **sraverify** folder.
+
+4. Choose the **reports** folder.
+
+5. Select the **consolidated** or **raw** folder.
+
+## Run SRA Verify locally
 In this step, you will run SRA Verify locally. Running locally is useful to run a specific test or the tests for a specific account type. You will have to manage credentials into each account.
 
-#### Step 1: Download and run SRA Verify
+### Step 1: Download and run SRA Verify
 In this step you will clone the Github repository and run the tool.
 
 1. Clone the repository with the following command
@@ -168,20 +189,3 @@ In this step you will clone the Github repository and run the tool.
    sraverify --check SRA-CT-1 --regions us-east-1
    ```
 
-## Review the results
-
-After the solution is deployed, a Lambda function starts the CodeBuild project. After the CodeBuild project is finished building, the SRA Verify results will be uploaded to the created Amazon S3 bucket.
-
-You can monitor the progress from the [CodeBuild console](https://console.aws.amazon.com/codesuite/codebuild/projects).
-
-To review the results, follow these steps.
-
-1. Navigate to the Amazon S3 console in the account you deployed SRA Verify.
-
-2. Select the bucket that contains **bucketsraverifyfindings**
-
-3. Choose the **sraverify** folder.
-
-4. Choose the **reports** folder.
-
-5. Select the **consolidated** or **raw** folder.

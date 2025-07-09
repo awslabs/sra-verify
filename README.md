@@ -113,6 +113,28 @@ To review the results, follow these steps.
 
 5. Select the **consolidated** or **raw** folder.
 
+6. Download the CSV file and review the findings. 
+
+### Review the results with the dashboard
+You can use the SRA Verify dashboard to get a summary of the findings.
+
+1. In the S3 console under s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/, select **sra-verify-dashboard.html** and choose **Open**.
+2. In the S3 console at the same location, select the **csv** file and choose **Actions**, **Share with a presigned URL**.
+   >Note: Do not share your presigned URL with anyone. A presigned URL uses security credentials to grant time-limited permission to download objects. The URL can be entered in a browser or used by a program to download the object. The credentials used by the presigned URL are those of the AWS user who generated the URL. For more information, review [Sharing objects with presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html).
+3. For **Number of minutes**, enter **1**.
+4. In the dashboard, paste the URL that was copied to your clipboard and choose **Load URL**.
+5. Review an example dashboard output in [docs/sra-verify-dashboard-example.png](/docs/sra-verify-dashboard-example.png)
+
+### Review the results with generative AI
+You can use generative AI to further summarize your findings.
+
+1. In the dashboard, select **Copy generative AI prompt**. This will copy a markdown formatted version of the findings and example prompt to your clipboard.
+2. Paste the prompt into a generative AI chat. 
+   >Note: The copied prompt will contain your organizations findings. Consider your organization's security policies before pasting the prompt into a generative AI tool.
+3. To use Amazon Bedrock, follow [Generate responses in the console using playgrounds](https://docs.aws.amazon.com/bedrock/latest/userguide/playgrounds.html) in the Amazon Bedrock user guide.
+4. Review an example generative AI chat output in [docs/sra-verify-generative-ai-example.md](/docs/sra-verify-generative-ai-example.md)
+
+
 ## Run SRA Verify locally
 In this step, you will run SRA Verify locally. Running locally is useful to run a specific test or the tests for a specific account type. You will have to manage credentials into each account.
 

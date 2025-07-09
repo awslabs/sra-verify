@@ -295,6 +295,8 @@ Resources:
                 - echo "Uploading SRAVerify results to S3..."
                 - aws s3 cp /tmp/sraverify-consolidated/csv/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/ --recursive
                 - aws s3 cp /tmp/sraverify-consolidated/raw/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/raw/ --recursive
+                - echo "Copying dashboard to S3..."
+                - aws s3 cp $CODEBUILD_SRC_DIR/sra-verify/sra-verify-dashboard.html s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/sra-verify-dashboard.html
           
           artifacts:
             files:

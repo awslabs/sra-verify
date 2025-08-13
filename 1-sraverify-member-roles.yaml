@@ -31,6 +31,28 @@ Resources:
                 aws:PrincipalArn: !Sub arn:${AWS::Partition}:iam::${SRAVerifyAccountID}:role/SRAVerifyCodeBuildServiceRole
       ManagedPolicyArns:
         - !Ref SRAVerifyLeastPrivilege
+        - !Ref SRAVerifyCheckPermissions
+
+  SRAVerifyCheckPermissions:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Resource has an explicit name for documentation.
+          - id: W13
+            reason: SRA Verify needs read only * resource to evaluate configuration against SRA best practices.
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: SRAVerifyCheckPermissions
+      Description: Permissions for actions in check.py
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AccountPermissions
+          Effect: Allow
+          Action:
+          - account:GetAccountInformation
+          Resource: '*'
 
   # This policy is automatically generated from generate_iam_policy.py by extracting the boto3 calls used.
   SRAVerifyLeastPrivilege:

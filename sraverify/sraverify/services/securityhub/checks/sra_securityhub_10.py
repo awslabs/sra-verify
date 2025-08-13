@@ -33,14 +33,13 @@ class SRA_SECURITYHUB_10(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
             # Get organization configuration in this specific region
             org_config = self.get_organization_configuration(region)
             
-            resource_id = f"securityhub:organization-configuration/{account_id}"
+            resource_id = f"securityhub:organization-configuration/{self.account_id}"
             
             # Check if AutoEnable is set to true
             auto_enable = org_config.get('AutoEnable', False)
@@ -50,7 +49,6 @@ class SRA_SECURITYHUB_10(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="Security Hub is set to auto-enable for new member accounts",
                         actual_value=f"AutoEnable is set to false in region {region}",
@@ -67,7 +65,6 @@ class SRA_SECURITYHUB_10(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="Security Hub is set to auto-enable for new member accounts",
                         actual_value=f"AutoEnable is set to true in region {region}",

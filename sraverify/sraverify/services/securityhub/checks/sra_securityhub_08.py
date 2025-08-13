@@ -35,7 +35,6 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -45,7 +44,7 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
             # Get Security Hub members
             securityhub_members = self.get_security_hub_members(region)
             
-            resource_id = f"securityhub:members/{account_id}/{region}"
+            resource_id = f"securityhub:members/{self.account_id}/{region}"
             
             # Create sets of account IDs for comparison
             active_org_account_ids = set()
@@ -63,7 +62,7 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
                 audit_account_id = self._audit_accounts[0]
             else:
                 # If no audit account is provided, assume the current account is the audit account
-                audit_account_id = account_id
+                audit_account_id = self.account_id
             
             # Remove the audit account from the list of active organization accounts
             # since the audit account is the Security Hub admin and not a member
@@ -79,7 +78,6 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="All active organization accounts are Security Hub members",
                         actual_value=(
@@ -101,7 +99,6 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="All active organization accounts are Security Hub members",
                         actual_value=(

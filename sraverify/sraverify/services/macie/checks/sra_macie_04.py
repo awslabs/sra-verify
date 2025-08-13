@@ -31,7 +31,6 @@ class SRA_MACIE_04(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get classification export configuration using the base class method with caching
@@ -43,8 +42,7 @@ class SRA_MACIE_04(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="KMS encryption for S3 bucket",
                         actual_value="Failed to retrieve Macie classification export configuration",
                         remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie GetClassificationExportConfiguration API"
@@ -59,13 +57,12 @@ class SRA_MACIE_04(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="KMS encryption for S3 bucket",
                         actual_value="Macie findings export configuration not found",
                         remediation=(
                             f"Configure Macie to export findings to a S3 bucket with KMS encryption in region {region} using the AWS CLI command: "
-                            f"aws macie2 put-classification-export-configuration --s3-destination bucketName=your-bucket-name,kmsKeyArn=arn:aws:kms:{region}:{account_id}:key/your-key-id --region {region}"
+                            f"aws macie2 put-classification-export-configuration --s3-destination bucketName=your-bucket-name,kmsKeyArn=arn:aws:kms:{region}:{self.account_id}:key/your-key-id --region {region}"
                         )
                     )
                 )
@@ -78,13 +75,12 @@ class SRA_MACIE_04(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="KMS encryption for S3 bucket",
                         actual_value="S3 destination not found in Macie findings export configuration",
                         remediation=(
                             f"Configure Macie to export findings to a S3 bucket with KMS encryption in region {region} using the AWS CLI command: "
-                            f"aws macie2 put-classification-export-configuration --s3-destination bucketName=your-bucket-name,kmsKeyArn=arn:aws:kms:{region}:{account_id}:key/your-key-id --region {region}"
+                            f"aws macie2 put-classification-export-configuration --s3-destination bucketName=your-bucket-name,kmsKeyArn=arn:aws:kms:{region}:{self.account_id}:key/your-key-id --region {region}"
                         )
                     )
                 )
@@ -100,8 +96,7 @@ class SRA_MACIE_04(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="KMS encryption for S3 bucket",
                         actual_value=f"Macie findings exported to S3 bucket '{bucket_name}' are encrypted using KMS key '{kms_key_arn}' in region {region}",
                         remediation="No remediation needed"
@@ -112,13 +107,12 @@ class SRA_MACIE_04(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="KMS encryption for S3 bucket",
                         actual_value=f"Macie findings exported to S3 bucket '{bucket_name}' are not encrypted using KMS in region {region}",
                         remediation=(
                             f"Configure Macie to export findings to a S3 bucket with KMS encryption in region {region} using the AWS CLI command: "
-                            f"aws macie2 put-classification-export-configuration --s3-destination bucketName={bucket_name},kmsKeyArn=arn:aws:kms:{region}:{account_id}:key/your-key-id --region {region}"
+                            f"aws macie2 put-classification-export-configuration --s3-destination bucketName={bucket_name},kmsKeyArn=arn:aws:kms:{region}:{self.account_id}:key/your-key-id --region {region}"
                         )
                     )
                 )

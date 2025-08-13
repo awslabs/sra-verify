@@ -33,7 +33,6 @@ class SRA_CLOUDTRAIL_12(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get delegated administrators for CloudTrail
         # This will use the cache if available or make API calls if needed
@@ -44,8 +43,7 @@ class SRA_CLOUDTRAIL_12(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="At least one delegated administrator for CloudTrail",
                     actual_value="No delegated administrator configured for CloudTrail",
                     remediation=(
@@ -69,7 +67,6 @@ class SRA_CLOUDTRAIL_12(CloudTrailCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value="At least one delegated administrator for CloudTrail",
                     actual_value=f"CloudTrail has delegated administrator: {admin_id} ({admin_name})",

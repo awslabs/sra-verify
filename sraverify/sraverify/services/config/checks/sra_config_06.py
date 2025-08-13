@@ -37,7 +37,6 @@ class SRA_CONFIG_06(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check if Log Archive account ID is provided
         if not hasattr(self, '_log_archive_accounts') or not self._log_archive_accounts:
@@ -45,7 +44,6 @@ class SRA_CONFIG_06(ConfigCheck):
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     checked_value="S3 bucket owned by Log Archive account",
                     actual_value="Log Archive Account ID not provided",
@@ -63,7 +61,6 @@ class SRA_CONFIG_06(ConfigCheck):
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                     actual_value="No regions specified for check",
@@ -83,8 +80,7 @@ class SRA_CONFIG_06(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/default",
+                        resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/default",
                         checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                         actual_value="No delivery channel found in this region",
                         remediation=(
@@ -107,8 +103,7 @@ class SRA_CONFIG_06(ConfigCheck):
                         self.create_finding(
                             status="FAIL",
                             region=region,
-                            account_id=account_id,
-                            resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}",
+                            resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/{channel_name}",
                             checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                             actual_value="No S3 bucket configured for delivery channel",
                             remediation=(
@@ -144,8 +139,7 @@ class SRA_CONFIG_06(ConfigCheck):
                         self.create_finding(
                             status="PASS",
                             region=region,
-                            account_id=account_id,
-                            resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}",
+                            resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/{channel_name}",
                             checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                             actual_value=f"Delivery channel S3 bucket '{bucket_name}' is owned by the Log Archive account {log_archive_account}",
                             remediation="No remediation needed"
@@ -173,8 +167,7 @@ class SRA_CONFIG_06(ConfigCheck):
                             self.create_finding(
                                 status="PASS",
                                 region=region,
-                                account_id=account_id,
-                                resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}",
+                                resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/{channel_name}",
                                 checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                                 actual_value=f"Delivery channel S3 bucket '{bucket_name}' is owned by the Log Archive account {log_archive_account} (cross-region bucket)",
                                 remediation="No remediation needed"
@@ -186,8 +179,7 @@ class SRA_CONFIG_06(ConfigCheck):
                             self.create_finding(
                                 status="FAIL",
                                 region=region,
-                                account_id=account_id,
-                                resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/{channel_name}",
+                                resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/{channel_name}",
                                 checked_value=f"S3 bucket owned by Log Archive account {log_archive_account}",
                                 actual_value=f"Delivery channel S3 bucket '{bucket_name}' does not appear to be owned by the Log Archive account {log_archive_account} based on the bucket name",
                                 remediation=(

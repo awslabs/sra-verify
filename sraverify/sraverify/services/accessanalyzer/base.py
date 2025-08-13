@@ -97,7 +97,7 @@ class AccessAnalyzerCheck(SecurityCheck):
         Returns:
             Dictionary containing delegated administrator details or empty dict if none
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         
         # Check class-level cache
         if account_id in AccessAnalyzerCheck._delegated_admin_cache:

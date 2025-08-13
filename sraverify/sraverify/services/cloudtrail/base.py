@@ -140,7 +140,7 @@ class CloudTrailCheck(SecurityCheck):
             logger.warning("No regions specified")
             return []
         
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []

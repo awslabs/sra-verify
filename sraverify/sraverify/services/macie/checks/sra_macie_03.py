@@ -35,7 +35,6 @@ class SRA_MACIE_03(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check if log archive accounts are provided
         log_archive_accounts = []
@@ -48,8 +47,7 @@ class SRA_MACIE_03(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="S3 bucket in Log Archive account",
                         actual_value="Log Archive account ID not provided",
                         remediation="Provide the Log Archive account IDs using --log-archive-account flag"
@@ -67,8 +65,7 @@ class SRA_MACIE_03(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="S3 bucket in Log Archive account",
                         actual_value="Failed to retrieve Macie classification export configuration",
                         remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie GetClassificationExportConfiguration API"
@@ -83,8 +80,7 @@ class SRA_MACIE_03(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="S3 bucket in Log Archive account",
                         actual_value="Macie findings export configuration not found",
                         remediation=(
@@ -102,8 +98,7 @@ class SRA_MACIE_03(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="S3 bucket in Log Archive account",
                         actual_value="S3 destination not found in Macie findings export configuration",
                         remediation=(
@@ -133,8 +128,7 @@ class SRA_MACIE_03(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="S3 bucket in Log Archive account",
                         actual_value=f"Macie findings are exported to S3 bucket '{bucket_name}' in Log Archive account {log_archive_account_found} in region {region}",
                         remediation="No remediation needed"
@@ -145,8 +139,7 @@ class SRA_MACIE_03(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="S3 bucket in Log Archive account",
                         actual_value=f"Macie findings are exported to S3 bucket '{bucket_name}' which is not in any of the specified Log Archive accounts {', '.join(log_archive_accounts)} in region {region}",
                         remediation=(

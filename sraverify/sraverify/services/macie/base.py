@@ -58,7 +58,7 @@ class MacieCheck(SecurityCheck):
             Dictionary containing findings publication configuration
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._findings_publication_cache:
@@ -90,7 +90,7 @@ class MacieCheck(SecurityCheck):
             Dictionary containing classification export configuration
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._export_configuration_cache:
@@ -122,7 +122,7 @@ class MacieCheck(SecurityCheck):
             List of delegated administrators
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._macie_delegated_admin_cache:
@@ -154,7 +154,7 @@ class MacieCheck(SecurityCheck):
             List of Macie members
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._macie_members_cache:
@@ -186,7 +186,7 @@ class MacieCheck(SecurityCheck):
             List of AWS Organization members
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._org_members_cache:
@@ -218,7 +218,7 @@ class MacieCheck(SecurityCheck):
             Dictionary containing Macie organization configuration
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._auto_enable_cache:
@@ -249,7 +249,7 @@ class MacieCheck(SecurityCheck):
             Dictionary containing Macie administrator account information
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._macie_delegated_admin_cache:

@@ -33,7 +33,6 @@ class SRA_SECURITYHUB_02(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -46,14 +45,13 @@ class SRA_SECURITYHUB_02(SecurityHubCheck):
             auto_enable_standards = org_config.get('AutoEnableStandards', 'NONE')
             auto_enable_new_controls = auto_enable_standards == 'NEW_CONTROLS'
             
-            resource_id = f"securityhub:configuration/{account_id}"
+            resource_id = f"securityhub:configuration/{self.account_id}"
             
             if not auto_enable_new_controls:
                 findings.append(
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="AutoEnableStandards: NEW_CONTROLS",
                         actual_value=f"Security hub is not setup to auto enable new standards [AutoEnableStandards: {auto_enable_standards}] in region {region}",
@@ -70,7 +68,6 @@ class SRA_SECURITYHUB_02(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="AutoEnableStandards: NEW_CONTROLS",
                         actual_value=f"Security hub is setup to auto enable new standards [AutoEnableStandards: {auto_enable_standards}] in region {region}",

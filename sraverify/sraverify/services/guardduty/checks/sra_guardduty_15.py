@@ -28,9 +28,7 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
         Returns:
             List of findings
         """
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # Check all regions
         for region in self.regions:
             detector_id = self.get_detector_id(region)
@@ -40,7 +38,6 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Unable to access GuardDuty in this region", 
                     remediation="Check permissions or if GuardDuty is supported in this region"
@@ -60,7 +57,6 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"{error_code} {error_message}", 
                         remediation="Verify that GuardDuty is the delegated admin in this Region and run the check again."
@@ -69,7 +65,6 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="ERROR", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"Error accessing GuardDuty organization configuration: {error_code}", 
                         remediation="Check permissions and AWS Organizations configuration"
@@ -83,7 +78,6 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value="GuardDuty AutoEnableOrganizationMembers is set to ALL", 
                     remediation=""
@@ -92,7 +86,6 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value=f"GuardDuty AutoEnableOrganizationMembers is set to {auto_enable_org_members}", 
                     remediation=f"Set AutoEnableOrganizationMembers to ALL in {region} to ensure GuardDuty is enabled for all organization members"

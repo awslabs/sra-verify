@@ -26,9 +26,7 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
         Returns:
             List of findings
         """
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # Check all regions
         for region in self.regions:
             detector_id = self.get_detector_id(region)
@@ -38,7 +36,6 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Unable to access GuardDuty in this region", 
                     remediation="Check permissions or if GuardDuty is supported in this region"
@@ -72,7 +69,6 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"Runtime protection is enabled: {', '.join(enabled_features)}", 
                         remediation=""
@@ -81,7 +77,6 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value="Runtime protection is not enabled", 
                         remediation=f"Enable Runtime Monitoring for GuardDuty in {region} to monitor operating system-level, networking, and file events in workloads"
@@ -90,7 +85,6 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value="Unable to retrieve detector details", 
                     remediation="Check GuardDuty permissions and configuration"

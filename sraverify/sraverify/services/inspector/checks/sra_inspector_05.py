@@ -31,7 +31,6 @@ class SRA_INSPECTOR_05(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -45,7 +44,6 @@ class SRA_INSPECTOR_05(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/delegated-admin",
                         checked_value="Inspector delegated admin account is configured",
                         actual_value="No delegated admin account is configured",
@@ -61,7 +59,6 @@ class SRA_INSPECTOR_05(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/delegated-admin",
                         checked_value="Inspector delegated admin account is configured",
                         actual_value=f"Delegated admin account {delegated_admin_id} is configured",

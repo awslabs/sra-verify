@@ -27,9 +27,7 @@ class SRA_GUARDDUTY_13(GuardDutyCheck):
         Returns:
             List of findings
         """
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # Check all regions
         for region in self.regions:
             detector_id = self.get_detector_id(region)
@@ -39,7 +37,6 @@ class SRA_GUARDDUTY_13(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Unable to access GuardDuty in this region", 
                     remediation="Check permissions or if GuardDuty is supported in this region"
@@ -56,20 +53,18 @@ class SRA_GUARDDUTY_13(GuardDutyCheck):
                 admin_account_status = admin_accounts[0].get('AdminStatus', 'Unknown')
                 
                 # Check if the admin account is different from the current account and is enabled
-                if admin_account_id != account_id and admin_account_status == 'ENABLED':
+                if admin_account_id != self.account_id and admin_account_status == 'ENABLED':
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"GuardDuty service administration is delegated to account {admin_account_id}", 
                         remediation=""
                     ))
-                elif admin_account_id == account_id:
+                elif admin_account_id == self.account_id:
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value="GuardDuty service administration is delegated to the management account itself", 
                         remediation=f"Delegate GuardDuty administration to a security account other than the management account in {region}"
@@ -78,7 +73,6 @@ class SRA_GUARDDUTY_13(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"GuardDuty service administration is delegated to account {admin_account_id} but status is {admin_account_status}", 
                         remediation=f"Check the status of the delegated administrator account in {region}"
@@ -88,7 +82,6 @@ class SRA_GUARDDUTY_13(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value="GuardDuty service administration is not delegated to any account", 
                     remediation=f"Delegate GuardDuty administration to a security account using the Organizations service in {region}"

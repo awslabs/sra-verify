@@ -34,14 +34,12 @@ class SRA_CONFIG_01(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         if not self.regions:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     actual_value="No regions specified for check",
                     remediation="Specify at least one region when running the check"
@@ -63,13 +61,12 @@ class SRA_CONFIG_01(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"arn:aws:config:{region}:{account_id}:configurationRecorder/default",
+                        resource_id=f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/default",
                         actual_value="No configuration recorder found in this region",
                         remediation=(
                             f"1. Check if the AWS Config service-linked role exists: aws iam get-role --role-name AWSServiceRoleForConfig. "
                             f"2. If the role doesn't exist, create it: aws iam create-service-linked-role --aws-service-name config.amazonaws.com. "
-                            f"3. Create a configuration recorder in {region}: aws configservice put-configuration-recorder --configuration-recorder name=default,roleARN=arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig --recording-group allSupported=true,includeGlobalResourceTypes=true --region {region}"
+                            f"3. Create a configuration recorder in {region}: aws configservice put-configuration-recorder --configuration-recorder name=default,roleARN=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig --recording-group allSupported=true,includeGlobalResourceTypes=true --region {region}"
                         )
                     )
                 )
@@ -79,7 +76,7 @@ class SRA_CONFIG_01(ConfigCheck):
                 recorder_role_arn = recorders[0].get('roleARN', '')
                 
                 # Construct the Config Recorder ARN
-                recorder_arn = f"arn:aws:config:{region}:{account_id}:configurationRecorder/{recorder_name}"
+                recorder_arn = f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/{recorder_name}"
                 
                 # Find the status for this recorder
                 recorder_status = next((status for status in recorder_statuses if status.get('name') == recorder_name), None)
@@ -90,7 +87,6 @@ class SRA_CONFIG_01(ConfigCheck):
                         self.create_finding(
                             status="PASS",
                             region=region,
-                            account_id=account_id,
                             resource_id=recorder_arn,
                             actual_value=f"Configuration recorder '{recorder_name}' exists and is recording",
                             remediation="No remediation needed"
@@ -102,7 +98,6 @@ class SRA_CONFIG_01(ConfigCheck):
                         self.create_finding(
                             status="FAIL",
                             region=region,
-                            account_id=account_id,
                             resource_id=recorder_arn,
                             actual_value=f"Configuration recorder '{recorder_name}' exists but is not recording",
                             remediation=(
@@ -117,7 +112,6 @@ class SRA_CONFIG_01(ConfigCheck):
                         self.create_finding(
                             status="FAIL",
                             region=region,
-                            account_id=account_id,
                             resource_id=recorder_arn,
                             actual_value=f"Configuration recorder '{recorder_name}' exists but status could not be determined",
                             remediation=(

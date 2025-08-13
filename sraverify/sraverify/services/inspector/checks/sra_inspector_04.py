@@ -31,7 +31,6 @@ class SRA_INSPECTOR_04(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get account status using the base class method with caching
@@ -46,14 +45,13 @@ class SRA_INSPECTOR_04(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"inspector2/{account_id}/lambda",
+                        resource_id=f"inspector2/{self.account_id}/lambda",
                         checked_value="Inspector Lambda scanning: ENABLED, LambdaCode scanning: ENABLED",
                         actual_value=f"Inspector Lambda scanning: {lambda_status if lambda_status else 'NOT_ENABLED'}, "
                                     f"LambdaCode scanning: {lambda_code_status if lambda_code_status else 'NOT_ENABLED'}",
                         remediation=(
                             "Enable Amazon Inspector Lambda and LambdaCode scanning for your account using the AWS Console or CLI command: "
-                            f"aws inspector2 enable --account-ids {account_id} --resource-types LAMBDA LAMBDA_CODE --region {region}"
+                            f"aws inspector2 enable --account-ids {self.account_id} --resource-types LAMBDA LAMBDA_CODE --region {region}"
                         )
                     )
                 )
@@ -62,8 +60,7 @@ class SRA_INSPECTOR_04(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"inspector2/{account_id}/lambda",
+                        resource_id=f"inspector2/{self.account_id}/lambda",
                         checked_value="Inspector Lambda scanning: ENABLED, LambdaCode scanning: ENABLED",
                         actual_value=f"Inspector Lambda scanning: {lambda_status}, LambdaCode scanning: {lambda_code_status}",
                         remediation="No remediation needed"

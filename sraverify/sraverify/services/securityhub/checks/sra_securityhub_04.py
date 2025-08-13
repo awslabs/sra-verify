@@ -39,7 +39,6 @@ class SRA_SECURITYHUB_04(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # This is a global check, so we'll use a single region but report it as global
         region = self.regions[0] if self.regions else "us-east-1"
@@ -52,17 +51,16 @@ class SRA_SECURITYHUB_04(SecurityHubCheck):
         config_type = org_configuration.get('ConfigurationType')
         status = org_configuration.get('Status')
         
-        resource_id = f"securityhub:hub/{account_id}"
+        resource_id = f"securityhub:hub/{self.account_id}"
         
         if config_type != 'CENTRAL' or status != 'ENABLED':
             findings.append(
                 self.create_finding(
                     status="FAIL",
                     region="global",  # Report as global
-                    account_id=account_id,
-                    resource_id=resource_id,
+                                        resource_id=resource_id,
                     checked_value="OrganizationConfiguration Configuration Type is Central and Status Enabled",
-                    actual_value=f"Security Hub delegated admin {account_id} is not setup properly to view findings for associated member accounts via ConfigurationType:{config_type} and Status:{status}",
+                    actual_value=f"Security Hub delegated admin {self.account_id} is not setup properly to view findings for associated member accounts via ConfigurationType:{config_type} and Status:{status}",
                     remediation=(
                         "Configure Security Hub with central configuration. In the Security Hub delegated admin account, "
                         "navigate to Settings > General > Configuration and select 'Centrally manage Security Hub across all accounts in your organization'. "
@@ -76,10 +74,9 @@ class SRA_SECURITYHUB_04(SecurityHubCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",  # Report as global
-                    account_id=account_id,
-                    resource_id=resource_id,
+                                        resource_id=resource_id,
                     checked_value="OrganizationConfiguration Configuration Type is Central and Status Enabled",
-                    actual_value=f"Security Hub delegated admin {account_id} is setup properly to view findings for associated member accounts via ConfigurationType:{config_type} and Status:{status}",
+                    actual_value=f"Security Hub delegated admin {self.account_id} is setup properly to view findings for associated member accounts via ConfigurationType:{config_type} and Status:{status}",
                     remediation="No remediation needed"
                 )
             )

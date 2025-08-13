@@ -34,14 +34,13 @@ class SRA_SECURITYHUB_09(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
             # Get Security Hub members
             securityhub_members = self.get_security_hub_members(region)
             
-            resource_id = f"securityhub:members/{account_id}/{region}"
+            resource_id = f"securityhub:members/{self.account_id}/{region}"
             
             # Check if there are any members
             if not securityhub_members:
@@ -49,7 +48,6 @@ class SRA_SECURITYHUB_09(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="All Security Hub member accounts have Enabled status",
                         actual_value=f"No Security Hub member accounts found in region {region}",
@@ -72,7 +70,6 @@ class SRA_SECURITYHUB_09(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="All Security Hub member accounts have Enabled status",
                         actual_value=(
@@ -93,7 +90,6 @@ class SRA_SECURITYHUB_09(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="All Security Hub member accounts have Enabled status",
                         actual_value=f"All {len(securityhub_members)} Security Hub member accounts have Enabled status in region {region}",

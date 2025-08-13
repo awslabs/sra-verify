@@ -30,9 +30,7 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
         Returns:
             List of findings
         """
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # Get the audit account ID from the _audit_accounts list
         # This is populated by main.py from the CLI arguments
         if not self._audit_accounts:
@@ -41,7 +39,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Audit account ID not provided", 
                     remediation="Run sraverify with --audit-account parameter"
@@ -61,7 +58,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Unable to access GuardDuty in this region", 
                     remediation="Check permissions or if GuardDuty is supported in this region"
@@ -81,7 +77,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="ERROR", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"This check must be run from the organization management account", 
                         remediation="Run this check from the AWS Organizations management account"
@@ -90,7 +85,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="ERROR", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"Error accessing GuardDuty organization information: {error_code}", 
                         remediation="Check permissions and AWS Organizations configuration"
@@ -109,7 +103,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"GuardDuty delegated admin account is the audit account ({audit_account_id})", 
                         remediation=""
@@ -118,7 +111,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"GuardDuty delegated admin account ({admin_account_id}) is not the audit account ({audit_account_id})", 
                         remediation=f"Delegate GuardDuty administration to the audit account ({audit_account_id}) in {region}"
@@ -127,7 +119,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"GuardDuty delegated admin is the audit account but status is {admin_account_status}", 
                         remediation=f"Check the status of the delegated administrator account in {region}"
@@ -137,7 +128,6 @@ class SRA_GUARDDUTY_14(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value="GuardDuty service administration is not delegated to any account", 
                     remediation=f"Delegate GuardDuty administration to the audit account ({audit_account_id}) using the Organizations service in {region}"

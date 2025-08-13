@@ -32,7 +32,6 @@ class SRA_MACIE_06(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check if audit accounts are provided
         audit_accounts = []
@@ -45,8 +44,7 @@ class SRA_MACIE_06(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="Administrator account is Audit account",
                         actual_value="Audit Account ID not provided",
                         remediation="Provide the Audit account IDs using --audit-account flag"
@@ -64,8 +62,7 @@ class SRA_MACIE_06(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="Administrator account is Audit account",
                         actual_value=f"No administrator account found for Macie in region {region}",
                         remediation=(
@@ -85,8 +82,7 @@ class SRA_MACIE_06(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="Administrator account is Audit account",
                         actual_value=f"Administrator account found for Macie in region {region} but status is not Enabled: {relation_status}",
                         remediation=(
@@ -103,8 +99,7 @@ class SRA_MACIE_06(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/administrator/{admin_account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/administrator/{admin_account_id}/{region}",
                         checked_value="Administrator account is Audit account",
                         actual_value=f"Macie administrator account {admin_account_id} is one of the specified Audit accounts in region {region}",
                         remediation="No remediation needed"
@@ -115,8 +110,7 @@ class SRA_MACIE_06(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/administrator/{admin_account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/administrator/{admin_account_id}/{region}",
                         checked_value="Administrator account is Audit account",
                         actual_value=f"Macie administrator account {admin_account_id} is not one of the specified Audit accounts ({', '.join(audit_accounts)}) in region {region}",
                         remediation=(

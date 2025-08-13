@@ -32,7 +32,6 @@ class SRA_S3_04(S3Check):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get public access block configuration using the base class method
         # This will use the cache if available or make API calls if needed
@@ -44,13 +43,12 @@ class SRA_S3_04(S3Check):
                 self.create_finding(
                     status="FAIL",
                     region="global",  # S3 public access block is a global setting
-                    account_id=account_id,
-                    resource_id=account_id,
+                    resource_id=self.account_id,
                     checked_value="BlockPublicPolicy: true",
                     actual_value="No public access block configuration found",
                     remediation=(
                         "Enable S3 Block Public Access at the account level using the AWS CLI command: "
-                        f"aws s3control put-public-access-block --account-id {account_id} "
+                        f"aws s3control put-public-access-block --account-id {self.account_id} "
                         "--public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,"
                         "BlockPublicPolicy=true,RestrictPublicBuckets=true"
                     )
@@ -65,8 +63,7 @@ class SRA_S3_04(S3Check):
                 self.create_finding(
                     status="PASS",
                     region="global",  # S3 public access block is a global setting
-                    account_id=account_id,
-                    resource_id=account_id,
+                    resource_id=self.account_id,
                     checked_value="BlockPublicPolicy: true",
                     actual_value="BlockPublicPolicy setting is true",
                     remediation="No remediation needed"
@@ -77,13 +74,12 @@ class SRA_S3_04(S3Check):
                 self.create_finding(
                     status="FAIL",
                     region="global",  # S3 public access block is a global setting
-                    account_id=account_id,
-                    resource_id=account_id,
+                    resource_id=self.account_id,
                     checked_value="BlockPublicPolicy: true",
                     actual_value="BlockPublicPolicy setting is false",
                     remediation=(
                         "Enable S3 Block Public Policy at the account level using the AWS CLI command: "
-                        f"aws s3control put-public-access-block --account-id {account_id} "
+                        f"aws s3control put-public-access-block --account-id {self.account_id} "
                         "--public-access-block-configuration BlockPublicPolicy=true"
                     )
                 )

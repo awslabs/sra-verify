@@ -34,7 +34,6 @@ class SRA_SECURITYHUB_03(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # We only need to check one region for this
         region = self.regions[0]
@@ -45,7 +44,7 @@ class SRA_SECURITYHUB_03(SecurityHubCheck):
         # Get organization admin accounts
         org_admin_accounts = self.get_organization_admin_accounts(region)
         
-        resource_id = f"delegated-admin/{account_id}"
+        resource_id = f"delegated-admin/{self.account_id}"
         
         # Check if there are any delegated administrators
         if not delegated_admins:
@@ -56,7 +55,6 @@ class SRA_SECURITYHUB_03(SecurityHubCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value="Security Hub delegated administrator matches organization admin account",
                     actual_value=actual_value,
@@ -80,7 +78,6 @@ class SRA_SECURITYHUB_03(SecurityHubCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value="Security Hub delegated administrator matches organization admin account",
                     actual_value=actual_value,
@@ -108,7 +105,6 @@ class SRA_SECURITYHUB_03(SecurityHubCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value="Security Hub delegated administrator matches organization admin account",
                     actual_value=f"{delegated_admin_value} matches {org_admin_value}",
@@ -120,7 +116,6 @@ class SRA_SECURITYHUB_03(SecurityHubCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value="Security Hub delegated administrator matches organization admin account",
                     actual_value=f"{delegated_admin_value} does not match {org_admin_value}",

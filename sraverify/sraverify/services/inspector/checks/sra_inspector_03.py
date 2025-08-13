@@ -31,7 +31,6 @@ class SRA_INSPECTOR_03(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get account status using the base class method with caching
@@ -45,13 +44,12 @@ class SRA_INSPECTOR_03(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"inspector2/{account_id}/ecr",
+                        resource_id=f"inspector2/{self.account_id}/ecr",
                         checked_value="Inspector ECR scanning: ENABLED",
                         actual_value=f"Inspector ECR scanning: {ecr_status if ecr_status else 'NOT_ENABLED'}",
                         remediation=(
                             "Enable Amazon Inspector ECR scanning for your account using the AWS Console or CLI command: "
-                            f"aws inspector2 enable --account-ids {account_id} --resource-types ECR --region {region}"
+                            f"aws inspector2 enable --account-ids {self.account_id} --resource-types ECR --region {region}"
                         )
                     )
                 )
@@ -60,8 +58,7 @@ class SRA_INSPECTOR_03(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"inspector2/{account_id}/ecr",
+                        resource_id=f"inspector2/{self.account_id}/ecr",
                         checked_value="Inspector ECR scanning: ENABLED",
                         actual_value=f"Inspector ECR scanning: {ecr_status}",
                         remediation="No remediation needed"

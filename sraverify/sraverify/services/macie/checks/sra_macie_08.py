@@ -31,7 +31,6 @@ class SRA_MACIE_08(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get organization configuration using the base class method with caching
@@ -43,8 +42,7 @@ class SRA_MACIE_08(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="autoEnable: true",
                         actual_value="Failed to retrieve Macie organization configuration",
                         remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie DescribeOrganizationConfiguration API"
@@ -60,8 +58,7 @@ class SRA_MACIE_08(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="autoEnable: true",
                         actual_value=f"Macie AutoEnable configuration is enabled for new member accounts in region {region}",
                         remediation="No remediation needed"
@@ -72,8 +69,7 @@ class SRA_MACIE_08(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="autoEnable: true",
                         actual_value=f"Macie AutoEnable configuration is not enabled for new member accounts in region {region}",
                         remediation=(

@@ -33,14 +33,13 @@ class SRA_SECURITYHUB_11(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
             # Get organization configuration in this specific region
             org_config = self.get_organization_configuration(region)
             
-            resource_id = f"securityhub:member-quota/{account_id}"
+            resource_id = f"securityhub:member-quota/{self.account_id}"
             
             # Check if MemberAccountLimitReached is false
             limit_reached = org_config.get('MemberAccountLimitReached', True)
@@ -50,7 +49,6 @@ class SRA_SECURITYHUB_11(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="Security Hub has not hit member account limit",
                         actual_value=f"Security Hub has hit member account limit in region {region}",
@@ -65,7 +63,6 @@ class SRA_SECURITYHUB_11(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="Security Hub has not hit member account limit",
                         actual_value=f"Security Hub has not hit member account limit in region {region}",

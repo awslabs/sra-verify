@@ -34,7 +34,6 @@ class SRA_INSPECTOR_07(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -57,7 +56,7 @@ class SRA_INSPECTOR_07(InspectorCheck):
             if not audit_accounts and delegated_admin_id:
                 audit_accounts = [delegated_admin_id]
             elif not audit_accounts:
-                audit_accounts = [account_id]
+                audit_accounts = [self.account_id]
             
             # Remove audit accounts from the list of accounts to check
             accounts_to_check = org_account_ids - set(audit_accounts)
@@ -86,7 +85,6 @@ class SRA_INSPECTOR_07(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/organization/members",
                         checked_value="All active organization accounts (except audit) have Inspector enabled",
                         actual_value=f"The following accounts do not have Inspector enabled in {region}: {', '.join(missing_accounts)}",
@@ -101,7 +99,6 @@ class SRA_INSPECTOR_07(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/organization/members",
                         checked_value="All active organization accounts (except audit) have Inspector enabled",
                         actual_value=f"All {len(accounts_to_check)} active organization accounts (except audit) have Inspector enabled in {region}",

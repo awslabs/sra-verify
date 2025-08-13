@@ -30,7 +30,6 @@ class SRA_MACIE_05(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get Macie administrator account using the base class method with caching
@@ -42,8 +41,7 @@ class SRA_MACIE_05(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="Administrator account for Macie",
                         actual_value=f"No administrator account found for Macie in region {region}",
                         remediation=(
@@ -63,8 +61,7 @@ class SRA_MACIE_05(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/administrator/{admin_account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/administrator/{admin_account_id}/{region}",
                         checked_value="Administrator account for Macie",
                         actual_value=f"Macie has an administrator account: {admin_account_id} with status: {relation_status} in region {region}",
                         remediation="No remediation needed"
@@ -75,8 +72,7 @@ class SRA_MACIE_05(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="Administrator account for Macie",
                         actual_value=f"Administrator account found for Macie in region {region} but status is not Enabled: {relation_status}",
                         remediation=(

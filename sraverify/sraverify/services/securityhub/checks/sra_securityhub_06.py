@@ -34,7 +34,6 @@ class SRA_SECURITYHUB_06(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # This check only needs to run in one region since it's an organization-wide setting
         region = self.regions[0] if self.regions else "us-east-1"
@@ -57,14 +56,13 @@ class SRA_SECURITYHUB_06(SecurityHubCheck):
             org_admin_id = admin.get('Id')
             break
         
-        resource_id = f"delegated-admin/{account_id}"
+        resource_id = f"delegated-admin/{self.account_id}"
         
         if not sh_admin_id or not org_admin_id:
             findings.append(
                 self.create_finding(
                     status="FAIL",
                     region=region,
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value=(
                         "aws organizations list-delegated-administrators --service-principal securityhub.amazonaws.com - "
@@ -84,7 +82,6 @@ class SRA_SECURITYHUB_06(SecurityHubCheck):
                 self.create_finding(
                     status="FAIL",
                     region=region,
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value=(
                         "aws organizations list-delegated-administrators --service-principal securityhub.amazonaws.com - "
@@ -106,7 +103,6 @@ class SRA_SECURITYHUB_06(SecurityHubCheck):
                 self.create_finding(
                     status="PASS",
                     region=region,
-                    account_id=account_id,
                     resource_id=resource_id,
                     checked_value="Security Hub delegated administrator matches organization admin account",
                     actual_value=f"Delegated admin account {org_admin_id} matches Security Hub admin account {sh_admin_id}",

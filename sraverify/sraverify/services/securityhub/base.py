@@ -58,7 +58,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             List of enabled standards or None if Security Hub is not enabled
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []
@@ -112,7 +112,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             Administrator account information
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return {}
@@ -147,7 +147,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             Organization configuration
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return {}
@@ -182,7 +182,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             List of enabled product ARNs
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []
@@ -217,7 +217,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             List of delegated administrators
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []
@@ -252,7 +252,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             List of organization admin accounts
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []
@@ -287,7 +287,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             List of organization accounts
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []
@@ -322,7 +322,7 @@ class SecurityHubCheck(SecurityCheck):
         Returns:
             List of Security Hub member accounts
         """
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         if not account_id:
             logger.warning("Could not determine account ID")
             return []

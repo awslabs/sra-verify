@@ -51,7 +51,6 @@ class SRA_CONFIG_07(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get delegated administrators for both Config service principals
         delegated_admins = self.get_delegated_administrators()
@@ -62,7 +61,6 @@ class SRA_CONFIG_07(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id="delegated-admin/none",
                     checked_value="Delegated administrator exists for Config service",
                     actual_value="No delegated administrator found for Config service",
@@ -110,7 +108,6 @@ class SRA_CONFIG_07(ConfigCheck):
                         self.create_finding(
                             status="PASS",
                             region="global",
-                            account_id=account_id,
                             resource_id=f"delegated-admin/{admin_id}",
                             checked_value="Delegated administrator exists for Config service",
                             actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) for both service principals",
@@ -123,7 +120,6 @@ class SRA_CONFIG_07(ConfigCheck):
                         self.create_finding(
                             status="WARN",
                             region="global",
-                            account_id=account_id,
                             resource_id=f"delegated-admin/{admin_id}",
                             checked_value="Delegated administrator exists for all Config service principals",
                             actual_value=f"Config service has delegated administrator set to account {admin_id} ({admin_name}) but not for all required service principals",
@@ -148,7 +144,6 @@ class SRA_CONFIG_07(ConfigCheck):
                 self.create_finding(
                     status="WARN",
                     region="global",
-                    account_id=account_id,
                     resource_id=f"delegated-admin/{','.join(admin_accounts.keys())}",
                     checked_value="Delegated administrator exists for all Config service principals",
                     actual_value=f"Config service has delegated administrators ({', '.join(admin_list)}) but not for all required service principals",

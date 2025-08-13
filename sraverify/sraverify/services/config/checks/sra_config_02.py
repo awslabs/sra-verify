@@ -35,14 +35,12 @@ class SRA_CONFIG_02(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         if not self.regions:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     actual_value="No regions specified for check",
                     remediation="Specify at least one region when running the check"
@@ -64,11 +62,10 @@ class SRA_CONFIG_02(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"arn:aws:config:{region}:{account_id}:configurationRecorder/default",
+                        resource_id=f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/default",
                         actual_value="No configuration recorder found in this region",
                         remediation=(
-                            f"First create a configuration recorder in {region} using: aws configservice put-configuration-recorder --configuration-recorder name=default,roleARN=arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig --recording-group allSupported=true,includeGlobalResourceTypes=true --region {region}. "
+                            f"First create a configuration recorder in {region} using: aws configservice put-configuration-recorder --configuration-recorder name=default,roleARN=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig --recording-group allSupported=true,includeGlobalResourceTypes=true --region {region}. "
                             f"Then start the recorder with: aws configservice start-configuration-recorder --configuration-recorder-name default --region {region}"
                         )
                     )
@@ -87,7 +84,7 @@ class SRA_CONFIG_02(ConfigCheck):
                 recorder_arn = recorder_status.get('arn')
             else:
                 # Construct the Config Recorder ARN if not available in status
-                recorder_arn = f"arn:aws:config:{region}:{account_id}:configurationRecorder/{recorder_name}"
+                recorder_arn = f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/{recorder_name}"
             
             if not recorder_status:
                 # No status found for this recorder
@@ -95,7 +92,6 @@ class SRA_CONFIG_02(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=recorder_arn,
                         actual_value=f"Configuration recorder '{recorder_name}' exists but status could not be determined",
                         remediation=(
@@ -117,7 +113,6 @@ class SRA_CONFIG_02(ConfigCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=recorder_arn,
                         actual_value=f"Configuration recorder '{recorder_name}' is running with lastStatus: SUCCESS",
                         remediation="No remediation needed"
@@ -135,7 +130,6 @@ class SRA_CONFIG_02(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=recorder_arn,
                         actual_value=f"Configuration recorder '{recorder_name}' is recording but has issues: {error_info}",
                         remediation=(
@@ -150,7 +144,6 @@ class SRA_CONFIG_02(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=recorder_arn,
                         actual_value=f"Configuration recorder '{recorder_name}' is not recording",
                         remediation=(

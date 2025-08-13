@@ -35,14 +35,12 @@ class SRA_CONFIG_04(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         if not self.regions:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     checked_value="Configuration aggregator exists",
                     actual_value="No regions specified for check",
@@ -68,7 +66,7 @@ class SRA_CONFIG_04(ConfigCheck):
                     org_aggregator_region = region
                     org_aggregator_name = aggregator.get('ConfigurationAggregatorName', 'Unknown')
                     org_aggregator_arn = aggregator.get('ConfigurationAggregatorArn', 
-                                                      f"arn:aws:config:{region}:{account_id}:config-aggregator/{org_aggregator_name}")
+                                                      f"arn:aws:config:{region}:{self.account_id}:config-aggregator/{org_aggregator_name}")
                     break
             
             if found_org_aggregator:
@@ -80,7 +78,6 @@ class SRA_CONFIG_04(ConfigCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",
-                    account_id=account_id,
                     resource_id=org_aggregator_arn,
                     checked_value="Configuration aggregator exists",
                     actual_value=f"Configuration aggregator '{org_aggregator_name}' exists in region {org_aggregator_region} with Source Type \"My Organization\"",
@@ -92,14 +89,13 @@ class SRA_CONFIG_04(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"arn:aws:config:global:{account_id}:config-aggregator/none",
+                    resource_id=f"arn:aws:config:global:{self.account_id}:config-aggregator/none",
                     checked_value="Configuration aggregator exists",
                     actual_value="No organization aggregator found in any region",
                     remediation=(
                         "Create an organization configuration aggregator in at least one region using: aws configservice put-configuration-aggregator "
                         "--configuration-aggregator-name organization-aggregator --organization-aggregation-source "
-                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
+                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
                         "--region <region>"
                     )
                 )

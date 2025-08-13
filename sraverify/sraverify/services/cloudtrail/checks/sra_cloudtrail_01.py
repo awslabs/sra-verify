@@ -36,7 +36,6 @@ class SRA_CLOUDTRAIL_01(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get all trails using the base class method
         # This will use the cache if available or make API calls if needed
@@ -53,13 +52,12 @@ class SRA_CLOUDTRAIL_01(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="IsOrganizationTrail: true",
                     actual_value="No organization trails found",
                     remediation=(
                         "Create an organization trail in the management account using the AWS CLI command: "
-                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{account_id} "
+                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{self.account_id} "
                         f"--is-multi-region-trail --region {self.regions[0] if self.regions else 'us-east-1'}"
                     )
                 )
@@ -75,7 +73,6 @@ class SRA_CLOUDTRAIL_01(CloudTrailCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",
-                    account_id=account_id,
                     resource_id=trail_arn,
                     checked_value="IsOrganizationTrail: true",
                     actual_value=f"Organization trail '{trail_name}' is configured",

@@ -32,7 +32,6 @@ class SRA_INSPECTOR_01(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get account status using the base class method with caching
@@ -46,13 +45,12 @@ class SRA_INSPECTOR_01(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"inspector2/{account_id}",
+                        resource_id=f"inspector2/{self.account_id}",
                         checked_value="Inspector state status: ENABLED",
                         actual_value=f"Inspector state status: {state_status if state_status else 'NOT_ENABLED'}",
                         remediation=(
                             "Enable Amazon Inspector for your account using the AWS Console or CLI command: "
-                            f"aws inspector2 enable --account-ids {account_id} --resource-types EC2 ECR LAMBDA LAMBDA_CODE --region {region}"
+                            f"aws inspector2 enable --account-ids {self.account_id} --resource-types EC2 ECR LAMBDA LAMBDA_CODE --region {region}"
                         )
                     )
                 )
@@ -61,8 +59,7 @@ class SRA_INSPECTOR_01(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"inspector2/{account_id}",
+                        resource_id=f"inspector2/{self.account_id}",
                         checked_value="Inspector state status: ENABLED",
                         actual_value=f"Inspector state status: {state_status}",
                         remediation="No remediation needed"

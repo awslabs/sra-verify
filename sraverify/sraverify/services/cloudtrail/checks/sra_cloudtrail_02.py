@@ -37,7 +37,6 @@ class SRA_CLOUDTRAIL_02(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get organization trails
         org_trails = self.get_organization_trails()
@@ -47,14 +46,13 @@ class SRA_CLOUDTRAIL_02(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="KmsKeyId: not empty",
                     actual_value="No organization trails found",
                     remediation=(
                         "Create an organization trail with KMS encryption in the management account using the AWS CLI command: "
-                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{account_id} "
-                        f"--kms-key-id arn:aws:kms:{self.regions[0] if self.regions else 'us-east-1'}:{account_id}:key/YOUR_KMS_KEY_ID "
+                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{self.account_id} "
+                        f"--kms-key-id arn:aws:kms:{self.regions[0] if self.regions else 'us-east-1'}:{self.account_id}:key/YOUR_KMS_KEY_ID "
                         f"--is-multi-region-trail --region {self.regions[0] if self.regions else 'us-east-1'}"
                     )
                 )
@@ -74,7 +72,6 @@ class SRA_CLOUDTRAIL_02(CloudTrailCheck):
                     self.create_finding(
                         status="PASS",
                         region="global",
-                        account_id=account_id,
                         resource_id=trail_arn,
                         checked_value="KmsKeyId: not empty",
                         actual_value=f"Organization trail '{trail_name}' is encrypted with KMS key: {kms_key_id}",
@@ -87,14 +84,13 @@ class SRA_CLOUDTRAIL_02(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=trail_arn,
                         checked_value="KmsKeyId: not empty",
                         actual_value=f"Organization trail '{trail_name}' is not encrypted with KMS",
                         remediation=(
                             f"Update the organization trail '{trail_name}' to use KMS encryption using the AWS CLI command: "
                             f"aws cloudtrail update-trail --name {trail_name} "
-                            f"--kms-key-id arn:aws:kms:{home_region}:{account_id}:key/YOUR_KMS_KEY_ID "
+                            f"--kms-key-id arn:aws:kms:{home_region}:{self.account_id}:key/YOUR_KMS_KEY_ID "
                             f"--region {home_region}"
                         )
                     )

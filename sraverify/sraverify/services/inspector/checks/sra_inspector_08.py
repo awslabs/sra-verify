@@ -31,7 +31,6 @@ class SRA_INSPECTOR_08(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -46,7 +45,6 @@ class SRA_INSPECTOR_08(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/organization-configuration/ec2",
                         checked_value="Inspector EC2 auto-enable is configured",
                         actual_value=f"EC2 auto-enable is not configured in {region}",
@@ -61,7 +59,6 @@ class SRA_INSPECTOR_08(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/organization-configuration/ec2",
                         checked_value="Inspector EC2 auto-enable is configured",
                         actual_value=f"EC2 auto-enable is configured in {region}",

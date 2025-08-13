@@ -32,7 +32,6 @@ class SRA_EC2_01(EC2Check):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get EBS encryption by default status using the base class method with caching
@@ -44,8 +43,7 @@ class SRA_EC2_01(EC2Check):
                     self.create_finding(
                         status="ERROR",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"account/{account_id}/region/{region}",
+                        resource_id=f"account/{self.account_id}/region/{region}",
                         checked_value="EbsEncryptionByDefault: true",
                         actual_value="Failed to retrieve EBS encryption by default status",
                         remediation="Ensure you have the necessary permissions to call the EC2 GetEbsEncryptionByDefault API"
@@ -61,8 +59,7 @@ class SRA_EC2_01(EC2Check):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"account/{account_id}/region/{region}",
+                        resource_id=f"account/{self.account_id}/region/{region}",
                         checked_value="EbsEncryptionByDefault: true",
                         actual_value=f"EBS encryption by default is enabled in region {region}",
                         remediation="No remediation needed"
@@ -73,8 +70,7 @@ class SRA_EC2_01(EC2Check):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"account/{account_id}/region/{region}",
+                        resource_id=f"account/{self.account_id}/region/{region}",
                         checked_value="EbsEncryptionByDefault: true",
                         actual_value=f"EBS encryption by default is not enabled in region {region}",
                         remediation=(

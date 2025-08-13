@@ -29,9 +29,7 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
         Returns:
             List of findings
         """
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # Check all regions
         for region in self.regions:
             detector_id = self.get_detector_id(region)
@@ -41,7 +39,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Unable to access GuardDuty in this region", 
                     remediation="Check permissions or if GuardDuty is supported in this region"
@@ -61,7 +58,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"{error_code} {error_message}", 
                         remediation="Verify that GuardDuty is the delegated admin in this Region and run the check again."
@@ -70,7 +66,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="ERROR", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"Error accessing GuardDuty organization configuration: {error_code}", 
                         remediation="Check permissions and AWS Organizations configuration"
@@ -119,7 +114,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value="GuardDuty Runtime Monitoring and all its components are configured for auto-enablement for all accounts (AutoEnable=ALL)", 
                     remediation=""
@@ -128,7 +122,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value=f"GuardDuty Runtime Monitoring feature is not configured", 
                     remediation=f"Enable Runtime Monitoring feature and configure auto-enablement for all accounts in {region}"
@@ -137,7 +130,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value=f"GuardDuty Runtime Monitoring is configured with AutoEnable={runtime_monitoring_auto_enable}, but should be ALL", 
                     remediation=f"Configure Runtime Monitoring auto-enablement for all accounts in {region} by setting AutoEnable to ALL"
@@ -146,7 +138,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value=f"GuardDuty Runtime Monitoring is missing the following components: {', '.join(missing_components)}", 
                     remediation=f"Configure all required Runtime Monitoring components in {region}"
@@ -155,7 +146,6 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value=f"GuardDuty Runtime Monitoring has misconfigured components: {', '.join(misconfigured_components)}", 
                     remediation=f"Set AutoEnable to ALL for all Runtime Monitoring components in {region}"

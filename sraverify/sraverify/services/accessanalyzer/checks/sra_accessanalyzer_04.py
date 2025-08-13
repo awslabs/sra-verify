@@ -29,20 +29,17 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
 
     def execute(self) -> List[Dict[str, Any]]:
         """Execute the check for each region."""
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # First, verify this check is running from an audit account - silently add to findings without logging warnings
         if hasattr(self, '_audit_accounts') and self._audit_accounts:
-            if account_id not in self._audit_accounts:
+            if self.account_id not in self._audit_accounts:
                 # Don't log a warning, just add to findings
                 findings.append(
                     self.create_finding(
                         status="ERROR",
-                        region="global",
-                        account_id=account_id,
+                        region="global",                        
                         resource_id="accessanalyzer:account-validation",
-                        actual_value=f"Invalid account for IAM Access Analyzer check: Account {account_id} is not an audit account",
+                        actual_value=f"Invalid account for IAM Access Analyzer check: Account {self.account_id} is not an audit account",
                         remediation=f"This check must be run from an audit account ({', '.join(self._audit_accounts)}). Either run this check from one of the designated audit accounts or update your configuration to specify the correct audit account(s) using the --account-type parameter."
                     )
                 )
@@ -53,8 +50,7 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
             findings.append(
                 self.create_finding(
                     status="ERROR",
-                    region="global",
-                    account_id=account_id,
+                    region="global",                    
                     resource_id=f"accessanalyzer:global",
                     actual_value="IAM Access Analyzer not available in any specified region",
                     remediation="Ensure IAM Access Analyzer service is available in at least one region and you have proper permissions"
@@ -73,8 +69,7 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
             findings.append(
                 self.create_finding(
                     status="FAIL",
-                    region="global",
-                    account_id=account_id,
+                    region="global",                    
                     resource_id="accessanalyzer:global",
                     actual_value="No IAM Access Analyzers found in any region",
                     remediation=(
@@ -101,20 +96,19 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
                     a for a in analyzers 
                     if a.get('type') == 'ORGANIZATION' 
                     and a.get('status') == 'ACTIVE'
-                    and a.get('arn', '').split(':')[4] == account_id
+                    and a.get('arn', '').split(':')[4] == self.account_id
                 ]
                 
                 if org_analyzers:
                     # If we found organization analyzers in this region created by this account, report a PASS
                     found_org_analyzers = True
                     analyzer_names = [a.get('name', 'Unknown') for a in org_analyzers]
-                    analyzer_arn = org_analyzers[0].get('arn', f"arn:aws:access-analyzer:{region}:{account_id}:analyzer/{region}")
+                    analyzer_arn = org_analyzers[0].get('arn', f"arn:aws:access-analyzer:{region}:{self.account_id}:analyzer/{region}")
                     
                     findings.append(
                         self.create_finding(
                             status="PASS",
-                            region=region,
-                            account_id=account_id,
+                            region=region,                            
                             resource_id=analyzer_arn,
                             actual_value=f"Found IAM Access Analyzer with Organization zone of trust in {region}: {', '.join(analyzer_names)}",
                             remediation="No remediation needed"
@@ -125,8 +119,7 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
                     findings.append(
                         self.create_finding(
                             status="FAIL",
-                            region=region,
-                            account_id=account_id,
+                            region=region,                            
                             resource_id="No Organization analyzer found in this region",
                             actual_value=f"No IAM Access Analyzer with Organization zone of trust found in {region}",
                             remediation=f"Create an IAM Access Analyzer with Organization zone of trust in {region} using the AWS CLI command: aws accessanalyzer create-analyzer --analyzer-name org-analyzer --type ORGANIZATION --region {region}"
@@ -137,9 +130,7 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
                 findings.append(
                     self.create_finding(
                         status="ERROR",
-                        region=region,
-                        account_id=account_id,
-                        resource_id="error",
+                        region=region,                        resource_id="error",
                         actual_value=f"Error checking IAM Access Analyzer in {region}: {str(e)}",
                         remediation="Ensure you have proper permissions to list IAM Access Analyzers and that the service is available in this region"
                     )

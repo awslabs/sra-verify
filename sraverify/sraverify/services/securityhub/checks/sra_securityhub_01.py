@@ -32,7 +32,6 @@ class SRA_SECURITYHUB_01(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # If no regions have Security Hub available, return a single failure
         if not self._clients:
@@ -40,7 +39,6 @@ class SRA_SECURITYHUB_01(SecurityHubCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id="securityhub:global",
                     checked_value="Security Hub is enabled",
                     actual_value="Security Hub not available in any region",
@@ -60,8 +58,7 @@ class SRA_SECURITYHUB_01(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"securityhub:service/{account_id}",
+                        resource_id=f"securityhub:service/{self.account_id}",
                         checked_value="Security Hub is enabled",
                         actual_value=f"Security Hub is not enabled in region {region}",
                         remediation=(
@@ -92,10 +89,9 @@ class SRA_SECURITYHUB_01(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"securityhub:standards/{account_id}",
+                        resource_id=f"securityhub:standards/{self.account_id}",
                         checked_value="Security Hub standards are enabled",
-                        actual_value=f"Account {account_id} region {region} has no Security Hub standards enabled",
+                        actual_value=f"Account {self.account_id} region {region} has no Security Hub standards enabled",
                         remediation=(
                             "Enable Security Hub standards for this account. In the Security Hub console, "
                             "navigate to Settings > Standards and enable the required standards. "
@@ -109,10 +105,9 @@ class SRA_SECURITYHUB_01(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"securityhub:standards/{account_id}",
+                        resource_id=f"securityhub:standards/{self.account_id}",
                         checked_value="Security Hub standards are enabled",
-                        actual_value=f"Account {account_id} region {region} has the following standards enabled: {standards_list}",
+                        actual_value=f"Account {self.account_id} region {region} has the following standards enabled: {standards_list}",
                         remediation="No remediation needed"
                     )
                 )

@@ -36,7 +36,6 @@ class SRA_CLOUDTRAIL_08(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get organization trails
         org_trails = self.get_organization_trails()
@@ -46,13 +45,12 @@ class SRA_CLOUDTRAIL_08(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="LatestDeliveryTime: within last 24 hours",
                     actual_value="No organization trails found",
                     remediation=(
                         "Create an organization trail in the management account using the AWS CLI command: "
-                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{account_id} "
+                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{self.account_id} "
                         f"--is-multi-region-trail --region {self.regions[0] if self.regions else 'us-east-1'} && "
                         f"aws cloudtrail start-logging --name org-trail --region {self.regions[0] if self.regions else 'us-east-1'}"
                     )
@@ -92,7 +90,6 @@ class SRA_CLOUDTRAIL_08(CloudTrailCheck):
                             self.create_finding(
                                 status="PASS",
                                 region="global",
-                                account_id=account_id,
                                 resource_id=trail_arn,
                                 checked_value="LatestDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' is publishing logs to S3 bucket '{s3_bucket_name}', latest delivery time: {latest_delivery_time_str}",
@@ -105,7 +102,6 @@ class SRA_CLOUDTRAIL_08(CloudTrailCheck):
                             self.create_finding(
                                 status="FAIL",
                                 region="global",
-                                account_id=account_id,
                                 resource_id=trail_arn,
                                 checked_value="LatestDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' has not published logs to S3 bucket '{s3_bucket_name}' within the last 24 hours, latest delivery time: {latest_delivery_time_str}",
@@ -121,7 +117,6 @@ class SRA_CLOUDTRAIL_08(CloudTrailCheck):
                         self.create_finding(
                             status="FAIL",
                             region="global",
-                            account_id=account_id,
                             resource_id=trail_arn,
                             checked_value="LatestDeliveryTime: within last 24 hours",
                             actual_value=f"Organization trail '{trail_name}' has an invalid delivery time format: {latest_delivery_time_str}, error: {str(e)}",
@@ -137,7 +132,6 @@ class SRA_CLOUDTRAIL_08(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=trail_arn,
                         checked_value="LatestDeliveryTime: within last 24 hours",
                         actual_value=f"Organization trail '{trail_name}' has no record of delivering logs to S3 bucket '{s3_bucket_name}'",

@@ -34,14 +34,12 @@ class SRA_CONFIG_03(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         if not self.regions:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     actual_value="No regions specified for check",
                     remediation="Specify at least one region when running the check"
@@ -63,11 +61,10 @@ class SRA_CONFIG_03(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/default",
+                        resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/default",
                         actual_value="No delivery channel found in this region",
                         remediation=(
-                            f"Create a delivery channel in {region} using: aws configservice put-delivery-channel --delivery-channel name=default,s3BucketName=config-bucket-{account_id},snsTopicARN=arn:aws:sns:{region}:{account_id}:config-notifications --region {region}. "
+                            f"Create a delivery channel in {region} using: aws configservice put-delivery-channel --delivery-channel name=default,s3BucketName=config-bucket-{self.account_id},snsTopicARN=arn:aws:sns:{region}:{self.account_id}:config-notifications --region {region}. "
                             f"Note: You must first create an S3 bucket and SNS topic with appropriate permissions for AWS Config."
                         )
                     )
@@ -80,8 +77,7 @@ class SRA_CONFIG_03(ConfigCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"arn:aws:config:{region}:{account_id}:deliveryChannel/default",
+                        resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/default",
                         actual_value="No delivery channel status found in this region",
                         remediation=(
                             f"Check the delivery channel configuration in {region} and ensure it's properly configured. "
@@ -118,7 +114,6 @@ class SRA_CONFIG_03(ConfigCheck):
                         self.create_finding(
                             status="PASS",
                             region=region,
-                            account_id=account_id,
                             resource_id=resource_id,
                             actual_value=(
                                 f"Delivery channel '{channel_name}' is processing events successfully: "
@@ -135,7 +130,6 @@ class SRA_CONFIG_03(ConfigCheck):
                         self.create_finding(
                             status="FAIL",
                             region=region,
-                            account_id=account_id,
                             resource_id=resource_id,
                             actual_value=(
                                 f"Delivery channel '{channel_name}' has issues processing events: "

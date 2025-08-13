@@ -24,9 +24,8 @@ class SRA_ACCESSANALYZER_02(AccessAnalyzerCheck):
 
     def execute(self) -> List[Dict[str, Any]]:
         """Execute the check."""
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        logger.debug(f"Executing {self.check_id} check for account {account_id}")
+        findings = []        
+        logger.debug(f"Executing {self.check_id} check for account {self.account_id}")
 
         # Check for delegated administrator
         try:
@@ -39,14 +38,13 @@ class SRA_ACCESSANALYZER_02(AccessAnalyzerCheck):
             # Store in class-level cache
             if response['DelegatedAdministrators']:
                 delegated_admin = response['DelegatedAdministrators'][0]
-                self.__class__._delegated_admin_cache[account_id] = delegated_admin
+                self.__class__._delegated_admin_cache[self.account_id] = delegated_admin
                 logger.debug(f"Found delegated administrator: {delegated_admin['Id']}")
                 
                 findings.append(
                     self.create_finding(
                         status="PASS",
                         region="global",
-                        account_id=account_id,
                         resource_id=delegated_admin['Id'],
                         actual_value=f"IAM Access Analyzer delegated administrator configured: "
                                    f"Account {delegated_admin['Id']}",
@@ -55,13 +53,12 @@ class SRA_ACCESSANALYZER_02(AccessAnalyzerCheck):
                 )
             else:
                 logger.debug("No delegated administrator found for IAM Access Analyzer")
-                self.__class__._delegated_admin_cache[account_id] = {}
+                self.__class__._delegated_admin_cache[self.account_id] = {}
                 findings.append(
                     self.create_finding(
                         status="FAIL",
-                        region="global",
-                        account_id=account_id,
-                        resource_id=f"organization/{account_id}",
+                        region="global",                        
+                        resource_id=f"organization/{self.account_id}",
                         actual_value="No delegated administrator configured for IAM Access Analyzer",
                         remediation="Configure a delegated administrator for IAM Access Analyzer using "
                                   "AWS Organizations"
@@ -70,13 +67,12 @@ class SRA_ACCESSANALYZER_02(AccessAnalyzerCheck):
                 
         except Exception as e:
             logger.error(f"Error checking delegated administrator: {e}")
-            self.__class__._delegated_admin_cache[account_id] = {}
+            self.__class__._delegated_admin_cache[self.account_id] = {}
             findings.append(
                 self.create_finding(
                     status="FAIL",
-                    region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    region="global",                    
+                    resource_id=f"organization/{self.account_id}",
                     actual_value=f"Error checking delegated administrator: {str(e)}",
                     remediation="Ensure proper permissions to check delegated administrators "
                               "and that Organizations is enabled"

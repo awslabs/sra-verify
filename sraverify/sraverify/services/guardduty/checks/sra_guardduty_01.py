@@ -28,8 +28,6 @@ class SRA_GUARDDUTY_01(GuardDutyCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
-
         for region in self.regions:
             detector_id = self.get_detector_id(region)
             
@@ -37,7 +35,6 @@ class SRA_GUARDDUTY_01(GuardDutyCheck):
                 self.findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=None, 
                     actual_value=None, 
                     remediation=f"Enable GuardDuty in {region}"
@@ -46,7 +43,6 @@ class SRA_GUARDDUTY_01(GuardDutyCheck):
                 self.findings.append(self.create_finding(
                     status="PASS", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value=None, 
                     remediation=""

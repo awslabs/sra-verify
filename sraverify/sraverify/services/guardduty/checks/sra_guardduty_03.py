@@ -27,9 +27,7 @@ class SRA_GUARDDUTY_03(GuardDutyCheck):
         Returns:
             List of findings
         """
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # Check all regions
         for region in self.regions:
             detector_id = self.get_detector_id(region)
@@ -39,7 +37,6 @@ class SRA_GUARDDUTY_03(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="ERROR", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}", 
                     actual_value="Unable to access GuardDuty in this region", 
                     remediation="Check permissions or if GuardDuty is supported in this region"
@@ -56,7 +53,6 @@ class SRA_GUARDDUTY_03(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="PASS", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"Detector status is {detector_status}", 
                         remediation="No remediation needed"
@@ -65,7 +61,6 @@ class SRA_GUARDDUTY_03(GuardDutyCheck):
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
-                        account_id=account_id,
                         resource_id=f"guardduty:{region}:{detector_id}", 
                         actual_value=f"Detector status is {detector_status}", 
                         remediation="Enabled GuardDuty"
@@ -74,7 +69,6 @@ class SRA_GUARDDUTY_03(GuardDutyCheck):
                 findings.append(self.create_finding(
                     status="FAIL", 
                     region=region, 
-                    account_id=account_id,
                     resource_id=f"guardduty:{region}:{detector_id}", 
                     actual_value="Unable to retrieve detector details", 
                     remediation="Check GuardDuty permissions and configuration"

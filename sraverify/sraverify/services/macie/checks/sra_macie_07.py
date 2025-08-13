@@ -33,7 +33,6 @@ class SRA_MACIE_07(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check if audit accounts are provided
         audit_accounts = []
@@ -50,8 +49,7 @@ class SRA_MACIE_07(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"organization/{account_id}",
+                        resource_id=f"organization/{self.account_id}",
                         checked_value="All active member accounts have Macie relationship enabled",
                         actual_value="Failed to retrieve AWS Organization members",
                         remediation="Ensure you have the necessary permissions to call the Organizations ListAccounts API"
@@ -68,8 +66,7 @@ class SRA_MACIE_07(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}",
+                        resource_id=f"macie2/{self.account_id}",
                         checked_value="All active member accounts have Macie relationship enabled",
                         actual_value="Failed to retrieve Macie members",
                         remediation="Ensure you have the necessary permissions to call the Macie ListMembers API"
@@ -88,8 +85,8 @@ class SRA_MACIE_07(MacieCheck):
             macie_member_account_ids = {member.get('accountId') for member in macie_members}
             
             # Remove the current account (delegated admin) from the set of accounts to check
-            if account_id in active_org_account_ids:
-                active_org_account_ids.remove(account_id)
+            if self.account_id in active_org_account_ids:
+                active_org_account_ids.remove(self.account_id)
             
             # Remove audit accounts from the set of accounts to check if provided
             for audit_account in audit_accounts:
@@ -110,8 +107,7 @@ class SRA_MACIE_07(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="All active member accounts have Macie relationship enabled",
                         actual_value=f"All {len(active_org_account_ids)} active member accounts have Macie relationship enabled in region {region}",
                         remediation="No remediation needed"
@@ -125,8 +121,7 @@ class SRA_MACIE_07(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="All active member accounts have Macie relationship enabled",
                         actual_value=(
                             f"Not all active member accounts have Macie relationship enabled in region {region}. "

@@ -33,7 +33,6 @@ class SRA_INSPECTOR_06(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -48,7 +47,6 @@ class SRA_INSPECTOR_06(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/delegated-admin",
                         checked_value="Inspector delegated admin account is the audit account",
                         actual_value="No delegated admin account is configured",
@@ -74,7 +72,6 @@ class SRA_INSPECTOR_06(InspectorCheck):
                     self.create_finding(
                         status="ERROR",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/delegated-admin",
                         checked_value="Inspector delegated admin account is the audit account",
                         actual_value=f"Delegated admin account is {delegated_admin_id}, but no audit account was specified for comparison",
@@ -89,7 +86,6 @@ class SRA_INSPECTOR_06(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/delegated-admin",
                         checked_value="Inspector delegated admin account is the audit account",
                         actual_value=f"Inspector delegated administrator (Account: {delegated_admin_id}) "
@@ -102,7 +98,6 @@ class SRA_INSPECTOR_06(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/delegated-admin",
                         checked_value="Inspector delegated admin account is the audit account",
                         actual_value=f"Inspector delegated administrator (Account: {delegated_admin_id}) "

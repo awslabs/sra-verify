@@ -35,7 +35,6 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get organization trails
         org_trails = self.get_organization_trails()
@@ -45,8 +44,7 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="S3 bucket in Log Archive account",
                     actual_value="No organization trails found",
                     remediation=(
@@ -68,8 +66,7 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="S3 bucket in Log Archive account",
                     actual_value="Log Archive Account ID not provided",
                     remediation="Provide the Log Archive account IDs using --log-archive-account flag"
@@ -124,7 +121,6 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value=f"S3 bucket in Log Archive account ({', '.join(log_archive_accounts)})",
                         actual_value=(
@@ -147,7 +143,6 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
                     self.create_finding(
                         status="PASS",
                         region="global",
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value=f"S3 bucket in Log Archive account ({', '.join(log_archive_accounts)})",
                         actual_value=(
@@ -166,7 +161,6 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value=f"S3 bucket in Log Archive account ({', '.join(log_archive_accounts)})",
                         actual_value=(

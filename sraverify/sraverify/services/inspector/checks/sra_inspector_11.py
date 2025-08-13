@@ -31,7 +31,6 @@ class SRA_INSPECTOR_11(InspectorCheck):
         Returns:
             List of findings
         """
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
@@ -46,7 +45,6 @@ class SRA_INSPECTOR_11(InspectorCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/organization-configuration/lambdaCode",
                         checked_value="Inspector Lambda Code auto-enable is configured",
                         actual_value="Lambda Code auto-enable is not configured",
@@ -61,7 +59,6 @@ class SRA_INSPECTOR_11(InspectorCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=f"inspector2/{region}/organization-configuration/lambdaCode",
                         checked_value="Inspector Lambda Code auto-enable is configured",
                         actual_value="Lambda Code auto-enable is configured",

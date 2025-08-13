@@ -36,14 +36,13 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
             # Get delegated administrators for Security Hub
             delegated_admins = self.get_delegated_administrators(region)
             
-            resource_id = f"delegated-admin/{account_id}"
+            resource_id = f"delegated-admin/{self.account_id}"
             
             # If no audit accounts are provided, we can't perform the check
             if not self._audit_accounts:
@@ -51,7 +50,6 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
                     self.create_finding(
                         status="ERROR",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="Delegated administrator is audit account",
                         actual_value="No audit account ID provided for comparison",
@@ -69,7 +67,6 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value=f"Delegated administrator is audit account {audit_account_id}",
                         actual_value=f"No Security Hub delegated administrator found in region {region}",
@@ -93,7 +90,6 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
                         self.create_finding(
                             status="PASS",
                             region=region,
-                            account_id=account_id,
                             resource_id=resource_id,
                             checked_value=f"Delegated administrator is audit account {audit_account_id}",
                             actual_value=f"Security Hub delegated administrator is the audit account {audit_account_id}",
@@ -107,7 +103,6 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value=f"Delegated administrator is audit account {audit_account_id}",
                         actual_value=f"Security Hub delegated administrator {delegated_admin_id} is not the audit account {audit_account_id}",

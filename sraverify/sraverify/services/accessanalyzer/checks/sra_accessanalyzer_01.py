@@ -26,9 +26,8 @@ class SRA_ACCESSANALYZER_01(AccessAnalyzerCheck):
 
     def execute(self) -> List[Dict[str, Any]]:
         """Execute the check for each region."""
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        logger.debug(f"Executing {self.check_id} check for account {account_id}")
+        findings = []        
+        logger.debug(f"Executing {self.check_id} check for account {self.account_id}")
 
         # If no regions have Access Analyzer available, return a single failure
         if not self._clients:
@@ -36,8 +35,7 @@ class SRA_ACCESSANALYZER_01(AccessAnalyzerCheck):
             findings.append(
                 self.create_finding(
                     status="FAIL",
-                    region="global",
-                    account_id=account_id,
+                    region="global",                    
                     resource_id="accessanalyzer:global",  # Generic format for global failure
                     actual_value="IAM Access Analyzer not available in any region",
                     remediation="Enable IAM Access Analyzer in at least one region and configure "
@@ -63,8 +61,7 @@ class SRA_ACCESSANALYZER_01(AccessAnalyzerCheck):
                 findings.append(
                     self.create_finding(
                         status="PASS",
-                        region=region,
-                        account_id=account_id,
+                        region=region,                        
                         resource_id=account_analyzer['arn'],  # Use the actual analyzer ARN for PASS
                         actual_value="IAM Access Analyzer configured with account zone of trust",
                         remediation="No remediation needed"
@@ -75,8 +72,7 @@ class SRA_ACCESSANALYZER_01(AccessAnalyzerCheck):
                 findings.append(
                     self.create_finding(
                         status="FAIL",
-                        region=region,
-                        account_id=account_id,
+                        region=region,                        
                         resource_id=f"accessanalyzer:{region}",  # Keep generic format for FAIL
                         actual_value="No IAM Access Analyzer configured with account zone of trust",
                         remediation="Create an IAM Access Analyzer with account zone of trust in this region"

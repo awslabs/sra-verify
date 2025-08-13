@@ -33,21 +33,19 @@ class SRA_SECURITYHUB_05(SecurityHubCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check each region separately
         for region in self.regions:
             # Get enabled products for import in this specific region
             enabled_products = self.get_enabled_products_for_import(region)
             
-            resource_id = f"securityhub:integrations/{account_id}"
+            resource_id = f"securityhub:integrations/{self.account_id}"
             
             if not enabled_products:
                 findings.append(
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="List of products that are enabled in Security Hub",
                         actual_value=f"Security Hub has no enabled security integrations in region {region}",
@@ -76,7 +74,6 @@ class SRA_SECURITYHUB_05(SecurityHubCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="List of products that are enabled in Security Hub",
                         actual_value=f"Security Hub has enabled security integrations in region {region}: {products_list}",

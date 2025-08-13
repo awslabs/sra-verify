@@ -35,7 +35,6 @@ class SRA_CLOUDTRAIL_05(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get all trails
         all_trails = self.describe_trails()
@@ -45,15 +44,14 @@ class SRA_CLOUDTRAIL_05(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id="cloudtrail:global",
                     checked_value="CloudWatchLogsLogGroupArn and CloudWatchLogsRoleArn: configured",
                     actual_value="No CloudTrail trails found",
                     remediation=(
                         "Create a CloudTrail trail with CloudWatch Logs configuration using the AWS CLI command: "
-                        f"aws cloudtrail create-trail --name trail-with-cloudwatch --s3-bucket-name cloudtrail-logs-{account_id} "
-                        f"--cloud-watch-logs-log-group-arn arn:aws:logs:{self.regions[0] if self.regions else 'us-east-1'}:{account_id}:log-group:CloudTrail/Logs:* "
-                        f"--cloud-watch-logs-role-arn arn:aws:iam::{account_id}:role/CloudTrail_CloudWatchLogs_Role"
+                        f"aws cloudtrail create-trail --name trail-with-cloudwatch --s3-bucket-name cloudtrail-logs-{self.account_id} "
+                        f"--cloud-watch-logs-log-group-arn arn:aws:logs:{self.regions[0] if self.regions else 'us-east-1'}:{self.account_id}:log-group:CloudTrail/Logs:* "
+                        f"--cloud-watch-logs-role-arn arn:aws:iam::{self.account_id}:role/CloudTrail_CloudWatchLogs_Role"
                     )
                 )
             )
@@ -77,7 +75,6 @@ class SRA_CLOUDTRAIL_05(CloudTrailCheck):
                     self.create_finding(
                         status="PASS",
                         region="global",
-                        account_id=account_id,
                         resource_id=resource_id,
                         checked_value="CloudWatchLogsLogGroupArn and CloudWatchLogsRoleArn: configured",
                         actual_value=(
@@ -94,15 +91,14 @@ class SRA_CLOUDTRAIL_05(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=trail_arn,
                         checked_value="CloudWatchLogsLogGroupArn and CloudWatchLogsRoleArn: configured",
                         actual_value=f"CloudTrail '{trail_name}' does not have CloudWatch Logs configuration",
                         remediation=(
                             f"Configure CloudTrail '{trail_name}' to use CloudWatch Logs using the AWS CLI command: "
                             f"aws cloudtrail update-trail --name {trail_name} "
-                            f"--cloud-watch-logs-log-group-arn arn:aws:logs:{home_region}:{account_id}:log-group:CloudTrail/Logs:* "
-                            f"--cloud-watch-logs-role-arn arn:aws:iam::{account_id}:role/CloudTrail_CloudWatchLogs_Role"
+                            f"--cloud-watch-logs-log-group-arn arn:aws:logs:{home_region}:{self.account_id}:log-group:CloudTrail/Logs:* "
+                            f"--cloud-watch-logs-role-arn arn:aws:iam::{self.account_id}:role/CloudTrail_CloudWatchLogs_Role"
                         )
                     )
                 )

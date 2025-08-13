@@ -35,14 +35,12 @@ class SRA_CONFIG_09(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         if not self.regions:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value="No regions specified for check",
@@ -68,7 +66,7 @@ class SRA_CONFIG_09(ConfigCheck):
                     org_aggregator_region = region
                     org_aggregator_name = aggregator.get('ConfigurationAggregatorName', 'Unknown')
                     org_aggregator_arn = aggregator.get('ConfigurationAggregatorArn', 
-                                                      f"arn:aws:config:{region}:{account_id}:config-aggregator/{org_aggregator_name}")
+                                                      f"arn:aws:config:{region}:{self.account_id}:config-aggregator/{org_aggregator_name}")
                     break
             
             if found_org_aggregator:
@@ -80,14 +78,13 @@ class SRA_CONFIG_09(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"arn:aws:config:global:{account_id}:config-aggregator/none",
+                    resource_id=f"arn:aws:config:global:{self.account_id}:config-aggregator/none",
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value="No organization aggregator found in any region",
                     remediation=(
                         "Create an organization configuration aggregator in at least one region using: aws configservice put-configuration-aggregator "
                         "--configuration-aggregator-name organization-aggregator --organization-aggregation-source "
-                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
+                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
                         "--region <region>"
                     )
                 )
@@ -101,7 +98,6 @@ class SRA_CONFIG_09(ConfigCheck):
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id=org_aggregator_arn,
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value=f"No Config client available for region {org_aggregator_region}",
@@ -118,7 +114,6 @@ class SRA_CONFIG_09(ConfigCheck):
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id=org_aggregator_arn,
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value=f"Error getting source statuses for aggregator '{org_aggregator_name}' in region {org_aggregator_region}: {str(e)}",
@@ -133,7 +128,6 @@ class SRA_CONFIG_09(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=org_aggregator_arn,
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value=f"No source statuses found for organization aggregator '{org_aggregator_name}' in region {org_aggregator_region}",
@@ -158,7 +152,6 @@ class SRA_CONFIG_09(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=org_aggregator_arn,
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value=f"Organization aggregator '{org_aggregator_name}' in region {org_aggregator_region} has sources with status: {', '.join(failed_sources)}",
@@ -174,7 +167,6 @@ class SRA_CONFIG_09(ConfigCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",
-                    account_id=account_id,
                     resource_id=org_aggregator_arn,
                     checked_value="All source statuses are SUCCEEDED",
                     actual_value=f"Organization aggregator '{org_aggregator_name}' in region {org_aggregator_region} has all sources with status SUCCEEDED",

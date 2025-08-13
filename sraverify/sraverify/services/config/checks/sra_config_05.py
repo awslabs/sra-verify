@@ -34,14 +34,12 @@ class SRA_CONFIG_05(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         if not self.regions:
             findings.append(
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="config:global",
                     checked_value="AllAwsRegions: true",
                     actual_value="No regions specified for check",
@@ -68,7 +66,7 @@ class SRA_CONFIG_05(ConfigCheck):
                     all_regions_aggregator_region = region
                     all_regions_aggregator_name = aggregator.get('ConfigurationAggregatorName', 'Unknown')
                     all_regions_aggregator_arn = aggregator.get('ConfigurationAggregatorArn', 
-                                                              f"arn:aws:config:{region}:{account_id}:config-aggregator/{all_regions_aggregator_name}")
+                                                              f"arn:aws:config:{region}:{self.account_id}:config-aggregator/{all_regions_aggregator_name}")
                     break
             
             if found_all_regions_aggregator:
@@ -80,7 +78,6 @@ class SRA_CONFIG_05(ConfigCheck):
                 self.create_finding(
                     status="PASS",
                     region="global",
-                    account_id=account_id,
                     resource_id=all_regions_aggregator_arn,
                     checked_value="AllAwsRegions: true",
                     actual_value=f"Configuration aggregator '{all_regions_aggregator_name}' is configured to aggregate all regions, located in region {all_regions_aggregator_region} with Region selection \"All current and future AWS regions\"",
@@ -92,14 +89,13 @@ class SRA_CONFIG_05(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"arn:aws:config:global:{account_id}:config-aggregator/none",
+                    resource_id=f"arn:aws:config:global:{self.account_id}:config-aggregator/none",
                     checked_value="AllAwsRegions: true",
                     actual_value="No organization aggregator with AllAwsRegions=true found in any region",
                     remediation=(
                         "Create an organization configuration aggregator with AllAwsRegions=true in at least one region using: aws configservice put-configuration-aggregator "
                         "--configuration-aggregator-name organization-aggregator --organization-aggregation-source "
-                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
+                        f"\"EnableAllRegions=true,RoleArn=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfigServiceRole\" "
                         "--region <region>"
                     )
                 )

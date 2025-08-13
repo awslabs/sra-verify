@@ -25,19 +25,16 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
 
     def execute(self) -> List[Dict[str, Any]]:
         """Execute the check."""
-        findings = []
-        account_id = self.get_session_accountId(self.session)
-        
+        findings = []        
         # First check if we have a delegated admin in cache
-        delegated_admin = self.__class__._delegated_admin_cache.get(account_id, {})
+        delegated_admin = self.__class__._delegated_admin_cache.get(self.account_id, {})
         
         if not delegated_admin:
             findings.append(
                 self.create_finding(
                     status="FAIL",
-                    region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    region="global",                    
+                    resource_id=f"organization/{self.account_id}",
                     actual_value="No delegated administrator configured for IAM Access Analyzer",
                     remediation="Configure a delegated administrator for IAM Access Analyzer first"
                 )
@@ -60,8 +57,7 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
                 findings.append(
                     self.create_finding(
                         status="ERROR",
-                        region="global",
-                        account_id=account_id,
+                        region="global",                        
                         resource_id=delegated_admin_id,
                         actual_value="Audit Account ID not provided",
                         remediation="Provide the Audit account IDs using --audit-account flag"
@@ -74,8 +70,7 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
                 findings.append(
                     self.create_finding(
                         status="PASS",
-                        region="global",
-                        account_id=account_id,
+                        region="global",                        
                         resource_id=delegated_admin_id,
                         actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
                                    f"matches one of the specified Audit accounts {', '.join(audit_accounts)}",
@@ -86,8 +81,7 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
                 findings.append(
                     self.create_finding(
                         status="FAIL",
-                        region="global",
-                        account_id=account_id,
+                        region="global",                        
                         resource_id=delegated_admin_id,
                         actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
                                    f"does not match any of the specified Audit accounts ({', '.join(audit_accounts)})",
@@ -99,9 +93,8 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
             findings.append(
                 self.create_finding(
                     status="ERROR",
-                    region="global",
-                    account_id=account_id,
-                    resource_id=delegated_admin_id if 'delegated_admin_id' in locals() else f"organization/{account_id}",
+                    region="global",                    
+                    resource_id=delegated_admin_id if 'delegated_admin_id' in locals() else f"organization/{self.account_id}",
                     actual_value=f"Error checking delegated administrator: {str(e)}",
                     remediation="Ensure proper permissions to check Organizations structure"
                 )

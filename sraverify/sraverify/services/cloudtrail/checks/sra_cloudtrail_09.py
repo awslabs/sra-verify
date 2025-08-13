@@ -34,7 +34,6 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Get organization trails
         org_trails = self.get_organization_trails()
@@ -44,15 +43,14 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
-                    resource_id=f"organization/{account_id}",
+                    resource_id=f"organization/{self.account_id}",
                     checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                     actual_value="No organization trails found",
                     remediation=(
                         "Create an organization trail with CloudWatch Logs delivery in the management account using the AWS CLI command: "
-                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{account_id} "
-                        f"--cloud-watch-logs-log-group-arn arn:aws:logs:{self.regions[0] if self.regions else 'us-east-1'}:{account_id}:log-group:CloudTrail/Logs:* "
-                        f"--cloud-watch-logs-role-arn arn:aws:iam::{account_id}:role/CloudTrail_CloudWatchLogs_Role "
+                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{self.account_id} "
+                        f"--cloud-watch-logs-log-group-arn arn:aws:logs:{self.regions[0] if self.regions else 'us-east-1'}:{self.account_id}:log-group:CloudTrail/Logs:* "
+                        f"--cloud-watch-logs-role-arn arn:aws:iam::{self.account_id}:role/CloudTrail_CloudWatchLogs_Role "
                         f"--is-multi-region-trail --region {self.regions[0] if self.regions else 'us-east-1'}"
                     )
                 )
@@ -72,15 +70,14 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=trail_arn,
                         checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                         actual_value=f"Organization trail '{trail_name}' is not configured to deliver logs to CloudWatch Logs",
                         remediation=(
                             f"Configure CloudTrail '{trail_name}' to use CloudWatch Logs using the AWS CLI command: "
                             f"aws cloudtrail update-trail --name {trail_name} "
-                            f"--cloud-watch-logs-log-group-arn arn:aws:logs:{home_region}:{account_id}:log-group:CloudTrail/Logs:* "
-                            f"--cloud-watch-logs-role-arn arn:aws:iam::{account_id}:role/CloudTrail_CloudWatchLogs_Role "
+                            f"--cloud-watch-logs-log-group-arn arn:aws:logs:{home_region}:{self.account_id}:log-group:CloudTrail/Logs:* "
+                            f"--cloud-watch-logs-role-arn arn:aws:iam::{self.account_id}:role/CloudTrail_CloudWatchLogs_Role "
                             f"--region {home_region}"
                         )
                     )
@@ -115,7 +112,6 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
                             self.create_finding(
                                 status="PASS",
                                 region="global",
-                                account_id=account_id,
                                 resource_id=resource_id,
                                 checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' is publishing logs to CloudWatch Logs, latest delivery time: {latest_cloudwatch_logs_delivery_time_str}",
@@ -128,7 +124,6 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
                             self.create_finding(
                                 status="FAIL",
                                 region="global",
-                                account_id=account_id,
                                 resource_id=resource_id,
                                 checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                                 actual_value=f"Organization trail '{trail_name}' has not published logs to CloudWatch Logs within the last 24 hours, latest delivery time: {latest_cloudwatch_logs_delivery_time_str}",
@@ -144,7 +139,6 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
                         self.create_finding(
                             status="FAIL",
                             region="global",
-                            account_id=account_id,
                             resource_id=trail_arn,
                             checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                             actual_value=f"Organization trail '{trail_name}' has an invalid CloudWatch Logs delivery time format: {latest_cloudwatch_logs_delivery_time_str}, error: {str(e)}",
@@ -160,7 +154,6 @@ class SRA_CLOUDTRAIL_09(CloudTrailCheck):
                     self.create_finding(
                         status="FAIL",
                         region="global",
-                        account_id=account_id,
                         resource_id=trail_arn,
                         checked_value="LatestCloudWatchLogsDeliveryTime: within last 24 hours",
                         actual_value=f"Organization trail '{trail_name}' has no record of delivering logs to CloudWatch Logs",

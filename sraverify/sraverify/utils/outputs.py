@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 # Required fields as per developer guide
 REQUIRED_FIELDS = [
     'AccountId',
+    'AccountName',
     'Region',
     'CheckId',
     'Status',

@@ -31,7 +31,6 @@ class SRA_MACIE_01(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get findings publication configuration using the base class method with caching
@@ -43,8 +42,7 @@ class SRA_MACIE_01(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="publishPolicyFindings: true",
                         actual_value="Failed to retrieve Macie findings publication configuration",
                         remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie GetFindingsPublicationConfiguration API"
@@ -59,8 +57,7 @@ class SRA_MACIE_01(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="publishPolicyFindings: true",
                         actual_value="Security Hub configuration not found in Macie findings publication configuration",
                         remediation=(
@@ -79,8 +76,7 @@ class SRA_MACIE_01(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="publishPolicyFindings: true",
                         actual_value=f"Macie is configured to publish policy findings to Security Hub in region {region}",
                         remediation="No remediation needed"
@@ -91,8 +87,7 @@ class SRA_MACIE_01(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="publishPolicyFindings: true",
                         actual_value=f"Macie is not configured to publish policy findings to Security Hub in region {region}",
                         remediation=(

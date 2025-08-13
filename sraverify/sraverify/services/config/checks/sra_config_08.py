@@ -59,7 +59,6 @@ class SRA_CONFIG_08(ConfigCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         # Check if Audit account ID is provided
         if not self._audit_accounts:
@@ -67,7 +66,6 @@ class SRA_CONFIG_08(ConfigCheck):
                 self.create_finding(
                     status="ERROR",
                     region="global",
-                    account_id=account_id,
                     resource_id="delegated-admin/none",
                     checked_value="Delegated administrator is audit account",
                     actual_value="No audit account ID provided",
@@ -85,7 +83,6 @@ class SRA_CONFIG_08(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=f"delegated-admin/none",
                     checked_value=f"Delegated administrator is audit account {', '.join(self._audit_accounts)}",
                     actual_value=f"No delegated administrator found for Config service",
@@ -131,7 +128,6 @@ class SRA_CONFIG_08(ConfigCheck):
                         self.create_finding(
                             status="PASS",
                             region="global",
-                            account_id=account_id,
                             resource_id=f"delegated-admin/{audit_account_id}",
                             checked_value=f"Delegated administrator is audit account {audit_account_id}",
                             actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) for both service principals",
@@ -144,7 +140,6 @@ class SRA_CONFIG_08(ConfigCheck):
                         self.create_finding(
                             status="WARN",
                             region="global",
-                            account_id=account_id,
                             resource_id=f"delegated-admin/{audit_account_id}",
                             checked_value=f"Delegated administrator is audit account {audit_account_id} for both service principals",
                             actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) but not for all required service principals",
@@ -171,7 +166,6 @@ class SRA_CONFIG_08(ConfigCheck):
                 self.create_finding(
                     status="FAIL",
                     region="global",
-                    account_id=account_id,
                     resource_id=f"delegated-admin/none",
                     checked_value=f"Delegated administrator is audit account {', '.join(self._audit_accounts)}",
                     actual_value=f"Config delegated administrator(s) {', '.join(other_admins)} are not the audit account {', '.join(self._audit_accounts)}",

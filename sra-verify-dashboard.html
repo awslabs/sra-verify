@@ -1315,7 +1315,7 @@
                     <td class="expandable-cell" onclick="showTooltip(event, '${escapeHtml(row.Title || '')}')">${row.Title || ''}</td>
                     <td>${row.Service || ''}</td>
                     <td>${row.Region || ''}</td>
-                    <td>${row.AccountId || ''}</td>
+                    <td>${formatAccountDisplay(row.AccountName, row.AccountId)}</td>
                     <td class="expandable-cell" onclick="showTooltip(event, '${escapeHtml(row.Description || '')}')">${row.Description || ''}</td>
                     <td class="expandable-cell" onclick="showTooltip(event, '${escapeHtml(row.ActualValue || '')}')">${row.ActualValue || ''}</td>
                 `;
@@ -1924,6 +1924,7 @@
             // Group data by account
             data.forEach(record => {
                 const accountId = record.AccountId;
+                const accountName = record.AccountName || '';
                 const region = record.Region;
                 const service = record.Service;
                 const status = record.Status;
@@ -1939,7 +1940,8 @@
 
                 if (!accountMap[accountId]) {
                     accountMap[accountId] = { 
-                        id: accountId, 
+                        id: accountId,
+                        name: accountName,
                         type: accountType, 
                         regions: {},
                         pass: 0,
@@ -2011,8 +2013,9 @@
 
             // Build tree structure
             Object.values(accountMap).forEach(account => {
+                const accountDisplayName = account.name ? `${account.name} (${account.id})` : account.id;
                 const accountNode = {
-                    name: `${account.type} (${account.id})`,
+                    name: accountDisplayName,
                     type: account.type,
                     pass: account.pass,
                     fail: account.fail,
@@ -2105,6 +2108,14 @@
         }
 
         // Utility functions
+        function formatAccountDisplay(accountName, accountId) {
+            if (!accountId) return '';
+            if (!accountName || accountName.trim() === '') {
+                return accountId;
+            }
+            return `${accountName} (${accountId})`;
+        }
+
         function escapeHtml(text) {
             if (!text) return '';
             return text.replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

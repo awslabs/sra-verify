@@ -53,7 +53,7 @@ class EC2Check(SecurityCheck):
             Dictionary containing EBS encryption by default status
         """
         # Check cache first
-        account_id = self.get_session_accountId(self.session)
+        account_id = self.account_id
         cache_key = f"{account_id}:{region}"
         
         if cache_key in self.__class__._ebs_encryption_default_cache:

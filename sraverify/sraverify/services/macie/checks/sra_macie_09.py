@@ -32,7 +32,6 @@ class SRA_MACIE_09(MacieCheck):
             List of findings
         """
         findings = []
-        account_id = self.get_session_accountId(self.session)
         
         for region in self.regions:
             # Get Macie members using the base class method with caching
@@ -44,8 +43,7 @@ class SRA_MACIE_09(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="All member accounts have Macie enabled",
                         actual_value="Failed to retrieve Macie members",
                         remediation="Ensure you have the necessary permissions to call the Macie ListMembers API"
@@ -59,8 +57,7 @@ class SRA_MACIE_09(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="All member accounts have Macie enabled",
                         actual_value="No Macie members found",
                         remediation=f"Enable Macie for member accounts in region {region} using the AWS CLI command: aws macie2 create-member --account account_details --region {region}"
@@ -79,8 +76,7 @@ class SRA_MACIE_09(MacieCheck):
                     self.create_finding(
                         status="PASS",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="All member accounts have Macie enabled",
                         actual_value=f"All {len(macie_members)} member accounts have Macie enabled in region {region}",
                         remediation="No remediation needed"
@@ -94,8 +90,7 @@ class SRA_MACIE_09(MacieCheck):
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        account_id=account_id,
-                        resource_id=f"macie2/{account_id}/{region}",
+                        resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="All member accounts have Macie enabled",
                         actual_value=f"{len(disabled_members)} out of {len(macie_members)} member accounts do not have Macie enabled in region {region}: {disabled_accounts_str}",
                         remediation=(

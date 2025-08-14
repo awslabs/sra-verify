@@ -26,8 +26,8 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
     def execute(self) -> List[Dict[str, Any]]:
         """Execute the check."""
         findings = []        
-        # First check if we have a delegated admin in cache
-        delegated_admin = self.__class__._delegated_admin_cache.get(self.account_id, {})
+        
+        delegated_admin = self.get_delegated_admin()
         
         if not delegated_admin:
             findings.append(

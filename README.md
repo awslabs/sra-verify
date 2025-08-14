@@ -85,14 +85,16 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
 3. Use the following command to deploy the template in the Audit account. Update the following parameters
    - Replace **\<audit-account-id\>** with the audit account id
    - Replace **\<log-account-id\>** with the log archive account id
+   - Replace **\<regions\>** with a comma-separated list of regions to scan (default: us-east-1,us-east-2,us-west-2).  Example "IncludeRegions=us-east-1,us-west-2,eu-west-1"
 
     ```bash
     aws cloudformation deploy \
     --template-file 2-sraverify-codebuild-deploy.yaml \
     --stack-name sra \
     --parameter-overrides \
-    AuditAccountID=<audit-account-id> \
-    LogArchiveAccountID=<log-account-id> \
+    AuditAccountID=<audit-account-id> \ 
+    LogArchiveAccountID=<log-account-id> \ 
+    IncludeRegions=<regions> \ 
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
     ```
 

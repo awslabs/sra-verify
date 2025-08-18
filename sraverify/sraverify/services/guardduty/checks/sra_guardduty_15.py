@@ -46,20 +46,20 @@ class SRA_GUARDDUTY_15(GuardDutyCheck):
                 
             # Get organization configuration for GuardDuty
             org_config = self.get_organization_configuration(region)
-            
+
             # Check if there was an error in the response
             if "Error" in org_config:
                 error_code = org_config["Error"].get("Code", "Unknown")
                 error_message = org_config["Error"].get("Message", "Unknown error")
                 
-                # Handle BadRequestException specifically for non-management accounts
+                # Handle BadRequestException specifically for non-delegated admin accounts
                 if error_code == "BadRequestException":
                     findings.append(self.create_finding(
                         status="FAIL", 
                         region=region, 
                         resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"{error_code} {error_message}", 
-                        remediation="Verify that GuardDuty is the delegated admin in this Region and run the check again."
+                        actual_value="This account is not the GuardDuty delegated administrator", 
+                        remediation="This check must be run from the GuardDuty delegated administrator account. Verify that this account is the delegated admin for GuardDuty in this region."
                     ))
                 else:
                     findings.append(self.create_finding(

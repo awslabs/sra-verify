@@ -79,7 +79,7 @@ Available checks:
   SRA-SECURITYHUB-01: Security Hub enabled account level standards exist (SecurityHub) [application]
   SRA-SECURITYHUB-02: Security Hub auto-enable new standards is enabled (SecurityHub) [audit]
   SRA-SECURITYHUB-03: Security Hub administration for the account matches delegated administrator (SecurityHub) [management]
-  SRA-SECURITYHUB-04: Security Hub administrator account is enabled (SecurityHub) [audit]
+  SRA-SECURITYHUB-04: Security Hub central configuration is enabled (SecurityHub) [audit]
   SRA-SECURITYHUB-05: Security Hub integration with findings generating products (SecurityHub) [audit]
   SRA-SECURITYHUB-06: Security Hub administration for the AWS Organization has a delegated administrator (SecurityHub) [management]
   SRA-SECURITYHUB-07: Security Hub delegated admin account is the audit account (SecurityHub) [management]

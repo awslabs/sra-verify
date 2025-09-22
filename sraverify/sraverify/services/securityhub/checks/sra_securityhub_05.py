@@ -41,7 +41,25 @@ class SRA_SECURITYHUB_05(SecurityHubCheck):
             
             resource_id = f"securityhub:integrations/{self.account_id}"
             
-            if not enabled_products:
+            # Check if Security Hub is not enabled (None response)
+            if enabled_products is None:
+                findings.append(
+                    self.create_finding(
+                        status="FAIL",
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub enabled with product integrations",
+                        actual_value=f"Security Hub is not enabled in region {region}",
+                        remediation=(
+                            f"Enable Security Hub in region {region} first. "
+                            "Use the AWS CLI command: "
+                            f"aws securityhub enable-security-hub --region {region}, "
+                            "then configure product integrations."
+                        )
+                    )
+                )
+            elif not enabled_products:
+                # Security Hub is enabled but no products configured
                 findings.append(
                     self.create_finding(
                         status="FAIL",
@@ -58,7 +76,7 @@ class SRA_SECURITYHUB_05(SecurityHubCheck):
                     )
                 )
             else:
-                # Format the list of products for reporting
+                # Security Hub is enabled with products
                 product_names = []
                 for product_arn in enabled_products:
                     # Extract the product name from the ARN

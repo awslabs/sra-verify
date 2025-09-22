@@ -39,40 +39,76 @@ class SRA_SECURITYHUB_02(SecurityHubCheck):
             # Get organization configuration for this region
             org_config = self.get_organization_configuration(region)
             
-            # Check if auto-enable standards is configured
-            # AutoEnableStandards can be "NONE", "DEFAULT", or "NEW_CONTROLS"
-            # "NEW_CONTROLS" means new controls are auto-enabled
-            auto_enable_standards = org_config.get('AutoEnableStandards', 'NONE')
-            auto_enable_new_controls = auto_enable_standards == 'NEW_CONTROLS'
-            
-            resource_id = f"securityhub:configuration/{self.account_id}"
-            
-            if not auto_enable_new_controls:
+            # Check if Security Hub organization configuration is available
+            if not org_config:
                 findings.append(
                     self.create_finding(
                         status="FAIL",
                         region=region,
-                        resource_id=resource_id,
-                        checked_value="AutoEnableStandards: NEW_CONTROLS",
-                        actual_value=f"Security hub is not setup to auto enable new standards [AutoEnableStandards: {auto_enable_standards}] in region {region}",
-                        remediation=(
-                            "Enable auto-enable new controls in Security Hub. In the Security Hub console, "
-                            "navigate to Settings > General > Configuration > Auto-enable new controls, and enable this setting. "
-                            "Alternatively, use the AWS CLI command: "
-                            f"aws securityhub update-organization-configuration --auto-enable-standards NEW_CONTROLS --region {region}"
-                        )
+                        resource_id=f"securityhub:configuration/{self.account_id}",
+                        checked_value="Security Hub organization configuration available",
+                        actual_value=f"Unable to retrieve Security Hub organization configuration in region {region}",
+                        remediation="Ensure Security Hub is enabled and this account has organization admin permissions"
                     )
                 )
-            else:
+                continue
+            
+            # Check if using central configuration
+            org_configuration = org_config.get('OrganizationConfiguration', {})
+            config_type = org_configuration.get('ConfigurationType')
+            
+            resource_id = f"securityhub:configuration/{self.account_id}"
+            
+            if config_type == 'CENTRAL':
+                # In central configuration, AutoEnableStandards is always NONE
+                # This is expected behavior, so it should PASS with appropriate messaging
                 findings.append(
                     self.create_finding(
                         status="PASS",
                         region=region,
                         resource_id=resource_id,
-                        checked_value="AutoEnableStandards: NEW_CONTROLS",
-                        actual_value=f"Security hub is setup to auto enable new standards [AutoEnableStandards: {auto_enable_standards}] in region {region}",
-                        remediation="No remediation needed"
+                        checked_value="Central configuration enabled for auto-enable standards management",
+                        actual_value=f"Security Hub uses central configuration [ConfigurationType: CENTRAL] in region {region}",
+                        remediation="No remediation needed - central configuration manages standards automatically through configuration policies"
                     )
                 )
+            else:
+                # For local configuration, check AutoEnable and AutoEnableStandards
+                auto_enable = org_config.get('AutoEnable', False)
+                auto_enable_standards = org_config.get('AutoEnableStandards', 'NONE')
+                
+                # AutoEnableStandards can be "NONE", "DEFAULT", or "NEW_CONTROLS"
+                # Both "DEFAULT" and "NEW_CONTROLS" indicate auto-enable is working
+                # "DEFAULT" means new controls in existing standards are auto-enabled
+                # "NEW_CONTROLS" means new controls are auto-enabled (newer API version)
+                auto_enable_new_controls = auto_enable_standards in ['DEFAULT', 'NEW_CONTROLS']
+                
+                if not auto_enable or not auto_enable_new_controls:
+                    findings.append(
+                        self.create_finding(
+                            status="FAIL",
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="AutoEnable: true, AutoEnableStandards: DEFAULT or NEW_CONTROLS",
+                            actual_value=f"Security Hub auto-enable configuration [AutoEnable: {auto_enable}, AutoEnableStandards: {auto_enable_standards}] in region {region}",
+                            remediation=(
+                                "Enable auto-enable new controls in Security Hub. In the Security Hub console, "
+                                "navigate to Settings > General > Configuration > Auto-enable new controls, and enable this setting. "
+                                "Alternatively, use the AWS CLI command: "
+                                f"aws securityhub update-organization-configuration --auto-enable --auto-enable-standards DEFAULT --region {region}"
+                            )
+                        )
+                    )
+                else:
+                    findings.append(
+                        self.create_finding(
+                            status="PASS",
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="AutoEnable: true, AutoEnableStandards: DEFAULT or NEW_CONTROLS",
+                            actual_value=f"Security Hub auto-enable is properly configured [AutoEnable: {auto_enable}, AutoEnableStandards: {auto_enable_standards}] in region {region}",
+                            remediation="No remediation needed"
+                        )
+                    )
         
         return findings

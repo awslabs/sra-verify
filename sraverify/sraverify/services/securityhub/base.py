@@ -172,7 +172,7 @@ class SecurityHubCheck(SecurityCheck):
         
         return org_config
     
-    def get_enabled_products_for_import(self, region: str) -> List[str]:
+    def get_enabled_products_for_import(self, region: str) -> Optional[List[str]]:
         """
         Get enabled products for import with caching.
         
@@ -180,7 +180,7 @@ class SecurityHubCheck(SecurityCheck):
             region: AWS region name
             
         Returns:
-            List of enabled product ARNs
+            List of enabled product ARNs, or None if Security Hub is not enabled
         """
         account_id = self.account_id
         if not account_id:
@@ -201,9 +201,10 @@ class SecurityHubCheck(SecurityCheck):
         # Get enabled products from client
         products = client.list_enabled_products_for_import()
         
-        # Cache the results
-        self.__class__._product_integrations_cache[cache_key] = products
-        logger.debug(f"Cached {len(products)} product integrations for {cache_key}")
+        # Only cache if we got a valid response (not None)
+        if products is not None:
+            self.__class__._product_integrations_cache[cache_key] = products
+            logger.debug(f"Cached {len(products)} product integrations for {cache_key}")
         
         return products
     

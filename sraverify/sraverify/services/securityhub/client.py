@@ -126,12 +126,12 @@ class SecurityHubClient:
             return {}
     
     
-    def list_enabled_products_for_import(self) -> List[str]:
+    def list_enabled_products_for_import(self) -> Optional[List[str]]:
         """
         List enabled products for import into Security Hub.
         
         Returns:
-            List of enabled product ARNs
+            List of enabled product ARNs, or None if Security Hub is not enabled
         """
         try:
             logger.debug(f"Listing enabled products for import in {self.region}")
@@ -146,6 +146,16 @@ class SecurityHubClient:
             logger.debug(f"Found {len(product_subscriptions)} enabled products in {self.region}")
             return product_subscriptions
         except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            error_message = e.response.get('Error', {}).get('Message', '')
+            
+            # Check if this is the "not subscribed to AWS Security Hub" error
+            if error_code == 'InvalidAccessException' and 'not subscribed to AWS Security Hub' in error_message:
+                # Return None specifically for this error to indicate Security Hub is not enabled
+                logger.debug(f"Security Hub is not enabled in {self.region}")
+                return None
+                
+            # For other errors, log as error and return empty list
             logger.error(f"Error listing enabled products in {self.region}: {e}")
             return []
         except Exception as e:

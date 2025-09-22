@@ -21,7 +21,8 @@ class SRA_SECURITYHUB_10(SecurityHubCheck):
             "for new member accounts when they join the organization."
         )
         self.check_logic = (
-            "Check evaluates if Security Hub describe-organization-configuration returns \"AutoEnable\": true. "
+            "Check evaluates Security Hub organization configuration. For central configuration, "
+            "PASS if ConfigurationType is CENTRAL (uses configuration policies). For local configuration, "
             "PASS if AutoEnable is true."
         )
     
@@ -41,35 +42,53 @@ class SRA_SECURITYHUB_10(SecurityHubCheck):
             
             resource_id = f"securityhub:organization-configuration/{self.account_id}"
             
-            # Check if AutoEnable is set to true
-            auto_enable = org_config.get('AutoEnable', False)
+            # Check if using central configuration
+            org_configuration = org_config.get('OrganizationConfiguration', {})
+            config_type = org_configuration.get('ConfigurationType')
             
-            if not auto_enable:
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=resource_id,
-                        checked_value="Security Hub is set to auto-enable for new member accounts",
-                        actual_value=f"AutoEnable is set to false in region {region}",
-                        remediation=(
-                            f"Configure Security Hub to automatically enable for new member accounts in region {region}. "
-                            f"In the AWS Console, navigate to Security Hub in region {region}, go to Settings > Configuration, "
-                            f"and enable 'Auto-enable Security Hub for new accounts'. Alternatively, use the AWS CLI command: "
-                            f"aws securityhub update-organization-configuration --auto-enable --region {region}"
-                        )
-                    )
-                )
-            else:
+            if config_type == 'CENTRAL':
+                # In central configuration, AutoEnable is always false and not relevant
+                # Configuration policies handle new account enablement
                 findings.append(
                     self.create_finding(
                         status="PASS",
                         region=region,
                         resource_id=resource_id,
-                        checked_value="Security Hub is set to auto-enable for new member accounts",
-                        actual_value=f"AutoEnable is set to true in region {region}",
-                        remediation="No remediation needed"
+                        checked_value="Security Hub auto-enable configured for new accounts",
+                        actual_value=f"Central configuration enabled [ConfigurationType: CENTRAL] in region {region} - new accounts managed via configuration policies",
+                        remediation="No remediation needed - central configuration manages new account enablement through configuration policies"
                     )
                 )
+            else:
+                # For local configuration, check AutoEnable
+                auto_enable = org_config.get('AutoEnable', False)
+                
+                if not auto_enable:
+                    findings.append(
+                        self.create_finding(
+                            status="FAIL",
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="Security Hub is set to auto-enable for new member accounts",
+                            actual_value=f"AutoEnable is set to false in region {region}",
+                            remediation=(
+                                f"Configure Security Hub to automatically enable for new member accounts in region {region}. "
+                                f"In the AWS Console, navigate to Security Hub in region {region}, go to Settings > Configuration, "
+                                f"and enable 'Auto-enable Security Hub for new accounts'. Alternatively, use the AWS CLI command: "
+                                f"aws securityhub update-organization-configuration --auto-enable --region {region}"
+                            )
+                        )
+                    )
+                else:
+                    findings.append(
+                        self.create_finding(
+                            status="PASS",
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="Security Hub is set to auto-enable for new member accounts",
+                            actual_value=f"AutoEnable is set to true in region {region}",
+                            remediation="No remediation needed"
+                        )
+                    )
         
         return findings

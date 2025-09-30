@@ -7,7 +7,7 @@ The tool performs automated security checks across multiple AWS services includi
 >Note: SRA Verify contains checks for several services, but may not contain a check for every consideration of the AWS Security Reference Architecture. Review the [AWS Prescriptive Guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/welcome.html) for more information on AWS Security Reference Architecture.
 
 ## Usage Instructions
-SRA Verify is designed to run in AWS CodeBuild in the Organization Audit (Security Tooling) account.  
+SRA Verify is designed to run in AWS CodeBuild in the Organization Audit (Security Tooling) account.
 
 You can use the provided AWS CloudFormation templates to deploy the solution. You can also run it locally or extend the solution using the SRA Verify library.
 
@@ -44,7 +44,7 @@ In this step you will deploy the SRAMemberRole to each account in your AWS Organ
     ```
 
 6. Use the following command to create stack instances for each account in your organization. You can target a specific OU, or the root OU. Update the following parameters:
-   - Replace **\<root-ou\>** with the [organization root ID](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_org_details.html#orgs_view_root). 
+   - Replace **\<root-ou\>** with the [organization root ID](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_org_details.html#orgs_view_root).
    - Replace **\<region\>** with the Region you want to deploy the template to.
    - Replace **\<caller\>** with **DELEGATED_ADMIN** if you are deploying the StackSet from the CloudFormation delegated admin. If you are deploying the CloudFormation from the management account, replace with **SELF**.
 
@@ -92,9 +92,9 @@ In this step, you will deploy the Cloudformation template to create the CodeBuil
     --template-file 2-sraverify-codebuild-deploy.yaml \
     --stack-name sra \
     --parameter-overrides \
-    AuditAccountID=<audit-account-id> \ 
-    LogArchiveAccountID=<log-account-id> \ 
-    IncludeRegions=<regions> \ 
+    AuditAccountID=<audit-account-id> \
+    LogArchiveAccountID=<log-account-id> \
+    IncludeRegions=<regions> \
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
     ```
 
@@ -115,7 +115,7 @@ To review the results, follow these steps.
 
 5. Select the **consolidated** or **raw** folder.
 
-6. Download the CSV file and review the findings. 
+6. Download the CSV file and review the findings.
 
 ### Review the results with the dashboard
 You can use the SRA Verify dashboard to get a summary of the findings.
@@ -131,7 +131,7 @@ You can use the SRA Verify dashboard to get a summary of the findings.
 You can use generative AI to further summarize your findings.
 
 1. In the dashboard, select **Copy generative AI prompt**. This will copy a markdown formatted version of the findings and example prompt to your clipboard.
-2. Paste the prompt into a generative AI chat. 
+2. Paste the prompt into a generative AI chat.
    >Note: The copied prompt will contain your organizations findings. Consider your organization's security policies before pasting the prompt into a generative AI tool.
 3. To use Amazon Bedrock, follow [Generate responses in the console using playgrounds](https://docs.aws.amazon.com/bedrock/latest/userguide/playgrounds.html) in the Amazon Bedrock user guide.
 4. Review an example generative AI chat output in [docs/sra-verify-generative-ai-example.md](/docs/sra-verify-generative-ai-example.md)
@@ -144,7 +144,7 @@ In this step, you will run SRA Verify locally. Running locally is useful to run 
 In this step you will clone the Github repository and run the tool.
 
 1. Clone the repository with the following command
-   
+
     ```bash
     git clone <repository-url>
     ```
@@ -160,7 +160,7 @@ In this step you will clone the Github repository and run the tool.
     ```
 
 4. Install sraverify
-   1. Install 
+   1. Install
 
         ```bash
         pip install ./sraverify
@@ -212,4 +212,3 @@ In this step you will clone the Github repository and run the tool.
    ```bash
    sraverify --check SRA-CT-1 --regions us-east-1
    ```
-

@@ -167,6 +167,7 @@ Resources:
             Effect: Allow
             Action:
               - wafv2:GetWebAclForResource
+              - wafv2:GetWebAcl
             Resource: '*'
           - Sid: StsPermissions
             Effect: Allow

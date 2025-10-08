@@ -174,3 +174,8 @@ Resources:
             Action:
               - sts:GetCallerIdentity
             Resource: '*'
+          - Sid: CloudwatchPermissions
+            Effect: Allow
+            Action:
+              - cloudwatch:DescribeAlarmsForMetric
+            Resource: '*'

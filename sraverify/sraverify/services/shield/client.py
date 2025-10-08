@@ -170,3 +170,45 @@ class ShieldClient:
                     "Message": error_message
                 }
             }
+    
+    def get_cloudwatch_alarms_for_resource(self, resource_arn: str) -> Dict[str, Any]:
+        """
+        Get CloudWatch alarms for Shield Advanced DDoS metrics for a resource.
+        
+        Args:
+            resource_arn: ARN of the resource
+            
+        Returns:
+            Dictionary containing alarm details or error information
+        """
+        try:
+            cloudwatch_client = self.session.client('cloudwatch', region_name=self.region)
+            
+            # Look for alarms on DDoSDetected metric for this resource
+            response = cloudwatch_client.describe_alarms_for_metric(
+                MetricName='DDoSDetected',
+                Namespace='AWS/DDoSProtection',
+                Dimensions=[
+                    {
+                        'Name': 'ResourceArn',
+                        'Value': resource_arn
+                    }
+                ]
+            )
+            
+            ddos_alarms = response.get('MetricAlarms', [])
+            
+            return {
+                "DDoSDetectedAlarms": ddos_alarms
+            }
+            
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            error_message = str(e)
+            logger.debug(f"Error getting CloudWatch alarms for resource {resource_arn} in {self.region}: {error_message}")
+            return {
+                "Error": {
+                    "Code": error_code,
+                    "Message": error_message
+                }
+            }

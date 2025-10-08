@@ -178,3 +178,22 @@ class ShieldCheck(SecurityCheck):
         
         logger.debug(f"Shield: Getting web ACL for resource {resource_arn} in {region}")
         return client.get_web_acl_for_resource(resource_arn)
+    
+    def get_cloudwatch_alarms_for_resource(self, region: str, resource_arn: str) -> Dict[str, Any]:
+        """
+        Get CloudWatch alarms for Shield Advanced DDoS metrics for a resource.
+        
+        Args:
+            region: AWS region name
+            resource_arn: ARN of the resource
+            
+        Returns:
+            Dictionary containing alarm details or empty dict if not available
+        """
+        client = self.get_client(region)
+        if not client:
+            logger.warning(f"Shield: No Shield client available for region {region}")
+            return {}
+        
+        logger.debug(f"Shield: Getting CloudWatch alarms for resource {resource_arn} in {region}")
+        return client.get_cloudwatch_alarms_for_resource(resource_arn)

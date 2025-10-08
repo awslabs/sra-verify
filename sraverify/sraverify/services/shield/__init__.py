@@ -12,6 +12,8 @@ from sraverify.services.shield.checks.sra_shield_09 import SRA_SHIELD_09
 from sraverify.services.shield.checks.sra_shield_10 import SRA_SHIELD_10
 from sraverify.services.shield.checks.sra_shield_11 import SRA_SHIELD_11
 from sraverify.services.shield.checks.sra_shield_12 import SRA_SHIELD_12
+from sraverify.services.shield.checks.sra_shield_13 import SRA_SHIELD_13
+from sraverify.services.shield.checks.sra_shield_14 import SRA_SHIELD_14
 
 CHECKS = {
     "SRA-SHIELD-01": SRA_SHIELD_01,
@@ -26,4 +28,6 @@ CHECKS = {
     "SRA-SHIELD-10": SRA_SHIELD_10,
     "SRA-SHIELD-11": SRA_SHIELD_11,
     "SRA-SHIELD-12": SRA_SHIELD_12,
+    "SRA-SHIELD-13": SRA_SHIELD_13,
+    "SRA-SHIELD-14": SRA_SHIELD_14,
 }

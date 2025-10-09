@@ -31,13 +31,23 @@ class SRA_SHIELD_05(ShieldCheck):
         protections = self.list_protections(region)
 
         if "Error" in protections:
-            self.findings.append(self.create_finding(
-                status="ERROR",
-                region=region,
-                resource_id=None,
-                actual_value=protections["Error"].get("Message", "Unknown error"),
-                remediation="Check IAM permissions for Shield API access"
-            ))
+            error_code = protections["Error"].get("Code", "")
+            if error_code == "ResourceNotFoundException":
+                self.findings.append(self.create_finding(
+                    status="FAIL",
+                    region=region,
+                    resource_id=None,
+                    actual_value="Shield Advanced subscription not found",
+                    remediation="Enable Shield Advanced subscription to protect resources"
+                ))
+            else:
+                self.findings.append(self.create_finding(
+                    status="ERROR",
+                    region=region,
+                    resource_id=None,
+                    actual_value=protections["Error"].get("Message", "Unknown error"),
+                    remediation="Check IAM permissions for Shield API access"
+                ))
         elif protections.get("Protections"):
             # Filter for Elastic IPs by checking ResourceArn
             eip_protections = [

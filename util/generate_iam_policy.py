@@ -104,7 +104,14 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
         if "get_paginator" in calls:
             calls.remove("get_paginator")
     
+    # Add required dependent permissions
     for service, calls in service_calls.items():
+        if service == "wafv2" and "get_web_acl_for_resource" in calls:
+            calls.add("get_web_acl")  # GetWebAclForResource requires GetWebAcl permission
+    
+    # Sort services alphabetically for consistent policy output
+    for service in sorted(service_calls.keys()):
+        calls = service_calls[service]
         if not calls:
             continue
             
@@ -125,12 +132,18 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
             "shield": "shield",
             "lambda": "lambda",
             "wafv2": "wafv2",
-            "cloudfront": "cloudfront"
+            "cloudfront": "cloudfront",
+            "elbv2": "elasticloadbalancing"
         }
         
         service_prefix = service_mapping.get(service, service)
         
-        actions = [f"{service_prefix}:{convert_to_api_action(call)}" for call in calls]
+        # Special handling for API Gateway which uses HTTP verbs instead of specific actions
+        if service == "apigateway":
+            # API Gateway uses GET action for read operations
+            actions = ["apigateway:GET"]
+        else:
+            actions = [f"{service_prefix}:{convert_to_api_action(call)}" for call in calls]
         
         statements.append({
             "Sid": f"{service.capitalize()}Permissions",

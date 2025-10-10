@@ -70,12 +70,89 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: S3Permissions
+          - Sid: AccessanalyzerPermissions
             Effect: Allow
             Action:
-              - s3:GetAccountPublicAccessBlock
-              - s3:GetBucketLocation
-              - s3:GetBucketPolicy
+              - access-analyzer:GetAnalyzer
+              - access-analyzer:ListAnalyzers
+            Resource: '*'
+          - Sid: AmplifyPermissions
+            Effect: Allow
+            Action:
+              - amplify:ListApps
+            Resource: '*'
+          - Sid: ApigatewayPermissions
+            Effect: Allow
+            Action:
+              - apigateway:GET
+            Resource: '*'
+          - Sid: ApprunnerPermissions
+            Effect: Allow
+            Action:
+              - apprunner:ListServices
+            Resource: '*'
+          - Sid: AppsyncPermissions
+            Effect: Allow
+            Action:
+              - appsync:ListGraphqlApis
+            Resource: '*'
+          - Sid: CloudfrontPermissions
+            Effect: Allow
+            Action:
+              - cloudfront:GetDistributionConfig
+              - cloudfront:ListDistributions
+            Resource: '*'
+          - Sid: CloudtrailPermissions
+            Effect: Allow
+            Action:
+              - cloudtrail:DescribeTrails
+              - cloudtrail:GetTrailStatus
+            Resource: '*'
+          - Sid: CloudwatchPermissions
+            Effect: Allow
+            Action:
+              - cloudwatch:DescribeAlarmsForMetric
+            Resource: '*'
+          - Sid: ConfigPermissions
+            Effect: Allow
+            Action:
+              - config:DescribeConfigurationAggregatorSourcesStatus
+              - config:DescribeConfigurationAggregators
+              - config:DescribeConfigurationRecorderStatus
+              - config:DescribeConfigurationRecorders
+              - config:DescribeDeliveryChannelStatus
+              - config:DescribeDeliveryChannels
+            Resource: '*'
+          - Sid: Ec2Permissions
+            Effect: Allow
+            Action:
+              - ec2:DescribeVerifiedAccessInstances
+              - ec2:GetEbsEncryptionByDefault
+            Resource: '*'
+          - Sid: Elbv2Permissions
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:DescribeLoadBalancers
+            Resource: '*'
+          - Sid: GuarddutyPermissions
+            Effect: Allow
+            Action:
+              - guardduty:DescribeOrganizationConfiguration
+              - guardduty:GetDetector
+              - guardduty:ListDetectors
+              - guardduty:ListOrganizationAdminAccounts
+            Resource: '*'
+          - Sid: Inspector2Permissions
+            Effect: Allow
+            Action:
+              - inspector2:BatchGetAccountStatus
+              - inspector2:DescribeOrganizationConfiguration
+              - inspector2:GetDelegatedAdminAccount
+            Resource: '*'
+          - Sid: LambdaPermissions
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
             Resource: '*'
           - Sid: Macie2Permissions
             Effect: Allow
@@ -93,42 +170,12 @@ Resources:
               - organizations:ListAccounts
               - organizations:ListDelegatedAdministrators
             Resource: '*'
-          - Sid: ConfigPermissions
+          - Sid: S3Permissions
             Effect: Allow
             Action:
-              - config:DescribeConfigurationAggregatorSourcesStatus
-              - config:DescribeConfigurationAggregators
-              - config:DescribeConfigurationRecorderStatus
-              - config:DescribeConfigurationRecorders
-              - config:DescribeDeliveryChannelStatus
-              - config:DescribeDeliveryChannels
-            Resource: '*'
-          - Sid: Inspector2Permissions
-            Effect: Allow
-            Action:
-              - inspector2:BatchGetAccountStatus
-              - inspector2:DescribeOrganizationConfiguration
-              - inspector2:GetDelegatedAdminAccount
-            Resource: '*'
-          - Sid: AccessanalyzerPermissions
-            Effect: Allow
-            Action:
-              - access-analyzer:GetAnalyzer
-              - access-analyzer:ListAnalyzers
-            Resource: '*'
-          - Sid: CloudtrailPermissions
-            Effect: Allow
-            Action:
-              - cloudtrail:DescribeTrails
-              - cloudtrail:GetTrailStatus
-            Resource: '*'
-          - Sid: GuarddutyPermissions
-            Effect: Allow
-            Action:
-              - guardduty:DescribeOrganizationConfiguration
-              - guardduty:GetDetector
-              - guardduty:ListDetectors
-              - guardduty:ListOrganizationAdminAccounts
+              - s3:GetAccountPublicAccessBlock
+              - s3:GetBucketLocation
+              - s3:GetBucketPolicy
             Resource: '*'
           - Sid: SecurityhubPermissions
             Effect: Allow
@@ -140,11 +187,6 @@ Resources:
               - securityhub:ListMembers
               - securityhub:ListOrganizationAdminAccounts
             Resource: '*'
-          - Sid: Ec2Permissions
-            Effect: Allow
-            Action:
-              - ec2:GetEbsEncryptionByDefault
-            Resource: '*'
           - Sid: ShieldPermissions
             Effect: Allow
             Action:
@@ -153,29 +195,16 @@ Resources:
               - shield:GetSubscriptionState
               - shield:ListProtections
             Resource: '*'
-          - Sid: LambdaPermissions
-            Effect: Allow
-            Action:
-              - lambda:GetFunction
-            Resource: '*'
-          - Sid: CloudfrontPermissions
-            Effect: Allow
-            Action:
-              - cloudfront:GetDistributionConfig
-            Resource: '*'
-          - Sid: Wafv2Permissions
-            Effect: Allow
-            Action:
-              - wafv2:GetWebAclForResource
-              - wafv2:GetWebAcl
-            Resource: '*'
           - Sid: StsPermissions
             Effect: Allow
             Action:
               - sts:GetCallerIdentity
             Resource: '*'
-          - Sid: CloudwatchPermissions
+          - Sid: Wafv2Permissions
             Effect: Allow
             Action:
-              - cloudwatch:DescribeAlarmsForMetric
+              - wafv2:GetLoggingConfiguration
+              - wafv2:GetWebAcl
+              - wafv2:GetWebAclForResource
+              - wafv2:ListWebAcls
             Resource: '*'

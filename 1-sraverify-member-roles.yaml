@@ -76,6 +76,11 @@ Resources:
               - access-analyzer:GetAnalyzer
               - access-analyzer:ListAnalyzers
             Resource: '*'
+          - Sid: AccountPermissions
+            Effect: Allow
+            Action:
+              - account:GetAlternateContact
+            Resource: '*'
           - Sid: AmplifyPermissions
             Effect: Allow
             Action:

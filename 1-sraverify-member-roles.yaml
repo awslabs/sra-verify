@@ -118,6 +118,11 @@ Resources:
             Action:
               - cloudwatch:DescribeAlarmsForMetric
             Resource: '*'
+          - Sid: CognitoIdpPermissions
+            Effect: Allow
+            Action:
+              - cognito-idp:ListUserPools
+            Resource: '*'
           - Sid: ConfigPermissions
             Effect: Allow
             Action:

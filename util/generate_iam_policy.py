@@ -51,8 +51,12 @@ def extract_boto3_calls(file_path: str) -> Dict[str, Set[str]]:
     client_pattern2 = r'(\w+_client)\s*=\s*(?:self\.)?session\.client\([\'"](\w+)[\'"]'
     client_matches2 = re.findall(client_pattern2, content)
     
+    # Pattern 3: Additional clients created in methods (e.g., cognito_idp_client)
+    client_pattern3 = r'(\w+_client)\s*=\s*(?:self\.)?session\.client\([\'"]([^\'\"]+)[\'"]'
+    client_matches3 = re.findall(client_pattern3, content)
+    
     # Combine all client matches
-    all_client_matches = client_matches1 + client_matches2
+    all_client_matches = client_matches1 + client_matches2 + client_matches3
     
     # Map client variable names to service names
     client_to_service = {}
@@ -133,7 +137,9 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
             "lambda": "lambda",
             "wafv2": "wafv2",
             "cloudfront": "cloudfront",
-            "elbv2": "elasticloadbalancing"
+            "elbv2": "elasticloadbalancing",
+            "cognito-idp": "cognito-idp",
+            "account": "account"
         }
         
         service_prefix = service_mapping.get(service, service)

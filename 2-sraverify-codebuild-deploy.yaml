@@ -2,7 +2,6 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'CloudFormation template to deploy SRAVerify CodeBuild project'
 
 Parameters:
-
   AuditAccountID:
     Type: String
     Description: The AWS account ID for the audit account. If you have multiple audit accounts, use a comma separated list.
@@ -17,11 +16,16 @@ Parameters:
     Default: 5
     MinValue: 1
     MaxValue: 20
-  
+
   IncludeRegions:
     Type: String
     Description: Comma-separated list of AWS regions to include in the scan
     Default: 'us-east-1,us-east-2,us-west-2'
+
+  GitBranch:
+    Type: String
+    Description: The git branch name to pull code from. Deploy the updated 1-sraverify-member-roles.yaml from the same branch to get the latest permissions.
+    Default: main
 
 Resources:
   # This is the role that Codebuild uses
@@ -32,7 +36,7 @@ Resources:
           - id: W11
             reason: Star resource required for actions
           - id: W28
-            reason: Explicit name used for role for easy identification. 
+            reason: Explicit name used for role for easy identification.
     Type: AWS::IAM::Role
     Properties:
       RoleName: SRAVerifyCodeBuildServiceRole
@@ -82,7 +86,7 @@ Resources:
                   - ec2:DescribeRegions
                 Resource: '*'
 
-  # S3 bucket for the SRA Verify findings. 
+  # S3 bucket for the SRA Verify findings.
   # Amazon Q suggests S3 bucket encryption, S3 Object Lock, and S3 Bucket replication. These features are not required for SRA Verify.
   # amazonq-ignore-next-line
   bucketSRAVerifyFindings:
@@ -94,7 +98,7 @@ Resources:
           - id: W41
             reason: Amazon S3 now applies server-side encryption with Amazon S3 managed keys (SSE-S3) as the base level of encryption for every bucket in Amazon S3.
     UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain 
+    DeletionPolicy: Retain
     Type: AWS::S3::Bucket
     Properties:
       VersioningConfiguration:
@@ -134,7 +138,7 @@ Resources:
     Properties:
       Name: SRAVerify-Security-Assessment
       Description: 'CodeBuild project for running SRAVerify security assessment'
-      ServiceRole: !GetAtt  SRAVerifyCodeBuildServiceRole.Arn
+      ServiceRole: !GetAtt SRAVerifyCodeBuildServiceRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
@@ -156,6 +160,8 @@ Resources:
             Value: !Ref LogArchiveAccountID
           - Name: AWS_PARTITION
             Value: !Sub ${AWS::Partition}
+          - Name: GIT_BRANCH
+            Value: !Ref GitBranch
 
       Source:
         Type: NO_SOURCE
@@ -169,9 +175,9 @@ Resources:
                 - echo "Setting up SRAVerify environment..."
                 - pip3 install --upgrade pip
                 - pip3 install boto3 pandas
-                - git clone https://github.com/awslabs/sra-verify.git
+                - git clone -b $GIT_BRANCH https://github.com/awslabs/sra-verify.git
                 - pip install ./sra-verify/sraverify
-          
+
             build:
               commands:
                 - |
@@ -179,7 +185,7 @@ Resources:
                   mkdir -p /tmp/sraverify-results
                   timestamp=$(date +%Y%m%d_%H%M%S)
                   export timestamp
-                  
+
                   # Define partition and region being ran from
                   echo "Running in AWS partition: $AWS_PARTITION"
                   echo "Running in AWS region: $AWS_DEFAULT_REGION"
@@ -188,11 +194,11 @@ Resources:
                   account_list=$(aws organizations list-accounts --query 'Accounts[?Status==`ACTIVE`].Id' --output text)
                   echo "Found accounts: $account_list"
                   export account_list
-          
+
                   # Get CodeBuild/Management account
                   management_account=$(aws organizations describe-organization --query 'Organization.MasterAccountId' --output text)
                   echo "Assuming role running in management account: $management_account"
-          
+
                   # Run organization-level checks from management account
                   echo "Running organization-level checks..."
                   cd /tmp/sraverify-results
@@ -202,7 +208,7 @@ Resources:
                       --regions ${INCLUDE_REGIONS} \
                       --audit-account ${AWS_AUDIT_ACCOUNTS} \
                       --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
-          
+
                   # Run audit checks from audit account
                   if [ "$AWS_AUDIT_ACCOUNTS" != "" ]; then
                       echo "Running audit checks..."
@@ -216,7 +222,7 @@ Resources:
                               --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
                       done
                   fi
-          
+
                   # Run log archive checks from log account
                   if [ "$AWS_LOG_ARCHIVE_ACCOUNTS" != "" ]; then
                       echo "Running log archive checks..."
@@ -230,18 +236,18 @@ Resources:
                               --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
                       done
                   fi
-          
+
                   # Create scan_account function
                   scan_account() {
                       local accountId=$1
                       local timestamp=$2
                       echo "Starting scan for account $accountId"
-                      
+
                       # Create temporary directory for this account's scan
                       mkdir -p "/tmp/sraverify-results/${accountId}"
                       cd "/tmp/sraverify-results/${accountId}"
-                      
-                      # Don't assume role, just use the role 
+
+                      # Don't assume role, just use the role
                       sraverify \
                           --role arn:$AWS_PARTITION:iam::${accountId}:role/SRAMemberRole \
                           --account-type application \
@@ -250,29 +256,29 @@ Resources:
                           --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS}
                   }
                   export -f scan_account
-                  
+
                   # Run account-level scans in parallel
                   echo "Running account-level checks in parallel..."
                   echo $account_list | tr ' ' '\n' | parallel -j ${PARALLEL_ACCOUNTS:-5} scan_account {} $timestamp
-          
+
                   echo "Consolidating CSV files..."
                   mkdir -p /tmp/sraverify-consolidated/csv
                   mkdir -p /tmp/sraverify-consolidated/raw
-                  
+
                   # Copy all raw CSV files including organization findings
                   find /tmp/sraverify-results -name "sraverify*.csv" -type f -exec cp {} /tmp/sraverify-consolidated/raw/ \;
-                  
+
                   # Run Python consolidation script
                   python3 - <<'PYTHON_EOF'
                   import pandas as pd
                   import glob
                   import os
                   import sys
-                  
+
                   try:
                       # Find all CSV files including organization findings
                       csv_files = glob.glob('/tmp/sraverify-results/**/sraverify*.csv', recursive=True)
-                      
+
                       if csv_files:
                           # Read and combine all CSVs
                           all_dfs = []
@@ -283,20 +289,20 @@ Resources:
                               except Exception as e:
                                   print(f"Error reading file {file}: {str(e)}")
                                   continue
-                          
+
                           if all_dfs:
                               # Save consolidated findings
                               combined_df = pd.concat(all_dfs, ignore_index=True)
                               output_file = f'/tmp/sraverify-consolidated/csv/sraverify-consolidated-{os.environ["timestamp"]}.csv'
                               combined_df.to_csv(output_file, index=False)
-                      
+
                   except Exception as e:
                       print(f"Error in Python script: {str(e)}")
                       import traceback
                       traceback.print_exc()
                       sys.exit(1)
                   PYTHON_EOF
-          
+
             post_build:
               commands:
                 - echo "Uploading SRAVerify results to S3..."
@@ -304,12 +310,12 @@ Resources:
                 - aws s3 cp /tmp/sraverify-consolidated/raw/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/raw/ --recursive
                 - echo "Copying dashboard to S3..."
                 - aws s3 cp $CODEBUILD_SRC_DIR/sra-verify/sra-verify-dashboard.html s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/sra-verify-dashboard.html
-          
+
           artifacts:
             files:
               - '**/*.csv'
             base-directory: '/tmp/sraverify-consolidated'
-          
+
           cache:
             paths:
               - '/root/.cache/pip/**/*'
@@ -382,7 +388,7 @@ Resources:
           import boto3
           from botocore.exceptions import ClientError
           import cfnresponse
-                    
+
           def startBuild(event, context):
             responseData = {}
             cb = boto3.client('codebuild')

@@ -38,6 +38,13 @@ class WAFClient:
             logger.error(f"Error getting REST APIs in {self.region}: {e}")
             return {"Error": {"Message": str(e)}}
 
+    def get_stages(self, rest_api_id: str) -> Dict[str, Any]:
+        try:
+            return self.apigateway_client.get_stages(restApiId=rest_api_id)
+        except ClientError as e:
+            logger.error(f"Error getting stages for REST API {rest_api_id} in {self.region}: {e}")
+            return {"Error": {"Message": str(e)}}
+
     def list_graphql_apis(self) -> Dict[str, Any]:
         try:
             return self.appsync_client.list_graphql_apis()
@@ -95,5 +102,8 @@ class WAFClient:
         except ClientError as e:
             if e.response['Error']['Code'] == 'WAFNonexistentItemException':
                 return {"WebACL": None}
+            elif e.response['Error']['Code'] == 'AccessDeniedException':
+                logger.error(f"Access denied getting web ACL for resource {resource_arn}: {e}")
+                return {"Error": {"Code": "AccessDeniedException", "Message": str(e)}}
             logger.error(f"Error getting web ACL for resource {resource_arn}: {e}")
             return {"Error": {"Message": str(e)}}

@@ -112,6 +112,18 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
     for service, calls in service_calls.items():
         if service == "wafv2" and "get_web_acl_for_resource" in calls:
             calls.add("get_web_acl")  # GetWebAclForResource requires GetWebAcl permission
+            # For Cognito user pools, GetWebACLForResource also requires cognito-idp:GetWebACLForResource
+            if "cognito-idp" not in service_calls:
+                service_calls["cognito-idp"] = set()
+            service_calls["cognito-idp"].add("get_web_acl_for_resource")
+            # For App Runner services, GetWebACLForResource also requires apprunner:DescribeWebAclForService
+            if "apprunner" not in service_calls:
+                service_calls["apprunner"] = set()
+            service_calls["apprunner"].add("describe_web_acl_for_service")
+            # For Verified Access instances, GetWebACLForResource also requires ec2:GetVerifiedAccessInstanceWebAcl
+            if "ec2" not in service_calls:
+                service_calls["ec2"] = set()
+            service_calls["ec2"].add("get_verified_access_instance_web_acl")
     
     # Sort services alphabetically for consistent policy output
     for service in sorted(service_calls.keys()):

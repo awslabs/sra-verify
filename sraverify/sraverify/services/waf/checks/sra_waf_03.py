@@ -41,46 +41,83 @@ class SRA_WAF_03(WAFCheck):
                 api_id = api.get("id")
                 api_name = api.get("name")
                 
-                # Construct the API Gateway stage ARN for WAF association check
-                # Format: arn:partition:apigateway:region::/restapis/api-id/stages/stage-name
-                # We'll check the default 'prod' stage, but in practice you'd want to check all stages
-                api_arn = f"arn:aws:apigateway:{region}::/restapis/{api_id}/stages/prod"
+                # Get all stages for this API
+                stages_response = self.get_stages(region, api_id)
                 
-                client = self.get_client(region)
-                if not client:
+                if "Error" in stages_response:
+                    self.findings.append(self.create_finding(
+                        status="ERROR",
+                        region=region,
+                        resource_id=api_name or api_id,
+                        actual_value=stages_response["Error"].get("Message", "Unknown error"),
+                        remediation="Check IAM permissions for API Gateway access"
+                    ))
                     continue
-
-                web_acl_response = client.get_web_acl_for_resource(api_arn)
-
-                if "Error" in web_acl_response:
-                    # If the stage doesn't exist, try without stage (this will likely fail but provides better error info)
+                
+                stages = stages_response.get("item", [])
+                
+                if not stages:
                     self.findings.append(self.create_finding(
                         status="FAIL",
                         region=region,
                         resource_id=api_name or api_id,
-                        actual_value="No WAF Web ACL associated (stage may not exist)",
-                        remediation="Deploy the API to a stage and associate a WAF Web ACL using the AWS Console, CLI, or API"
+                        actual_value="No stages deployed",
+                        remediation="Deploy the API to a stage and associate a WAF Web ACL"
                     ))
                     continue
+                
+                # Check each stage for WAF association
+                for stage in stages:
+                    stage_name = stage.get("stageName")
+                    resource_id = f"{api_name or api_id}/{stage_name}"
+                    
+                    # Construct the API Gateway stage ARN for WAF association check
+                    api_arn = f"arn:aws:apigateway:{region}::/restapis/{api_id}/stages/{stage_name}"
+                    
+                    client = self.get_client(region)
+                    if not client:
+                        continue
 
-                web_acl = web_acl_response.get("WebACL")
+                    web_acl_response = client.get_web_acl_for_resource(api_arn)
 
-                if web_acl:
-                    web_acl_name = web_acl.get("Name", "Unknown")
-                    self.findings.append(self.create_finding(
-                        status="PASS",
-                        region=region,
-                        resource_id=api_name or api_id,
-                        actual_value=f"WAF Web ACL associated: {web_acl_name}",
-                        remediation="No action needed"
-                    ))
-                else:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=api_name or api_id,
-                        actual_value="No WAF Web ACL associated",
-                        remediation="Associate a WAF Web ACL with this API Gateway REST API using the AWS Console, CLI, or API"
-                    ))
+                    if "Error" in web_acl_response:
+                        error_code = web_acl_response["Error"].get("Code")
+                        if error_code == "AccessDeniedException":
+                            self.findings.append(self.create_finding(
+                                status="ERROR",
+                                region=region,
+                                resource_id=resource_id,
+                                actual_value=web_acl_response["Error"].get("Message", "Access denied"),
+                                remediation="Check IAM permissions for wafv2:GetWebACLForResource"
+                            ))
+                        else:
+                            self.findings.append(self.create_finding(
+                                status="FAIL",
+                                region=region,
+                                resource_id=resource_id,
+                                actual_value="No WAF Web ACL associated",
+                                remediation="Associate a WAF Web ACL with this API Gateway stage using the AWS Console, CLI, or API"
+                            ))
+                        continue
+
+                    web_acl = web_acl_response.get("WebACL")
+
+                    if web_acl:
+                        web_acl_name = web_acl.get("Name", "Unknown")
+                        self.findings.append(self.create_finding(
+                            status="PASS",
+                            region=region,
+                            resource_id=resource_id,
+                            actual_value=f"WAF Web ACL associated: {web_acl_name}",
+                            remediation="No action needed"
+                        ))
+                    else:
+                        self.findings.append(self.create_finding(
+                            status="FAIL",
+                            region=region,
+                            resource_id=resource_id,
+                            actual_value="No WAF Web ACL associated",
+                            remediation="Associate a WAF Web ACL with this API Gateway stage using the AWS Console, CLI, or API"
+                        ))
 
         return self.findings

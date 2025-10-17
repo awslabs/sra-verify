@@ -49,13 +49,23 @@ class SRA_WAF_06(WAFCheck):
                 web_acl_response = client.get_web_acl_for_resource(service_arn)
 
                 if "Error" in web_acl_response:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=service_name or service_id,
-                        actual_value="No WAF Web ACL associated",
-                        remediation="Associate a WAF Web ACL with this App Runner service using the AWS Console, CLI, or API"
-                    ))
+                    error_code = web_acl_response["Error"].get("Code")
+                    if error_code == "AccessDeniedException":
+                        self.findings.append(self.create_finding(
+                            status="ERROR",
+                            region=region,
+                            resource_id=service_name or service_id,
+                            actual_value=web_acl_response["Error"].get("Message", "Access denied"),
+                            remediation="Check IAM permissions for wafv2:GetWebACLForResource and apprunner:DescribeWebAclForService"
+                        ))
+                    else:
+                        self.findings.append(self.create_finding(
+                            status="FAIL",
+                            region=region,
+                            resource_id=service_name or service_id,
+                            actual_value="No WAF Web ACL associated",
+                            remediation="Associate a WAF Web ACL with this App Runner service using the AWS Console, CLI, or API"
+                        ))
                     continue
 
                 web_acl = web_acl_response.get("WebACL")

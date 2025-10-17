@@ -50,6 +50,12 @@ class WAFCheck(SecurityCheck):
                 self._rest_apis_cache[region] = client.get_rest_apis()
         return self._rest_apis_cache.get(region, {})
 
+    def get_stages(self, region: str, rest_api_id: str) -> Dict[str, Any]:
+        client = self.get_client(region)
+        if client:
+            return client.get_stages(rest_api_id)
+        return {"Error": {"Message": "No client available"}}
+
     def get_graphql_apis(self, region: str) -> Dict[str, Any]:
         if region not in self._graphql_apis_cache:
             client = self.get_client(region)

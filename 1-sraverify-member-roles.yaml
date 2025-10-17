@@ -94,6 +94,7 @@ Resources:
           - Sid: ApprunnerPermissions
             Effect: Allow
             Action:
+              - apprunner:DescribeWebAclForService
               - apprunner:ListServices
             Resource: '*'
           - Sid: AppsyncPermissions
@@ -121,6 +122,7 @@ Resources:
           - Sid: CognitoIdpPermissions
             Effect: Allow
             Action:
+              - cognito-idp:GetWebAclForResource
               - cognito-idp:ListUserPools
             Resource: '*'
           - Sid: ConfigPermissions
@@ -138,6 +140,7 @@ Resources:
             Action:
               - ec2:DescribeVerifiedAccessInstances
               - ec2:GetEbsEncryptionByDefault
+              - ec2:GetVerifiedAccessInstanceWebAcl
             Resource: '*'
           - Sid: Elbv2Permissions
             Effect: Allow

@@ -23,7 +23,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${SRAVerifyAccountID}:root' 
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${SRAVerifyAccountID}:root'
             Action:
               - 'sts:AssumeRole'
             Condition:
@@ -48,11 +48,11 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Sid: AccountPermissions
-          Effect: Allow
-          Action:
-          - account:GetAccountInformation
-          Resource: '*'
+          - Sid: AccountPermissions
+            Effect: Allow
+            Action:
+              - account:GetAccountInformation
+            Resource: '*'
 
   # This policy is automatically generated from generate_iam_policy.py by extracting the boto3 calls used.
   SRAVerifyLeastPrivilege:
@@ -70,78 +70,154 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Sid: S3Permissions
-          Effect: Allow
-          Action:
-          - s3:GetAccountPublicAccessBlock
-          - s3:GetBucketLocation
-          - s3:GetBucketPolicy
-          Resource: '*'
-        - Sid: Macie2Permissions
-          Effect: Allow
-          Action:
-          - macie2:DescribeOrganizationConfiguration
-          - macie2:GetAdministratorAccount
-          - macie2:GetClassificationExportConfiguration
-          - macie2:GetFindingsPublicationConfiguration
-          - macie2:ListMembers
-          Resource: '*'
-        - Sid: OrganizationsPermissions
-          Effect: Allow
-          Action:
-          - organizations:DescribeOrganization
-          - organizations:ListAccounts
-          - organizations:ListDelegatedAdministrators
-          Resource: '*'
-        - Sid: ConfigPermissions
-          Effect: Allow
-          Action:
-          - config:DescribeConfigurationAggregatorSourcesStatus
-          - config:DescribeConfigurationAggregators
-          - config:DescribeConfigurationRecorderStatus
-          - config:DescribeConfigurationRecorders
-          - config:DescribeDeliveryChannelStatus
-          - config:DescribeDeliveryChannels
-          Resource: '*'
-        - Sid: Inspector2Permissions
-          Effect: Allow
-          Action:
-          - inspector2:BatchGetAccountStatus
-          - inspector2:DescribeOrganizationConfiguration
-          - inspector2:GetDelegatedAdminAccount
-          Resource: '*'
-        - Sid: AccessanalyzerPermissions
-          Effect: Allow
-          Action:
-          - access-analyzer:GetAnalyzer
-          - access-analyzer:ListAnalyzers
-          Resource: '*'
-        - Sid: CloudtrailPermissions
-          Effect: Allow
-          Action:
-          - cloudtrail:DescribeTrails
-          - cloudtrail:GetTrailStatus
-          Resource: '*'
-        - Sid: GuarddutyPermissions
-          Effect: Allow
-          Action:
-          - guardduty:DescribeOrganizationConfiguration
-          - guardduty:GetDetector
-          - guardduty:ListDetectors
-          - guardduty:ListOrganizationAdminAccounts
-          Resource: '*'
-        - Sid: SecurityhubPermissions
-          Effect: Allow
-          Action:
-          - securityhub:DescribeOrganizationConfiguration
-          - securityhub:GetAdministratorAccount
-          - securityhub:GetEnabledStandards
-          - securityhub:ListEnabledProductsForImport
-          - securityhub:ListMembers
-          - securityhub:ListOrganizationAdminAccounts
-          Resource: '*'
-        - Sid: Ec2Permissions
-          Effect: Allow
-          Action:
-          - ec2:GetEbsEncryptionByDefault
-          Resource: '*'
+          - Sid: AccessanalyzerPermissions
+            Effect: Allow
+            Action:
+              - access-analyzer:GetAnalyzer
+              - access-analyzer:ListAnalyzers
+            Resource: '*'
+          - Sid: AccountPermissions
+            Effect: Allow
+            Action:
+              - account:GetAlternateContact
+            Resource: '*'
+          - Sid: AmplifyPermissions
+            Effect: Allow
+            Action:
+              - amplify:ListApps
+            Resource: '*'
+          - Sid: ApigatewayPermissions
+            Effect: Allow
+            Action:
+              - apigateway:GET
+            Resource: '*'
+          - Sid: ApprunnerPermissions
+            Effect: Allow
+            Action:
+              - apprunner:DescribeWebAclForService
+              - apprunner:ListServices
+            Resource: '*'
+          - Sid: AppsyncPermissions
+            Effect: Allow
+            Action:
+              - appsync:ListGraphqlApis
+            Resource: '*'
+          - Sid: CloudfrontPermissions
+            Effect: Allow
+            Action:
+              - cloudfront:GetDistributionConfig
+              - cloudfront:ListDistributions
+            Resource: '*'
+          - Sid: CloudtrailPermissions
+            Effect: Allow
+            Action:
+              - cloudtrail:DescribeTrails
+              - cloudtrail:GetTrailStatus
+            Resource: '*'
+          - Sid: CloudwatchPermissions
+            Effect: Allow
+            Action:
+              - cloudwatch:DescribeAlarmsForMetric
+            Resource: '*'
+          - Sid: CognitoIdpPermissions
+            Effect: Allow
+            Action:
+              - cognito-idp:GetWebAclForResource
+              - cognito-idp:ListUserPools
+            Resource: '*'
+          - Sid: ConfigPermissions
+            Effect: Allow
+            Action:
+              - config:DescribeConfigurationAggregatorSourcesStatus
+              - config:DescribeConfigurationAggregators
+              - config:DescribeConfigurationRecorderStatus
+              - config:DescribeConfigurationRecorders
+              - config:DescribeDeliveryChannelStatus
+              - config:DescribeDeliveryChannels
+            Resource: '*'
+          - Sid: Ec2Permissions
+            Effect: Allow
+            Action:
+              - ec2:DescribeVerifiedAccessInstances
+              - ec2:GetEbsEncryptionByDefault
+              - ec2:GetVerifiedAccessInstanceWebAcl
+            Resource: '*'
+          - Sid: Elbv2Permissions
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:DescribeLoadBalancers
+            Resource: '*'
+          - Sid: GuarddutyPermissions
+            Effect: Allow
+            Action:
+              - guardduty:DescribeOrganizationConfiguration
+              - guardduty:GetDetector
+              - guardduty:ListDetectors
+              - guardduty:ListOrganizationAdminAccounts
+            Resource: '*'
+          - Sid: Inspector2Permissions
+            Effect: Allow
+            Action:
+              - inspector2:BatchGetAccountStatus
+              - inspector2:DescribeOrganizationConfiguration
+              - inspector2:GetDelegatedAdminAccount
+            Resource: '*'
+          - Sid: LambdaPermissions
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
+            Resource: '*'
+          - Sid: Macie2Permissions
+            Effect: Allow
+            Action:
+              - macie2:DescribeOrganizationConfiguration
+              - macie2:GetAdministratorAccount
+              - macie2:GetClassificationExportConfiguration
+              - macie2:GetFindingsPublicationConfiguration
+              - macie2:ListMembers
+            Resource: '*'
+          - Sid: OrganizationsPermissions
+            Effect: Allow
+            Action:
+              - organizations:DescribeOrganization
+              - organizations:ListAccounts
+              - organizations:ListDelegatedAdministrators
+            Resource: '*'
+          - Sid: S3Permissions
+            Effect: Allow
+            Action:
+              - s3:GetAccountPublicAccessBlock
+              - s3:GetBucketLocation
+              - s3:GetBucketPolicy
+            Resource: '*'
+          - Sid: SecurityhubPermissions
+            Effect: Allow
+            Action:
+              - securityhub:DescribeOrganizationConfiguration
+              - securityhub:GetAdministratorAccount
+              - securityhub:GetEnabledStandards
+              - securityhub:ListEnabledProductsForImport
+              - securityhub:ListMembers
+              - securityhub:ListOrganizationAdminAccounts
+            Resource: '*'
+          - Sid: ShieldPermissions
+            Effect: Allow
+            Action:
+              - shield:DescribeDrtAccess
+              - shield:DescribeSubscription
+              - shield:GetSubscriptionState
+              - shield:ListProtections
+            Resource: '*'
+          - Sid: StsPermissions
+            Effect: Allow
+            Action:
+              - sts:GetCallerIdentity
+            Resource: '*'
+          - Sid: Wafv2Permissions
+            Effect: Allow
+            Action:
+              - wafv2:GetLoggingConfiguration
+              - wafv2:GetWebAcl
+              - wafv2:GetWebAclForResource
+              - wafv2:ListWebAcls
+            Resource: '*'

@@ -42,26 +42,39 @@ def extract_boto3_calls(file_path: str) -> Dict[str, Set[str]]:
     # Initialize result dictionary
     result = {}
     
-    # Find all client initializations
-    # Pattern: self.something = self.session.client('service_name')
-    client_pattern = r'self\.(\w+)\s*=\s*(?:self\.)?session\.client\([\'"](\w+)[\'"]'
-    client_matches = re.findall(client_pattern, content)
+    # Find all client initializations - multiple patterns
+    # Pattern 1: self.something = self.session.client('service_name')
+    client_pattern1 = r'self\.(\w+)\s*=\s*(?:self\.)?session\.client\([\'"](\w+)[\'"]'
+    client_matches1 = re.findall(client_pattern1, content)
+    
+    # Pattern 2: service_client = self.session.client('service_name')
+    client_pattern2 = r'(\w+_client)\s*=\s*(?:self\.)?session\.client\([\'"](\w+)[\'"]'
+    client_matches2 = re.findall(client_pattern2, content)
+    
+    # Pattern 3: Additional clients created in methods (e.g., cognito_idp_client)
+    client_pattern3 = r'(\w+_client)\s*=\s*(?:self\.)?session\.client\([\'"]([^\'\"]+)[\'"]'
+    client_matches3 = re.findall(client_pattern3, content)
+    
+    # Combine all client matches
+    all_client_matches = client_matches1 + client_matches2 + client_matches3
     
     # Map client variable names to service names
     client_to_service = {}
-    for client_var, service_name in client_matches:
+    for client_var, service_name in all_client_matches:
         client_to_service[client_var] = service_name
         if service_name not in result:
             result[service_name] = set()
     
-    # Find API calls for each client
+    # Find API calls for each specific client variable
     for client_var, service_name in client_to_service.items():
-        # Pattern: self.client_var.method_name(
-        api_calls = re.findall(rf'self\.{client_var}\.([a-zA-Z0-9_]+)\(', content)
+        # Pattern: exact client_var.method_name( (with word boundaries to avoid partial matches)
+        api_pattern = rf'\b{re.escape(client_var)}\.([a-zA-Z0-9_]+)\('
+        api_calls = re.findall(api_pattern, content)
         result[service_name].update(call for call in api_calls if call not in boto3_internal_methods)
         
-        # Find paginator calls - pattern: self.client_var.get_paginator('operation_name')
-        paginator_calls = re.findall(rf'self\.{client_var}\.get_paginator\([\'"]([a-zA-Z0-9_]+)[\'"]', content)
+        # Find paginator calls - pattern: exact client_var.get_paginator('operation_name')
+        paginator_pattern = rf'\b{re.escape(client_var)}\.get_paginator\([\'"]([a-zA-Z0-9_]+)[\'"]'
+        paginator_calls = re.findall(paginator_pattern, content)
         result[service_name].update(paginator_calls)
     
     return result
@@ -95,35 +108,60 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
         if "get_paginator" in calls:
             calls.remove("get_paginator")
     
+    # Add required dependent permissions
     for service, calls in service_calls.items():
+        if service == "wafv2" and "get_web_acl_for_resource" in calls:
+            calls.add("get_web_acl")  # GetWebAclForResource requires GetWebAcl permission
+            # For Cognito user pools, GetWebACLForResource also requires cognito-idp:GetWebACLForResource
+            if "cognito-idp" not in service_calls:
+                service_calls["cognito-idp"] = set()
+            service_calls["cognito-idp"].add("get_web_acl_for_resource")
+            # For App Runner services, GetWebACLForResource also requires apprunner:DescribeWebAclForService
+            if "apprunner" not in service_calls:
+                service_calls["apprunner"] = set()
+            service_calls["apprunner"].add("describe_web_acl_for_service")
+            # For Verified Access instances, GetWebACLForResource also requires ec2:GetVerifiedAccessInstanceWebAcl
+            if "ec2" not in service_calls:
+                service_calls["ec2"] = set()
+            service_calls["ec2"].add("get_verified_access_instance_web_acl")
+    
+    # Sort services alphabetically for consistent policy output
+    for service in sorted(service_calls.keys()):
+        calls = service_calls[service]
         if not calls:
             continue
             
         # Convert service name to proper AWS service prefix
         service_prefix = service
         # Handle special cases
-        if service == "s3":
-            service_prefix = "s3"
-        elif service == "ec2":
-            service_prefix = "ec2"
-        elif service == "guardduty":
-            service_prefix = "guardduty"
-        elif service == "securityhub":
-            service_prefix = "securityhub"
-        elif service == "cloudtrail":
-            service_prefix = "cloudtrail"
-        elif service == "config":
-            service_prefix = "config"
-        elif service == "macie2":
-            service_prefix = "macie2"
-        elif service == "accessanalyzer":
-            service_prefix = "access-analyzer"
-        elif service == "inspector2":
-            service_prefix = "inspector2"
-        elif service == "organizations":
-            service_prefix = "organizations"
+        service_mapping = {
+            "s3": "s3",
+            "ec2": "ec2", 
+            "guardduty": "guardduty",
+            "securityhub": "securityhub",
+            "cloudtrail": "cloudtrail",
+            "config": "config",
+            "macie2": "macie2",
+            "accessanalyzer": "access-analyzer",
+            "inspector2": "inspector2",
+            "organizations": "organizations",
+            "shield": "shield",
+            "lambda": "lambda",
+            "wafv2": "wafv2",
+            "cloudfront": "cloudfront",
+            "elbv2": "elasticloadbalancing",
+            "cognito-idp": "cognito-idp",
+            "account": "account"
+        }
         
-        actions = [f"{service_prefix}:{convert_to_api_action(call)}" for call in calls]
+        service_prefix = service_mapping.get(service, service)
+        
+        # Special handling for API Gateway which uses HTTP verbs instead of specific actions
+        if service == "apigateway":
+            # API Gateway uses GET action for read operations
+            actions = ["apigateway:GET"]
+        else:
+            actions = [f"{service_prefix}:{convert_to_api_action(call)}" for call in calls]
         
         statements.append({
             "Sid": f"{service.capitalize()}Permissions",

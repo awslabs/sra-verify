@@ -6,6 +6,8 @@ Available checks:
   SRA-ACCOUNT-01: Security alternate contact configured (Account) [application]
   SRA-ACCOUNT-02: Billing alternate contact configured (Account) [application]
   SRA-ACCOUNT-03: Operations alternate contact configured (Account) [application]
+  SRA-AUDITMANAGER-01: AWS Audit Manager is enabled (AuditManager) [application]
+  SRA-AUDITMANAGER-02: Audit Manager delegated admin is the audit account (AuditManager) [management]
   SRA-CLOUDTRAIL-01: An Organization trail is configured for the AWS Organization (CloudTrail) [management]
   SRA-CLOUDTRAIL-02: Organization trail is encrypted with KMS (CloudTrail) [management]
   SRA-CLOUDTRAIL-03: Organization trail has Log File validation enabled (CloudTrail) [management]

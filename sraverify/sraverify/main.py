@@ -28,6 +28,7 @@ from sraverify.services.macie import CHECKS as macie_checks
 from sraverify.services.shield import CHECKS as shield_checks
 from sraverify.services.waf import CHECKS as waf_checks
 from sraverify.services.account import CHECKS as account_checks
+from sraverify.services.auditmanager import CHECKS as auditmanager_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
@@ -42,7 +43,8 @@ ALL_CHECKS = {
     **macie_checks,
     **shield_checks,
     **waf_checks,
-    **account_checks
+    **account_checks,
+    **auditmanager_checks
     # Add more service checks here as they're implemented
     # **config_checks,
     # etc.

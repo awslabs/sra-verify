@@ -102,6 +102,12 @@ Resources:
             Action:
               - appsync:ListGraphqlApis
             Resource: '*'
+          - Sid: AuditmanagerPermissions
+            Effect: Allow
+            Action:
+              - auditmanager:GetAccountStatus
+              - auditmanager:GetOrganizationAdminAccount
+            Resource: '*'
           - Sid: CloudfrontPermissions
             Effect: Allow
             Action:

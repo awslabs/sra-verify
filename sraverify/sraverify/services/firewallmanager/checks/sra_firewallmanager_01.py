@@ -15,22 +15,22 @@ class SRA_FIREWALLMANAGER_01(FirewallManagerCheck):
 
     def execute(self) -> List[Dict[str, Any]]:
         region = "us-east-1"
-        
+
         admin_response = self.get_admin_account()
-        
+
         if "Error" in admin_response:
             self.findings.append(self.create_finding(
-                status="FAIL",
+                status="ERROR",
                 region=region,
                 resource_id=None,
                 actual_value=admin_response["Error"].get("Message", "Unknown error"),
                 remediation="Configure Firewall Manager delegated administrator: https://docs.aws.amazon.com/waf/latest/developerguide/fms-prereq.html"
             ))
             return self.findings
-        
+
         admin_account = admin_response.get("AdminAccount")
         role_status = admin_response.get("RoleStatus")
-        
+
         if not admin_account:
             self.findings.append(self.create_finding(
                 status="FAIL",
@@ -71,5 +71,5 @@ class SRA_FIREWALLMANAGER_01(FirewallManagerCheck):
                 actual_value=f"Firewall Manager administrator is audit account {admin_account} with status {role_status}",
                 remediation="No remediation needed"
             ))
-        
+
         return self.findings

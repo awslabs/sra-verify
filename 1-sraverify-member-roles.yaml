@@ -153,6 +153,12 @@ Resources:
             Action:
               - elasticloadbalancing:DescribeLoadBalancers
             Resource: '*'
+          - Sid: FmsPermissions
+            Effect: Allow
+            Action:
+              - fms:GetAdminAccount
+              - fms:ListPolicies
+            Resource: '*'
           - Sid: GuarddutyPermissions
             Effect: Allow
             Action:

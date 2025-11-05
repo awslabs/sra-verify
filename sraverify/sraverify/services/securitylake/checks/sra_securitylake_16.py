@@ -53,53 +53,52 @@ class SRA_SECURITYLAKE_16(SecurityLakeCheck):
         audit_account_id = self._audit_accounts[0]
         logger.debug(f"Using audit account ID: {audit_account_id}")
 
-        # This is a global check, so we only need to run it once
-        # Use the first region just to make the API call
-        region = self.regions[0] if self.regions else "us-east-1"
-        resource_id = f"arn:aws:securitylake::global:subscriber/query-access"
+        # Check each region
+        for region in self.regions:
+            resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:subscriber/query-access"
 
-        # Get subscribers using the base class method
-        subscribers = self.get_subscribers(region)
+            # Get subscribers using the base class method
+            subscribers = self.get_subscribers(region)
 
-        # Check if any subscriber is the audit account with query access
-        audit_subscriber = next(
-            (sub for sub in subscribers
-             if "LAKEFORMATION" in sub.get("accessTypes", []) and
-             sub.get("subscriberIdentity", {}).get("principal") == audit_account_id),
-            None
-        )
+            # Check if any subscriber is the audit account with query access
+            audit_subscriber = next(
+                (sub for sub in subscribers
+                 if "LAKEFORMATION" in sub.get("accessTypes", []) and
+                 sub.get("subscriberIdentity", {}).get("principal") == audit_account_id),
+                None
+            )
 
-        if not audit_subscriber:
-            logger.debug("Audit account is not set up as query access subscriber")
-            findings.append(
-                self.create_finding(
-                    status="FAIL",
-                    region="global",
-                    resource_id=resource_id,
-                    checked_value=f"Audit account {audit_account_id} has query access",
-                    actual_value=f"Audit account {audit_account_id} is not set up as query access subscriber",
-                    remediation=(
-                        f"Set up the audit account {audit_account_id} as a query access subscriber in Security Lake. "
-                        "In the Security Lake console, navigate to Subscribers > Create subscriber and select "
-                        f"the audit account {audit_account_id} with Query access type."
+            if not audit_subscriber:
+                logger.debug(f"Audit account is not set up as query access subscriber in {region}")
+                findings.append(
+                    self.create_finding(
+                        status="FAIL",
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value=f"Audit account {audit_account_id} has query access",
+                        actual_value=f"Audit account {audit_account_id} is not set up as query access subscriber",
+                        remediation=(
+                            f"Set up the audit account {audit_account_id} as a query access subscriber in Security Lake. "
+                            "In the Security Lake console, navigate to Subscribers > Create subscriber and select "
+                            f"the audit account {audit_account_id} with Query access type."
+                        )
                     )
                 )
-            )
-        else:
-            # Get subscriber ID for resource ID
-            subscriber_id = audit_subscriber.get("subscriberId", "default")
-            resource_id = f"arn:aws:securitylake::global:subscriber/{subscriber_id}"
+            else:
+                # Get subscriber ID for resource ID
+                subscriber_id = audit_subscriber.get("subscriberId", "default")
+                resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:subscriber/{subscriber_id}"
 
-            logger.debug("Audit account is set up as query access subscriber")
-            findings.append(
-                self.create_finding(
-                    status="PASS",
-                    region="global",
-                    resource_id=resource_id,
-                    checked_value=f"Audit account {audit_account_id} has query access",
-                    actual_value=f"Audit account {audit_account_id} is set up as query access subscriber",
-                    remediation="No remediation needed"
+                logger.debug(f"Audit account is set up as query access subscriber in {region}")
+                findings.append(
+                    self.create_finding(
+                        status="PASS",
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value=f"Audit account {audit_account_id} has query access",
+                        actual_value=f"Audit account {audit_account_id} is set up as query access subscriber",
+                        remediation="No remediation needed"
+                    )
                 )
-            )
 
         return findings

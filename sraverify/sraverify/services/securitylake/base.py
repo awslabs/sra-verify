@@ -358,6 +358,7 @@ class SecurityLakeCheck(SecurityCheck):
                 return False
 
             # Get account-specific data lake sources and cache them
+            # Pass the account ID as a string (not the full account object)
             data_lake_sources = client.get_data_lake_sources(self.account_id)
             self.__class__._log_sources_cache[cache_key] = data_lake_sources
             logger.debug(f"Cached {len(data_lake_sources)} account data lake sources for {cache_key}")
@@ -369,5 +370,55 @@ class SecurityLakeCheck(SecurityCheck):
         for source_entry in data_lake_sources:
             if source_entry.get("account") == self.account_id and source_entry.get("sourceName") == source_name:
                 return True
+
+        return False
+
+    def check_log_source_configured(self, region: str, source_name: str, account_id: str = None, 
+                                     required_version: str = "2.0") -> bool:
+        """
+        Check if a log source is configured using list-log-sources API.
+        This checks configuration, not collection status.
+
+        Args:
+            region: AWS region name
+            source_name: Name of the log source (e.g., 'ROUTE53', 'VPC_FLOW')
+            account_id: Account ID to check (defaults to current account)
+            required_version: Required source version (default: "2.0")
+
+        Returns:
+            True if source is configured with correct version, False otherwise
+        """
+        target_account = account_id or self.account_id
+        if not target_account:
+            logger.debug("Could not determine account ID")
+            return False
+
+        # Check cache first
+        cache_key = f"list_sources:{target_account}:{region}"
+        if cache_key not in self.__class__._log_sources_cache:
+            client = self.get_client(region)
+            if not client:
+                return False
+
+            # Get configured log sources and cache them
+            try:
+                log_sources = client.list_log_sources(regions=[region], accounts=[target_account])
+                self.__class__._log_sources_cache[cache_key] = log_sources
+                logger.debug(f"Cached log sources for {cache_key}")
+            except Exception as e:
+                logger.error(f"Error listing log sources: {e}")
+                return False
+        else:
+            log_sources = self.__class__._log_sources_cache[cache_key]
+            logger.debug(f"Using cached log sources for {cache_key}")
+
+        # Check if the source is configured with correct version
+        for source_entry in log_sources:
+            if source_entry.get("account") == target_account and source_entry.get("region") == region:
+                for source in source_entry.get("sources", []):
+                    aws_log_source = source.get("awsLogSource", {})
+                    if (aws_log_source.get("sourceName") == source_name and 
+                        aws_log_source.get("sourceVersion") == required_version):
+                        return True
 
         return False

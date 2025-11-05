@@ -71,20 +71,31 @@ class SecurityLakeClient:
             logger.error(f"Error listing data lakes in {self.region}: {e}")
             return []
 
-    def list_log_sources(self):
+    def list_log_sources(self, regions=None, accounts=None):
         """
         List enabled log sources with pagination support.
+
+        Args:
+            regions: List of regions to filter (optional)
+            accounts: List of account IDs to filter (optional)
 
         Returns:
             List of log sources or empty list if error
         """
         try:
-            response = self.client.list_log_sources()
+            params = {}
+            if regions:
+                params['regions'] = regions
+            if accounts:
+                params['accounts'] = accounts
+                
+            response = self.client.list_log_sources(**params)
             log_sources = response.get("sources", [])
 
             # Handle pagination
             while response.get('nextToken'):
-                response = self.client.list_log_sources(nextToken=response['nextToken'])
+                params['nextToken'] = response['nextToken']
+                response = self.client.list_log_sources(**params)
                 log_sources.extend(response.get("sources", []))
 
             return log_sources
@@ -204,7 +215,7 @@ class SecurityLakeClient:
         Get data lake sources for a specific account.
         
         Args:
-            account_id: AWS account ID to check sources for
+            account_id: AWS account ID string to check sources for
             
         Returns:
             List of data lake sources or empty list if error
@@ -212,6 +223,14 @@ class SecurityLakeClient:
         try:
             request_body = {}
             if account_id:
+                # Ensure account_id is a string (extract ID if it's a dict like SecurityHub pattern)
+                if isinstance(account_id, dict):
+                    if 'Id' in account_id:
+                        account_id = account_id['Id']
+                    else:
+                        logger.error(f"Cannot extract account ID from dict: {account_id}")
+                        return []
+                        
                 request_body["accounts"] = [account_id]
                 
             response = self.client.get_data_lake_sources(**request_body)

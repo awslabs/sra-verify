@@ -1,10 +1,8 @@
 """Check if Security Lake organization configuration is enabled."""
 
-
 from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
-
 
 
 class SRA_SECURITYLAKE_04(SecurityLakeCheck):
@@ -18,7 +16,7 @@ class SRA_SECURITYLAKE_04(SecurityLakeCheck):
         self.severity = "HIGH"
         self.description = (
             "This check verifies whether Amazon Security Lake has configuration that "
-            "will be automatically enable new organization accounts as member accounts "
+            "will automatically enable new organization accounts as member accounts "
             "from an Amazon Security Lake administrator account."
         )
         self.check_logic = (

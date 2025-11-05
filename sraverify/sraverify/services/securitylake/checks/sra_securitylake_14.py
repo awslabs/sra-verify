@@ -4,12 +4,14 @@ from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
 
+
 class SRA_SECURITYLAKE_14(SecurityLakeCheck):
     """Check if Security Lake has a delegated administrator."""
 
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "management"  # Delegated admin check runs from management account
         self.check_id = "SRA-SECURITYLAKE-14"
         self.check_name = "Security Lake has delegated administrator"
         self.severity = "CRITICAL"

@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
 
+
 class SRA_SECURITYLAKE_06(SecurityLakeCheck):
     """Check if Route 53 log source is enabled for Security Lake."""
 

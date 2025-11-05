@@ -1,10 +1,8 @@
 """Check if Lambda execution logs are enabled for Security Lake."""
 
-
 from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
-
 
 
 class SRA_SECURITYLAKE_10(SecurityLakeCheck):

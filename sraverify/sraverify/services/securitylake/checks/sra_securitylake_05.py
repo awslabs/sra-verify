@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
 
+
 class SRA_SECURITYLAKE_05(SecurityLakeCheck):
     """Check if Security Lake organization configuration matches expected values."""
 

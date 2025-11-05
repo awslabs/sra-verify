@@ -5,7 +5,6 @@ from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
 
 
-
 class SRA_SECURITYLAKE_09(SecurityLakeCheck):
     """Check if EKS Audit logs are enabled for Security Lake."""
 

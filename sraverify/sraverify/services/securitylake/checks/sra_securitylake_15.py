@@ -11,7 +11,7 @@ class SRA_SECURITYLAKE_15(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
-
+        self.account_type = "management"  # Delegated admin check runs from management account
         self.check_id = "SRA-SECURITYLAKE-15"
         self.check_name = "Security Lake delegated admin is log archive account"
         self.severity = "CRITICAL"

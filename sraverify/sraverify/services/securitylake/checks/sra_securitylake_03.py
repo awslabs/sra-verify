@@ -1,8 +1,8 @@
 """Check if Security Lake SQS DLQ is encrypted with CMK."""
 
-from sraverify.core.logging import logger
 from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
+from sraverify.core.logging import logger
 
 
 class SRA_SECURITYLAKE_03(SecurityLakeCheck):
@@ -15,7 +15,7 @@ class SRA_SECURITYLAKE_03(SecurityLakeCheck):
         self.check_name = "Security Lake DLQ encrypted with CMK"
         self.severity = "HIGH"
         self.description = (
-            "This check verifies whether Security Lake SQS Dlq is encrypted in this "
+            "This check verifies whether Security Lake SQS DLQ is encrypted in this "
             "region with a customer managed key from AWS KMS. You must use a customer "
             "managed KMS key for the encryption as you have greater control on the key "
             "usage and permission."
@@ -69,9 +69,8 @@ class SRA_SECURITYLAKE_03(SecurityLakeCheck):
             # Check encryption for each queue
             unencrypted_dlqs = []
             for queue_name, queue_url in dlq_queues:
-                # Use the client through the base class
-                client = self.get_client(region)
-                kms_key = client.get_sqs_queue_encryption(queue_url) if client else None
+                # Check encryption using base class method
+                kms_key = self.get_sqs_queue_encryption(region, queue_url)
 
                 if not kms_key or kms_key.startswith("alias/aws/"):
                     unencrypted_dlqs.append((queue_name, queue_url))

@@ -1,8 +1,8 @@
 """Check if Security Lake SQS queues are encrypted with CMK."""
 
-from sraverify.core.logging import logger
 from typing import List, Dict, Any
 from sraverify.services.securitylake.base import SecurityLakeCheck
+from sraverify.core.logging import logger
 
 
 class SRA_SECURITYLAKE_02(SecurityLakeCheck):
@@ -73,9 +73,8 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
             for queue_name, queue_url in sqs_queues:
                 resource_id = f"arn:aws:sqs:{region}:{self.account_id}:{queue_name}"
 
-                # Use the client through the base class
-                client = self.get_client(region)
-                kms_key = client.get_sqs_queue_encryption(queue_url) if client else None
+                # Check encryption using base class method
+                kms_key = self.get_sqs_queue_encryption(region, queue_url)
 
                 if not kms_key or kms_key.startswith("alias/aws/"):
                     unencrypted_queues.append((queue_name, queue_url))

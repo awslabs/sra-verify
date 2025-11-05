@@ -5,13 +5,13 @@ from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.core.logging import logger
 
 
-
 class SRA_SECURITYLAKE_01(SecurityLakeCheck):
     """Check if Amazon Security Lake is enabled."""
 
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Security Lake must be enabled in all accounts
         self.check_id = "SRA-SECURITYLAKE-01"
         self.check_name = "Security Lake is enabled"
         self.severity = "HIGH"
@@ -43,22 +43,14 @@ class SRA_SECURITYLAKE_01(SecurityLakeCheck):
             # Construct a proper ARN-like resource ID
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default"
 
-            # Get data lakes for the region
-            client = self.get_client(region)
-            data_lakes = client.list_data_lakes() if client else []
-
-            # Handle both list and dictionary responses
-            if isinstance(data_lakes, dict):
-                data_lakes = data_lakes.get('dataLakes', [])
-
-            # Check if any data lakes are configured in the region
-            if data_lakes:
+            # Check if Security Lake is enabled using base class method with caching
+            if self.is_security_lake_enabled(region):
                 self.findings.append(
                     self.create_finding(
                         status="PASS",
                         region=region,
                         resource_id=resource_id,
-                        checked_value="Security Lake Enabled",
+                        checked_value="Security Lake enabled in region",
                         actual_value=f"Security Lake is enabled in {region}",
                         remediation="No remediation needed"
                     )
@@ -69,7 +61,7 @@ class SRA_SECURITYLAKE_01(SecurityLakeCheck):
                         status="FAIL",
                         region=region,
                         resource_id=resource_id,
-                        checked_value="Security Lake Enabled",
+                        checked_value="Security Lake enabled in region",
                         actual_value=f"Security Lake is not enabled in {region}",
                         remediation=(
                         "Enable Security Lake in this region. In the Security Lake console, "

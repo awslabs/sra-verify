@@ -212,6 +212,14 @@ Resources:
               - securityhub:ListMembers
               - securityhub:ListOrganizationAdminAccounts
             Resource: '*'
+          - Sid: SecuritylakePermissions
+            Effect: Allow
+            Action:
+              - securitylake:GetDataLakeOrganizationConfiguration
+              - securitylake:ListDataLakes
+              - securitylake:ListLogSources
+              - securitylake:ListSubscribers
+            Resource: '*'
           - Sid: ShieldPermissions
             Effect: Allow
             Action:
@@ -219,6 +227,11 @@ Resources:
               - shield:DescribeSubscription
               - shield:GetSubscriptionState
               - shield:ListProtections
+            Resource: '*'
+          - Sid: SqsPermissions
+            Effect: Allow
+            Action:
+              - sqs:GetQueueAttributes
             Resource: '*'
           - Sid: StsPermissions
             Effect: Allow

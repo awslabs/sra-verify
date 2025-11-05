@@ -216,6 +216,7 @@ Resources:
             Effect: Allow
             Action:
               - securitylake:GetDataLakeOrganizationConfiguration
+              - securitylake:GetDataLakeSources
               - securitylake:ListDataLakes
               - securitylake:ListLogSources
               - securitylake:ListSubscribers

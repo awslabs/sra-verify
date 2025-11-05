@@ -316,6 +316,43 @@ class SecurityLakeCheck(SecurityCheck):
             self.__class__._sqs_encryption_cache[cache_key] = None
             return None
 
+    def get_data_lake_sources(self, region: str, account_id: str = None) -> List[Dict[str, Any]]:
+        """
+        Get Security Lake data lake sources with caching.
+        
+        Args:
+            region: AWS region name
+            account_id: Optional account ID. If None, gets all accounts.
+            
+        Returns:
+            List of data lake sources
+        """
+        cache_key = f"{self.account_id}:{region}:data_lake_sources:{account_id or 'all'}"
+        if cache_key in self.__class__._log_sources_cache:
+            logger.debug(f"Using cached data lake sources for {cache_key}")
+            return self.__class__._log_sources_cache[cache_key]
+            
+        client = self.get_client(region)
+        if not client:
+            logger.debug(f"No client available for region {region}")
+            self.__class__._log_sources_cache[cache_key] = []
+            return []
+            
+        try:
+            # Call with or without account_id based on parameter
+            data_lake_sources = client.get_data_lake_sources(account_id)
+            self.__class__._log_sources_cache[cache_key] = data_lake_sources
+            logger.debug(f"Cached {len(data_lake_sources)} data lake sources for {cache_key}")
+            return data_lake_sources
+        except Exception as e:
+            # Use debug level for UnauthorizedException as it's expected when Security Lake isn't enabled
+            if "UnauthorizedException" in str(e) or "Unauthorized" in str(e):
+                logger.debug(f"Security Lake not enabled in {region}: {e}")
+            else:
+                logger.error(f"Error getting data lake sources in {region}: {e}")
+            self.__class__._log_sources_cache[cache_key] = []
+            return []
+
     def get_enabled_regions(self) -> List[str]:
         """
         Get list of regions where Security Lake is enabled.

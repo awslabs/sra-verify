@@ -239,5 +239,9 @@ class SecurityLakeClient:
             logger.debug(f"No data lake sources found in region {self.region}")
             return []
         except ClientError as e:
-            logger.error(f"Error getting data lake sources in {self.region}: {e}")
+            # Use debug level for UnauthorizedException as it's expected when Security Lake isn't enabled
+            if e.response.get('Error', {}).get('Code') == 'UnauthorizedException':
+                logger.debug(f"Security Lake not enabled in {self.region}: {e}")
+            else:
+                logger.error(f"Error getting data lake sources in {self.region}: {e}")
             return []

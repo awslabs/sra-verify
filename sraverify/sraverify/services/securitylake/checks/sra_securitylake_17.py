@@ -63,8 +63,8 @@ class SRA_SECURITYLAKE_17(SecurityLakeCheck):
         # Check if any subscriber is the audit account with data access
         audit_subscriber = next(
             (sub for sub in subscribers
-             if sub.get("subscriberType") == "DATA_ACCESS" and
-             sub.get("accountId") == audit_account_id),
+             if "S3" in sub.get("accessTypes", []) and
+             sub.get("subscriberIdentity", {}).get("principal") == audit_account_id),
             None
         )
 

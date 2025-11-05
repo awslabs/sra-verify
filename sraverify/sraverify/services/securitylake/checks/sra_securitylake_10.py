@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_10(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-10"
         self.check_name = "Security Lake Lambda execution logs enabled"
         self.severity = "HIGH"
@@ -40,7 +41,7 @@ class SRA_SECURITYLAKE_10(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/LAMBDA_EXECUTION"
 
             # Check if Lambda execution logs are enabled using the base class method
-            lambda_enabled = self.get_log_source_status(region, "LAMBDA_EXECUTION")
+            lambda_enabled = self.get_account_log_source_status(region, "LAMBDA_EXECUTION")
 
             if not lambda_enabled:
                 self.findings.append(

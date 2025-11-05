@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_11(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-11"
         self.check_name = "Security Lake CloudTrail management logs enabled"
         self.severity = "HIGH"
@@ -42,7 +43,7 @@ class SRA_SECURITYLAKE_11(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/CLOUD_TRAIL_MGMT"
 
             # Check if CloudTrail management logs are enabled using the base class method
-            cloudtrail_enabled = self.get_log_source_status(region, "CLOUD_TRAIL_MGMT")
+            cloudtrail_enabled = self.get_account_log_source_status(region, "CLOUD_TRAIL_MGMT")
 
             if not cloudtrail_enabled:
                 self.findings.append(

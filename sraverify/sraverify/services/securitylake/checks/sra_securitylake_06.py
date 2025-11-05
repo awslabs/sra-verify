@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_06(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-06"
         self.check_name = "Security Lake Route 53 log source enabled"
         self.severity = "HIGH"
@@ -40,7 +41,7 @@ class SRA_SECURITYLAKE_06(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/ROUTE53"
 
             # Check if Route 53 log source is enabled using the base class method
-            route53_enabled = self.get_log_source_status(region, "ROUTE53")
+            route53_enabled = self.get_account_log_source_status(region, "ROUTE53")
 
             if not route53_enabled:
                 self.findings.append(

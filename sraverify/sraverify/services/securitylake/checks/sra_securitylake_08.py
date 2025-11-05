@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_08(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-08"
         self.check_name = "Security Lake Security Hub findings enabled"
         self.severity = "HIGH"
@@ -41,7 +42,7 @@ class SRA_SECURITYLAKE_08(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/SH_FINDINGS"
 
             # Check if Security Hub findings are enabled using the base class method
-            securityhub_enabled = self.get_log_source_status(region, "SH_FINDINGS")
+            securityhub_enabled = self.get_account_log_source_status(region, "SH_FINDINGS")
 
             if not securityhub_enabled:
                 self.findings.append(

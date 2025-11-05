@@ -333,3 +333,41 @@ class SecurityLakeCheck(SecurityCheck):
                 logger.debug(f"Security Lake is not enabled in {region}")
 
         return enabled_regions
+
+    def get_account_log_source_status(self, region: str, source_name: str) -> bool:
+        """
+        Check if a specific log source is enabled for the current account in a region.
+        Uses get_data_lake_sources API for account-specific status.
+
+        Args:
+            region: AWS region name
+            source_name: Name of the log source to check (e.g., 'ROUTE53', 'VPC_FLOW')
+
+        Returns:
+            True if the log source is enabled for this account, False otherwise
+        """
+        if not self.account_id:
+            logger.debug("Could not determine account ID")
+            return False
+
+        # Check cache first
+        cache_key = f"account_sources:{self.account_id}:{region}"
+        if cache_key not in self.__class__._log_sources_cache:
+            client = self.get_client(region)
+            if not client:
+                return False
+
+            # Get account-specific data lake sources and cache them
+            data_lake_sources = client.get_data_lake_sources(self.account_id)
+            self.__class__._log_sources_cache[cache_key] = data_lake_sources
+            logger.debug(f"Cached {len(data_lake_sources)} account data lake sources for {cache_key}")
+        else:
+            data_lake_sources = self.__class__._log_sources_cache[cache_key]
+            logger.debug(f"Using cached account data lake sources for {cache_key}")
+
+        # Check if the source is enabled for this account
+        for source_entry in data_lake_sources:
+            if source_entry.get("account") == self.account_id and source_entry.get("sourceName") == source_name:
+                return True
+
+        return False

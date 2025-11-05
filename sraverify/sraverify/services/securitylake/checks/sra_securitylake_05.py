@@ -22,6 +22,7 @@ class SRA_SECURITYLAKE_05(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-05"
         self.check_name = "Security Lake log sources configured"
         self.severity = "MEDIUM"
@@ -49,10 +50,10 @@ class SRA_SECURITYLAKE_05(SecurityLakeCheck):
             logger.debug(f"Checking Security Lake log sources configuration in {region}")
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-sources/all"
 
-            # Check each expected log source
+            # Check each expected log source for this account
             configured_sources = set()
             for source in self.EXPECTED_LOG_SOURCES:
-                if self.get_log_source_status(region, source):
+                if self.get_account_log_source_status(region, source):
                     configured_sources.add(source)
 
             if not configured_sources:

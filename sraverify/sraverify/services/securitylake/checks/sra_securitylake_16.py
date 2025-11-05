@@ -64,8 +64,8 @@ class SRA_SECURITYLAKE_16(SecurityLakeCheck):
         # Check if any subscriber is the audit account with query access
         audit_subscriber = next(
             (sub for sub in subscribers
-             if sub.get("subscriberType") == "QUERY_ACCESS" and
-             sub.get("accountId") == audit_account_id),
+             if "LAKEFORMATION" in sub.get("accessTypes", []) and
+             sub.get("subscriberIdentity", {}).get("principal") == audit_account_id),
             None
         )
 

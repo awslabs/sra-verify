@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_13(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-13"
         self.check_name = "Security Lake VPC flow logs enabled"
         self.severity = "HIGH"
@@ -41,7 +42,7 @@ class SRA_SECURITYLAKE_13(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/VPC_FLOW"
 
             # Check if VPC Flow logs are enabled using the base class method
-            vpc_flow_enabled = self.get_log_source_status(region, "VPC_FLOW")
+            vpc_flow_enabled = self.get_account_log_source_status(region, "VPC_FLOW")
 
             if not vpc_flow_enabled:
                 self.findings.append(

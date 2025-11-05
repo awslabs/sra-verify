@@ -198,3 +198,27 @@ class SecurityLakeClient:
         except ClientError as e:
             logger.error(f"Error listing organization accounts: {e}")
             return []
+
+    def get_data_lake_sources(self, account_id: str = None):
+        """
+        Get data lake sources for a specific account.
+        
+        Args:
+            account_id: AWS account ID to check sources for
+            
+        Returns:
+            List of data lake sources or empty list if error
+        """
+        try:
+            request_body = {}
+            if account_id:
+                request_body["accounts"] = [account_id]
+                
+            response = self.client.get_data_lake_sources(**request_body)
+            return response.get("dataLakeSources", [])
+        except self.client.exceptions.ResourceNotFoundException:
+            logger.debug(f"No data lake sources found in region {self.region}")
+            return []
+        except ClientError as e:
+            logger.error(f"Error getting data lake sources in {self.region}: {e}")
+            return []

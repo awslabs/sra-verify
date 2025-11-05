@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_07(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-07"
         self.check_name = "Security Lake CloudTrail S3 data events enabled"
         self.severity = "HIGH"
@@ -42,7 +43,7 @@ class SRA_SECURITYLAKE_07(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/S3_DATA"
 
             # Check if S3 data events are enabled using the base class method
-            s3_data_enabled = self.get_log_source_status(region, "S3_DATA")
+            s3_data_enabled = self.get_account_log_source_status(region, "S3_DATA")
 
             if not s3_data_enabled:
                 self.findings.append(

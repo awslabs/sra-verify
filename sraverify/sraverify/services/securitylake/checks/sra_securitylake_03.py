@@ -44,8 +44,9 @@ class SRA_SECURITYLAKE_03(SecurityLakeCheck):
             # Find DLQ queues
             dlq_queues = []
             for subscriber in subscribers:
-                if "dlq" in subscriber.get("endpoint", "").lower():
-                    queue_url = subscriber["endpoint"]
+                endpoint = subscriber.get("subscriberEndpoint", "")
+                if endpoint and "sqs" in endpoint.lower() and "dlq" in endpoint.lower():
+                    queue_url = endpoint
                     queue_name = queue_url.split("/")[-1]
                     dlq_queues.append((queue_name, queue_url))
 

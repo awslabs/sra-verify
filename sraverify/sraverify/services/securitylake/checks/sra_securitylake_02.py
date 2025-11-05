@@ -46,8 +46,9 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
             # Find SQS queues
             sqs_queues = []
             for subscriber in subscribers:
-                if "sqs" in subscriber.get("endpoint", "").lower():
-                    queue_url = subscriber["endpoint"]
+                endpoint = subscriber.get("subscriberEndpoint", "")
+                if endpoint and "sqs" in endpoint.lower():
+                    queue_url = endpoint
                     queue_name = queue_url.split("/")[-1]
                     sqs_queues.append((queue_name, queue_url))
 

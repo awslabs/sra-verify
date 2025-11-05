@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_12(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-12"
         self.check_name = "Security Lake WAF logs enabled"
         self.severity = "HIGH"
@@ -41,7 +42,7 @@ class SRA_SECURITYLAKE_12(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/WAF"
 
             # Check if WAF logs are enabled using the base class method
-            waf_enabled = self.get_log_source_status(region, "WAF")
+            waf_enabled = self.get_account_log_source_status(region, "WAF")
 
             if not waf_enabled:
                 self.findings.append(

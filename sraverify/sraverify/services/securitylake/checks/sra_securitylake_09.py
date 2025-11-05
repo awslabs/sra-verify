@@ -11,6 +11,7 @@ class SRA_SECURITYLAKE_09(SecurityLakeCheck):
     def __init__(self):
         """Initialize check."""
         super().__init__()
+        self.account_type = "application"  # Log sources configured in application accounts
         self.check_id = "SRA-SECURITYLAKE-09"
         self.check_name = "Security Lake EKS audit logs enabled"
         self.severity = "HIGH"
@@ -41,7 +42,7 @@ class SRA_SECURITYLAKE_09(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:log-source/EKS_AUDIT"
 
             # Check if EKS Audit logs are enabled using the base class method
-            eks_enabled = self.get_log_source_status(region, "EKS_AUDIT")
+            eks_enabled = self.get_account_log_source_status(region, "EKS_AUDIT")
 
             if not eks_enabled:
                 self.findings.append(

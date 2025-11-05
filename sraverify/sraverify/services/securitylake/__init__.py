@@ -17,7 +17,6 @@ from sraverify.services.securitylake.checks.sra_securitylake_14 import SRA_SECUR
 from sraverify.services.securitylake.checks.sra_securitylake_15 import SRA_SECURITYLAKE_15
 from sraverify.services.securitylake.checks.sra_securitylake_16 import SRA_SECURITYLAKE_16
 from sraverify.services.securitylake.checks.sra_securitylake_17 import SRA_SECURITYLAKE_17
-from sraverify.services.securitylake.checks.sra_securitylake_18 import SRA_SECURITYLAKE_18
 
 CHECKS = {
     "SRA-SECURITYLAKE-01": SRA_SECURITYLAKE_01,
@@ -36,6 +35,5 @@ CHECKS = {
     "SRA-SECURITYLAKE-14": SRA_SECURITYLAKE_14,
     "SRA-SECURITYLAKE-15": SRA_SECURITYLAKE_15,
     "SRA-SECURITYLAKE-16": SRA_SECURITYLAKE_16,
-    "SRA-SECURITYLAKE-17": SRA_SECURITYLAKE_17,
-    "SRA-SECURITYLAKE-18": SRA_SECURITYLAKE_18
+    "SRA-SECURITYLAKE-17": SRA_SECURITYLAKE_17
 }

@@ -48,8 +48,21 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
             for subscriber in subscribers:
                 endpoint = subscriber.get("subscriberEndpoint", "")
                 if endpoint and "sqs" in endpoint.lower():
-                    queue_url = endpoint
-                    queue_name = queue_url.split("/")[-1]
+                    # Convert ARN to queue URL if needed
+                    if endpoint.startswith("arn:aws:sqs:"):
+                        # Extract components from ARN: arn:aws:sqs:region:account:queue-name
+                        arn_parts = endpoint.split(":")
+                        if len(arn_parts) >= 6:
+                            queue_region = arn_parts[3]
+                            account_id = arn_parts[4]
+                            queue_name = arn_parts[5]
+                            queue_url = f"https://sqs.{queue_region}.amazonaws.com/{account_id}/{queue_name}"
+                        else:
+                            continue
+                    else:
+                        queue_url = endpoint
+                        queue_name = queue_url.split("/")[-1]
+                    
                     sqs_queues.append((queue_name, queue_url))
 
             if not subscribers or not sqs_queues:

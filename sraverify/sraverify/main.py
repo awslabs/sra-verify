@@ -31,6 +31,7 @@ from sraverify.services.account import CHECKS as account_checks
 from sraverify.services.auditmanager import CHECKS as auditmanager_checks
 from sraverify.services.firewallmanager import CHECKS as firewallmanager_checks
 from sraverify.services.securitylake import CHECKS as securitylake_checks
+from sraverify.services.securityincidentresponse import CHECKS as securityincidentresponse_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
@@ -48,7 +49,8 @@ ALL_CHECKS = {
     **account_checks,
     **auditmanager_checks,
     **firewallmanager_checks,
-    **securitylake_checks
+    **securitylake_checks,
+    **securityincidentresponse_checks
     # Add more service checks here as they're implemented
     # **config_checks,
     # etc.

@@ -167,6 +167,11 @@ Resources:
               - guardduty:ListDetectors
               - guardduty:ListOrganizationAdminAccounts
             Resource: '*'
+          - Sid: IamPermissions
+            Effect: Allow
+            Action:
+              - iam:GetRole
+            Resource: '*'
           - Sid: Inspector2Permissions
             Effect: Allow
             Action:
@@ -201,6 +206,13 @@ Resources:
               - s3:GetAccountPublicAccessBlock
               - s3:GetBucketLocation
               - s3:GetBucketPolicy
+            Resource: '*'
+          - Sid: SecurityIRPermissions
+            Effect: Allow
+            Action:
+              - security-ir:BatchGetMemberAccountDetails
+              - security-ir:GetMembership
+              - security-ir:ListMemberships
             Resource: '*'
           - Sid: SecurityhubPermissions
             Effect: Allow

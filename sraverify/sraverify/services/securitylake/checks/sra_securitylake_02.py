@@ -62,7 +62,7 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
                     else:
                         queue_url = endpoint
                         queue_name = queue_url.split("/")[-1]
-                    
+
                     sqs_queues.append((queue_name, queue_url))
 
             if not subscribers or not sqs_queues:
@@ -73,9 +73,9 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
                         region=region,
                         resource_id=resource_id,
                         checked_value="SQS queues present and encrypted with CMK",
-                        actual_value=f"No SQS queues found - Security Lake may not be enabled in {region}",
+                        actual_value=f"No SQS queues found in {region}",
                         remediation=(
-                            "Enable Security Lake and configure subscribers with SQS queues. In the Security Lake console, "
+                            "Configure subscribers with SQS queues. In the Security Lake console, "
                             "navigate to Subscribers and add subscribers with SQS queue endpoints."
                         )
                     )

@@ -12,11 +12,12 @@ class SRA_SECURITYINCIDENTRESPONSE_03(SecurityIncidentResponseCheck):
         self.check_logic = "Lists memberships and checks if Triage opt-in feature is enabled"
 
     def execute(self) -> List[Dict[str, Any]]:
-        region = self.regions[0] if self.regions else "us-east-1"
-        
+        # Discover the region where Security Incident Response is configured
+        region = self.discover_sir_region()
+
         # First get list of memberships
         memberships_response = self.list_memberships()
-        
+
         if "Error" in memberships_response:
             self.findings.append(self.create_finding(
                 status="ERROR",
@@ -28,7 +29,7 @@ class SRA_SECURITYINCIDENTRESPONSE_03(SecurityIncidentResponseCheck):
             return self.findings
 
         memberships = memberships_response.get("items", [])
-        
+
         if not memberships:
             self.findings.append(self.create_finding(
                 status="FAIL",
@@ -42,10 +43,10 @@ class SRA_SECURITYINCIDENTRESPONSE_03(SecurityIncidentResponseCheck):
         # Check each membership for proactive response
         for membership in memberships:
             membership_id = membership.get("membershipId")
-            
+
             # Get detailed membership info
             membership_details = self.get_membership(membership_id)
-            
+
             if "Error" in membership_details:
                 self.findings.append(self.create_finding(
                     status="ERROR",
@@ -55,16 +56,16 @@ class SRA_SECURITYINCIDENTRESPONSE_03(SecurityIncidentResponseCheck):
                     remediation="Check IAM permissions for Security Incident Response GetMembership API access"
                 ))
                 continue
-            
+
             # Check opt-in features for Triage
             opt_in_features = membership_details.get("optInFeatures", [])
             triage_enabled = False
-            
+
             for feature in opt_in_features:
                 if feature.get("featureName") == "Triage" and feature.get("isEnabled"):
                     triage_enabled = True
                     break
-            
+
             if triage_enabled:
                 self.findings.append(self.create_finding(
                     status="PASS",

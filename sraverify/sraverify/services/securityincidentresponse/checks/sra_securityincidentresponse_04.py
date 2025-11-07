@@ -12,7 +12,8 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
         self.check_logic = "Gets all organization accounts and checks if each is associated with Security Incident Response membership"
 
     def execute(self) -> List[Dict[str, Any]]:
-        region = self.regions[0] if self.regions else "us-east-1"
+        # Discover the region where Security Incident Response is configured
+        region = self.discover_sir_region()
         
         # Get all organization accounts
         org_accounts = self.get_organization_accounts()
@@ -72,7 +73,7 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
                         region=region,
                         resource_id=account_id,
                         actual_value=response["Error"].get("Message", "Unknown error"),
-                        remediation="Check IAM permissions for Security Incident Response BatchGetMemberAccountDetails API access"
+                        remediation="Check IAM permissions for Security Incident Response BatchGetMemberAccountDetails API access or ensure you specified the region where Security Incident Response is enabled with the --regions flag"
                     ))
                 continue
             

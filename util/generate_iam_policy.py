@@ -55,8 +55,12 @@ def extract_boto3_calls(file_path: str) -> Dict[str, Set[str]]:
     client_pattern3 = r'(\w+_client)\s*=\s*(?:self\.)?session\.client\([\'"]([^\'\"]+)[\'"]'
     client_matches3 = re.findall(client_pattern3, content)
     
+    # Pattern 4: Simple service name variables (e.g., sqs = self.session.client('sqs'))
+    client_pattern4 = r'(\w+)\s*=\s*(?:self\.)?session\.client\([\'"](\w+)[\'"]'
+    client_matches4 = re.findall(client_pattern4, content)
+    
     # Combine all client matches
-    all_client_matches = client_matches1 + client_matches2 + client_matches3
+    all_client_matches = client_matches1 + client_matches2 + client_matches3 + client_matches4
     
     # Map client variable names to service names
     client_to_service = {}

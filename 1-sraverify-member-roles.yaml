@@ -102,6 +102,12 @@ Resources:
             Action:
               - appsync:ListGraphqlApis
             Resource: '*'
+          - Sid: AuditmanagerPermissions
+            Effect: Allow
+            Action:
+              - auditmanager:GetAccountStatus
+              - auditmanager:GetOrganizationAdminAccount
+            Resource: '*'
           - Sid: CloudfrontPermissions
             Effect: Allow
             Action:
@@ -147,6 +153,12 @@ Resources:
             Action:
               - elasticloadbalancing:DescribeLoadBalancers
             Resource: '*'
+          - Sid: FmsPermissions
+            Effect: Allow
+            Action:
+              - fms:GetAdminAccount
+              - fms:ListPolicies
+            Resource: '*'
           - Sid: GuarddutyPermissions
             Effect: Allow
             Action:
@@ -154,6 +166,11 @@ Resources:
               - guardduty:GetDetector
               - guardduty:ListDetectors
               - guardduty:ListOrganizationAdminAccounts
+            Resource: '*'
+          - Sid: IamPermissions
+            Effect: Allow
+            Action:
+              - iam:GetRole
             Resource: '*'
           - Sid: Inspector2Permissions
             Effect: Allow
@@ -190,6 +207,13 @@ Resources:
               - s3:GetBucketLocation
               - s3:GetBucketPolicy
             Resource: '*'
+          - Sid: SecurityIRPermissions
+            Effect: Allow
+            Action:
+              - security-ir:BatchGetMemberAccountDetails
+              - security-ir:GetMembership
+              - security-ir:ListMemberships
+            Resource: '*'
           - Sid: SecurityhubPermissions
             Effect: Allow
             Action:
@@ -200,6 +224,15 @@ Resources:
               - securityhub:ListMembers
               - securityhub:ListOrganizationAdminAccounts
             Resource: '*'
+          - Sid: SecuritylakePermissions
+            Effect: Allow
+            Action:
+              - securitylake:GetDataLakeOrganizationConfiguration
+              - securitylake:GetDataLakeSources
+              - securitylake:ListDataLakes
+              - securitylake:ListLogSources
+              - securitylake:ListSubscribers
+            Resource: '*'
           - Sid: ShieldPermissions
             Effect: Allow
             Action:
@@ -207,6 +240,11 @@ Resources:
               - shield:DescribeSubscription
               - shield:GetSubscriptionState
               - shield:ListProtections
+            Resource: '*'
+          - Sid: SqsPermissions
+            Effect: Allow
+            Action:
+              - sqs:GetQueueAttributes
             Resource: '*'
           - Sid: StsPermissions
             Effect: Allow

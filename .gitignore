@@ -64,3 +64,5 @@ coverage.xml
 generated*
 
 sratester/
+
+.kiro/*

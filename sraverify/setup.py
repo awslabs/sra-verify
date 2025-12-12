@@ -8,13 +8,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sraverify",
-    version="0.1.0",
+    version="0.1.1",
     author="SRA Verify team",
     author_email="schiefj@amazon.com",
     description="AWS Security Reference Architecture Verification Tool",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/awslabs/sraverify",
+    url="https://github.com/awslabs/sra-verify",
     packages=packages,
     classifiers=[
         "Programming Language :: Python :: 3",

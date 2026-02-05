@@ -199,6 +199,10 @@ Resources:
               - organizations:DescribeOrganization
               - organizations:ListAccounts
               - organizations:ListDelegatedAdministrators
+              - organizations:ListAccountsForParent
+              - organizations:ListOrganizationalUnitsForParent
+              - organizations:ListPolicies
+              - organizations:ListRoots
             Resource: '*'
           - Sid: S3Permissions
             Effect: Allow

@@ -8,7 +8,7 @@ import sys
 logger = logging.getLogger("sraverify")
 
 # Create handlers
-console_handler = logging.StreamHandler(sys.stdout)
+console_handler = logging.StreamHandler(sys.stderr)
 
 # Create formatters
 default_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -1,13 +1,24 @@
-from typing import Dict, Any, Optional
-import boto3
+from typing import Dict, Any
 from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
+
 
 class FirewallManagerClient:
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+    def __init__(self, region: str, ctx: ScanContext):
+        """
+        Initialize Firewall Manager client for a specific region.
+
+        Args:
+            region: AWS region name. The Firewall Manager admin APIs are
+                global and only respond in ``us-east-1``; regional policy
+                APIs accept any enabled region.
+            ctx: Per-scan ``ScanContext`` whose bounded ``Client_Config`` and
+                cached ``(service, region)`` boto3 clients back this wrapper.
+        """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('fms', region_name=region)
+        self.ctx = ctx
+        self.client = ctx.get_client('fms', region=region)
 
     def get_admin_account(self) -> Dict[str, Any]:
         try:
@@ -28,12 +39,12 @@ class FirewallManagerClient:
                     response = self.client.list_policies(NextToken=next_token, MaxResults=100)
                 else:
                     response = self.client.list_policies(MaxResults=100)
-                
+
                 policies.extend(response.get('PolicyList', []))
                 next_token = response.get('NextToken')
                 if not next_token:
                     break
-            
+
             return {"PolicyList": policies}
         except ClientError as e:
             logger.error(f"Error listing Firewall Manager policies in {self.region}: {e}")

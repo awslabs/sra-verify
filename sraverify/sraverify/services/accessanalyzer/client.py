@@ -1,29 +1,35 @@
 """
 IAM Access Analyzer client for interacting with AWS IAM Access Analyzer service.
 """
-from typing import Dict, List, Optional, Any
-import boto3
+from typing import Dict, List, Any
+
 from botocore.exceptions import ClientError, EndpointConnectionError
+
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class AccessAnalyzerClient:
     """Client for interacting with AWS IAM Access Analyzer service."""
-    
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+
+    def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize IAM Access Analyzer client for a specific region.
-        
+
         Args:
             region: AWS region name
-            session: AWS session to use (if None, a new session will be created)
+            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
+                ``Client_Config``, and per-scan boto3 client cache. Underlying
+                boto3 clients are obtained via ``ctx.get_client(...)`` so the
+                bounded timeouts and retry policy are applied and the same
+                client instance is reused across all wrappers in this scan.
         """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('accessanalyzer', region_name=region)
-        self.org_client = self.session.client('organizations', region_name=region)
+        self.ctx = ctx
+        self.client = ctx.get_client('accessanalyzer', region=region)
+        self.org_client = ctx.get_client('organizations', region=region)
         logger.debug(f"Initialized AccessAnalyzerClient for region {region}")
-    
+
     def is_access_analyzer_available(self) -> bool:
         """Check if Access Analyzer is available in the region."""
         try:
@@ -47,22 +53,22 @@ class AccessAnalyzerClient:
             # Any other error, assume service is not available
             logger.debug(f"Error checking Access Analyzer availability in {self.region}: {str(e)}")
             return False
-    
+
     def list_analyzers(self) -> List[Dict[str, Any]]:
         """
         List all analyzers in the region.
-        
+
         Returns:
             List of analyzer details
         """
         try:
             analyzers = []
             paginator = self.client.get_paginator('list_analyzers')
-            
+
             logger.debug(f"Listing analyzers in {self.region}")
             for page in paginator.paginate():
                 analyzers.extend(page.get('analyzers', []))
-            
+
             logger.debug(f"Found {len(analyzers)} analyzers in {self.region}")
             return analyzers
         except ClientError as e:
@@ -71,14 +77,14 @@ class AccessAnalyzerClient:
         except Exception as e:
             logger.warning(f"Unexpected error listing analyzers in {self.region}: {e}")
             return []
-    
+
     def get_analyzer_details(self, analyzer_arn: str) -> Dict[str, Any]:
         """
         Get details for a specific analyzer.
-        
+
         Args:
             analyzer_arn: ARN of the analyzer
-            
+
         Returns:
             Analyzer details
         """
@@ -92,11 +98,11 @@ class AccessAnalyzerClient:
         except Exception as e:
             logger.warning(f"Unexpected error getting analyzer details for {analyzer_arn}: {e}")
             return {}
-    
+
     def get_delegated_admin(self) -> Dict[str, Any]:
         """
         Get the delegated administrator for IAM Access Analyzer.
-        
+
         Returns:
             Dictionary containing delegated administrator details or empty dict if none
         """
@@ -104,7 +110,7 @@ class AccessAnalyzerClient:
             logger.debug("Getting delegated administrator for IAM Access Analyzer")
             response = self.org_client.list_delegated_administrators(ServicePrincipal='access-analyzer.amazonaws.com')
             delegated_admins = response.get('DelegatedAdministrators', [])
-            
+
             if delegated_admins:
                 logger.debug(f"Found delegated administrator for IAM Access Analyzer: {delegated_admins[0].get('Id')}")
                 return delegated_admins[0]

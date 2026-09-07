@@ -1,15 +1,23 @@
-from typing import Dict, Optional, Any, List
-import boto3
+from typing import Dict, Any, List
 from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 class SecurityIncidentResponseClient:
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+    def __init__(self, region: str, ctx: ScanContext):
+        """
+        Initialize the Security Incident Response client wrapper for a region.
+
+        Args:
+            region: AWS region name
+            ctx: Per-scan ``ScanContext`` providing the cached, bounded boto3
+                clients used by this wrapper
+        """
         self.region = region
-        self.session = session or boto3.Session()
-        self.org_client = self.session.client('organizations', region_name=region)
-        self.sir_client = self.session.client('security-ir', region_name=region)
-        self.iam_client = self.session.client('iam', region_name=region)
+        self.ctx = ctx
+        self.org_client = ctx.get_client('organizations', region=region)
+        self.sir_client = ctx.get_client('security-ir', region=region)
+        self.iam_client = ctx.get_client('iam', region=region)
 
     def list_delegated_administrators(self, service_principal: str = "security-ir.amazonaws.com") -> Dict[str, Any]:
         """List delegated administrators for Security Incident Response service."""

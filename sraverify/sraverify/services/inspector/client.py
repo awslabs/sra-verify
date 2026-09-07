@@ -1,35 +1,41 @@
 """
 Inspector client for interacting with AWS Inspector service.
 """
-from typing import Dict, List, Optional, Any
-import boto3
+from typing import Dict, List, Any
 from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class InspectorClient:
     """Client for interacting with AWS Inspector service."""
-    
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+
+    def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize Inspector client for a specific region.
-        
+
         Args:
             region: AWS region name
-            session: AWS session to use (if None, a new session will be created)
+            ctx: The ``ScanContext`` whose per-scan boto3 client cache and
+                ``Client_Config`` back every underlying boto3 client this
+                wrapper uses. Underlying boto3 clients are obtained via
+                ``ctx.get_client`` so they are cached for the lifetime of the
+                scan and pick up the bounded timeouts/retries from the
+                context's ``Client_Config``.
         """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('inspector2', region_name=region)
-        self.org_client = self.session.client('organizations', region_name=region)
+        self.ctx = ctx
+        # Inspector v2 uses the boto3 service name ``inspector2``.
+        self.client = ctx.get_client('inspector2', region=region)
+        self.org_client = ctx.get_client('organizations', region=region)
 
     def batch_get_account_status(self, account_ids: List[str]) -> Dict[str, Any]:
         """
         Get the Inspector account status for specified accounts.
-        
+
         Args:
             account_ids: List of AWS account IDs
-            
+
         Returns:
             Dictionary containing account status information
         """
@@ -43,11 +49,11 @@ class InspectorClient:
         except Exception as e:
             logger.debug(f"Unexpected error getting Inspector account status in {self.region}: {e}")
             return {}
-    
+
     def get_delegated_admin_account(self) -> Dict[str, Any]:
         """
         Get the delegated administrator account for Inspector.
-        
+
         Returns:
             Dictionary containing delegated admin account information
         """
@@ -61,11 +67,11 @@ class InspectorClient:
         except Exception as e:
             logger.debug(f"Unexpected error getting Inspector delegated admin account in {self.region}: {e}")
             return {}
-    
+
     def describe_organization_configuration(self) -> Dict[str, Any]:
         """
         Describe Inspector organization configuration.
-        
+
         Returns:
             Dictionary containing organization configuration
         """
@@ -79,11 +85,11 @@ class InspectorClient:
         except Exception as e:
             logger.debug(f"Unexpected error describing Inspector organization configuration in {self.region}: {e}")
             return {}
-    
+
     def list_organization_accounts(self) -> List[Dict[str, Any]]:
         """
         List all accounts in the AWS Organization.
-        
+
         Returns:
             List of organization accounts
         """

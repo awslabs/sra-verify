@@ -8,7 +8,7 @@ from sraverify.core.logging import logger
 
 class SRA_CONFIG_08(ConfigCheck):
     """Check if Config delegated admin account is the Security Tooling (Audit) account."""
-    
+
     def __init__(self):
         """Initialize the check."""
         super().__init__()
@@ -27,18 +27,17 @@ class SRA_CONFIG_08(ConfigCheck):
         self.resource_type = "AWS::Organizations::Account"
         # Initialize audit account attribute
         self._audit_accounts = []
-    
-    def initialize(self, session, regions=None, **kwargs):
+
+    def initialize(self, ctx, **kwargs):
         """
-        Initialize check with AWS session, regions, and parameters.
-        
+        Initialize check with the per-scan ``ScanContext`` and parameters.
+
         Args:
-            session: AWS session to use for the check
-            regions: List of AWS regions to check
+            ctx: The :class:`ScanContext` for the current scan
             **kwargs: Additional parameters for the check
         """
-        super().initialize(session, regions)
-        
+        super().initialize(ctx)
+
         # Extract audit-account from kwargs
         if 'audit-account' in kwargs:
             # Handle both single value and list
@@ -50,16 +49,16 @@ class SRA_CONFIG_08(ConfigCheck):
             logger.debug(f"Audit account IDs set to: {self._audit_accounts}")
         else:
             logger.debug("No Audit account ID provided in parameters")
-    
+
     def execute(self) -> List[Dict[str, Any]]:
         """
         Execute the check.
-        
+
         Returns:
             List of findings
         """
         findings = []
-        
+
         # Check if Audit account ID is provided
         if not self._audit_accounts:
             findings.append(
@@ -73,10 +72,10 @@ class SRA_CONFIG_08(ConfigCheck):
                 )
             )
             return findings
-        
+
         # Get delegated administrators for both Config service principals
         delegated_admins = self.get_delegated_administrators()
-        
+
         if not delegated_admins:
             # No delegated administrator found for either service principal
             findings.append(
@@ -98,13 +97,13 @@ class SRA_CONFIG_08(ConfigCheck):
                 )
             )
             return findings
-        
+
         # Group delegated admins by account ID to check if the same account is used for both service principals
         admin_accounts = {}
         for admin in delegated_admins:
             admin_id = admin.get('Id', 'Unknown')
             admin_name = admin.get('Name', 'Unknown')
-            
+
             if admin_id not in admin_accounts:
                 admin_accounts[admin_id] = {
                     'name': admin_name,
@@ -112,7 +111,7 @@ class SRA_CONFIG_08(ConfigCheck):
                 }
             else:
                 admin_accounts[admin_id]['count'] += 1
-        
+
         # Check if any of the audit accounts is a delegated administrator
         audit_account_found = False
         for audit_account_id in self._audit_accounts:
@@ -120,7 +119,7 @@ class SRA_CONFIG_08(ConfigCheck):
                 admin_info = admin_accounts[audit_account_id]
                 admin_name = admin_info['name']
                 service_count = admin_info['count']
-                
+
                 # Check if the audit account is delegated for both service principals
                 if service_count == 2:
                     audit_account_found = True
@@ -154,14 +153,14 @@ class SRA_CONFIG_08(ConfigCheck):
                             )
                         )
                     )
-        
+
         # If no audit account is a delegated administrator
         if not audit_account_found:
             # List all accounts that are delegated administrators
             other_admins = []
             for admin_id, info in admin_accounts.items():
                 other_admins.append(f"{admin_id} ({info['name']})")
-            
+
             findings.append(
                 self.create_finding(
                     status="FAIL",
@@ -181,5 +180,5 @@ class SRA_CONFIG_08(ConfigCheck):
                     )
                 )
             )
-        
+
         return findings

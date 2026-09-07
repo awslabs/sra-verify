@@ -1,8 +1,7 @@
 """
 Audit Manager client for interacting with AWS Audit Manager service.
 """
-from typing import Dict, Optional, Any
-import boto3
+from typing import Dict, Any
 from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
 
@@ -10,17 +9,19 @@ from sraverify.core.logging import logger
 class AuditManagerClient:
     """Client for interacting with AWS Audit Manager service."""
 
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+    def __init__(self, region: str, ctx):
         """
         Initialize Audit Manager client for a specific region.
 
         Args:
             region: AWS region name
-            session: AWS session to use (if None, a new session will be created)
+            ctx: ScanContext for the current scan; the underlying boto3 client
+                is obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('auditmanager', region_name=region)
+        self.ctx = ctx
+        self.client = ctx.get_client('auditmanager', region=region)
 
     def get_account_status(self) -> Dict[str, Any]:
         """
@@ -50,9 +51,9 @@ class AuditManagerClient:
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
             error_message = str(e)
-            
+
             # Don't log setup required errors as they're handled as FAIL in the check
             if "Please complete AWS Audit Manager setup" not in error_message:
                 logger.error(f"Error getting organization admin account in {self.region}: {error_message}")
-            
+
             return {"Error": {"Code": error_code, "Message": error_message}}

@@ -1,5 +1,12 @@
 """
 Base class for AWS IAM security checks.
+
+As of the scan-context-refactor (task 8.16), IAM's previously class-level
+``_users_cache`` has been replaced with calls to the per-scan
+:class:`ScanContext` namespaced primitives under the ``"iam"`` namespace.
+Cache keys are scoped by ``account_id`` (e.g., ``"users:111111111111"``)
+because the per-scan context is per-session but a single SRA Verify run can
+in principle span account boundaries via assumed-role sessions.
 """
 from typing import Any, Dict, Optional
 
@@ -11,17 +18,17 @@ from sraverify.services.iam.client import IAM_Client
 class IAMCheck(SecurityCheck):
     """Base class for all AWS IAM security checks.
 
-    IAM is a global AWS service, so a single :class:`IAM_Client` pinned to
-    ``us-east-1`` is constructed per instance and findings always carry
-    ``Region = "us-east-1"``. Shared class-level caches keyed by
-    ``account_id`` avoid duplicate ``ListUsers`` API calls when multiple IAM
-    checks run in the same SRA Verify invocation.
+    IAM is a global AWS service, so a single :class:`IAM_Client` is constructed
+    per instance (no region) and findings always carry
+    ``Region = "us-east-1"``. Cached AWS-API responses live on the per-scan
+    :class:`ScanContext` under the ``"iam"`` namespace, keyed by
+    ``account_id``, which avoids duplicate ``ListUsers`` API calls when
+    multiple IAM checks run in the same SRA Verify invocation.
     """
 
-    # Class-level cache shared across all instances, keyed by account_id.
-    # Both success and error responses are cached so that repeated failures
-    # do not cascade into additional API calls within the same run.
-    _users_cache: Dict[str, Dict[str, Any]] = {}
+    # All cached AWS-API responses for IAM are stored under this namespace
+    # on the per-scan ``ScanContext``.
+    NAMESPACE = "iam"
 
     # IAM is a global service; all API calls target this endpoint and every
     # finding produced by an IAM check reports this region.
@@ -37,9 +44,14 @@ class IAMCheck(SecurityCheck):
         self._iam_client: Optional[IAM_Client] = None
 
     def _setup_clients(self):
-        """Set up the IAM client (global service, no per-region clients)."""
-        # IAM is a global service: one client pinned to us-east-1 is enough.
-        self._iam_client = IAM_Client(self.session)
+        """Set up the IAM client (global service, no per-region clients).
+
+        The underlying boto3 IAM client held by :class:`IAM_Client` is obtained
+        from ``self._ctx.get_client('iam', region=None)`` so it is shared
+        across every IAM caller in the scan via the per-scan client cache.
+        """
+        # IAM is a global service: one client constructed without a region.
+        self._iam_client = IAM_Client(ctx=self._ctx)
         # Clear the inherited per-region clients dict since IAM does not use it
         # (mirrors the pattern used by OrganizationsCheck).
         self._clients.clear()
@@ -57,26 +69,26 @@ class IAMCheck(SecurityCheck):
         """
         List IAM users for the current account with caching.
 
-        Looks up ``self.account_id`` in the class-level ``_users_cache`` first
-        and returns the cached response on hit. On miss, delegates to
-        :meth:`IAM_Client.list_users`, caches the response (success or error),
-        and returns it.
+        Looks up ``f"users:{self.account_id}"`` in the ``"iam"`` namespace on
+        the attached :class:`ScanContext` first and returns the cached
+        response on hit. On miss, delegates to :meth:`IAM_Client.list_users`,
+        caches the response (success or error), and returns it.
 
         Returns:
             Dictionary with a ``Users`` key (success) or an ``Error`` key
             (failure), matching the shape returned by :class:`IAM_Client`.
         """
-        cache_key = self.account_id
-        if cache_key in IAMCheck._users_cache:
+        cache_key = f"users:{self.account_id}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
             logger.debug("IAM: Using cached list_users response")
-            return IAMCheck._users_cache[cache_key]
+            return self._ctx._get(self.NAMESPACE, cache_key)
 
         logger.debug("IAM: Fetching list_users response")
         response = self._iam_client.list_users()
 
         # Cache both success and error responses so repeated failures don't
         # cascade into additional API calls within the same run.
-        IAMCheck._users_cache[cache_key] = response
+        self._ctx._set(self.NAMESPACE, cache_key, response)
         logger.debug("IAM: Cached list_users response")
 
         return response

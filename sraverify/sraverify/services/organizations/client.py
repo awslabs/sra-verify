@@ -1,30 +1,42 @@
 """
 Organizations client for interacting with AWS Organizations service.
 """
-from typing import Dict, List, Optional, Any
-import boto3
+from typing import Dict, Any
+
 from botocore.exceptions import ClientError
+
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class OrganizationsClient:
-    """Client for interacting with AWS Organizations service."""
-    
-    def __init__(self, session: Optional[boto3.Session] = None):
+    """Client for interacting with AWS Organizations service.
+
+    Organizations is a global AWS service, so the underlying boto3 client is
+    always pinned to ``us-east-1`` regardless of the session's configured
+    region.
+    """
+
+    def __init__(self, ctx: ScanContext):
         """
         Initialize Organizations client.
-        
+
         Args:
-            session: AWS session to use (if None, a new session will be created)
+            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
+                ``Client_Config``, and per-scan boto3 client cache. The
+                underlying boto3 client is obtained via ``ctx.get_client(...)``
+                so the bounded timeouts and retry policy are applied and the
+                same client instance is reused across all wrappers in this
+                scan.
         """
-        self.session = session or boto3.Session()
+        self.ctx = ctx
         # Organizations is a global service, always use us-east-1
-        self.client = self.session.client('organizations', region_name='us-east-1')
-    
+        self.client = ctx.get_client('organizations', region='us-east-1')
+
     def describe_organization(self) -> Dict[str, Any]:
         """
         Get organization details.
-        
+
         Returns:
             Dictionary with Organization key containing organization details,
             or Error key if an error occurred.
@@ -46,7 +58,7 @@ class OrganizationsClient:
     def list_roots(self) -> Dict[str, Any]:
         """
         List organization roots with pagination support.
-        
+
         Returns:
             Dictionary with Roots key containing list of roots,
             or Error key if an error occurred.
@@ -67,14 +79,14 @@ class OrganizationsClient:
                     "Message": error_message
                 }
             }
-    
+
     def list_organizational_units_for_parent(self, parent_id: str) -> Dict[str, Any]:
         """
         List organizational units under a parent with pagination support.
-        
+
         Args:
             parent_id: The ID of the parent root or OU
-            
+
         Returns:
             Dictionary with OrganizationalUnits key containing list of OUs,
             or Error key if an error occurred.
@@ -95,14 +107,14 @@ class OrganizationsClient:
                     "Message": error_message
                 }
             }
-    
+
     def list_policies(self, policy_type: str = "SERVICE_CONTROL_POLICY") -> Dict[str, Any]:
         """
         List policies by type with pagination support.
-        
+
         Args:
             policy_type: Type of policy to list (default: SERVICE_CONTROL_POLICY)
-            
+
         Returns:
             Dictionary with Policies key containing list of policies,
             or Error key if an error occurred.
@@ -127,10 +139,10 @@ class OrganizationsClient:
     def list_accounts_for_parent(self, parent_id: str) -> Dict[str, Any]:
         """
         List accounts under a parent (root or OU) with pagination support.
-        
+
         Args:
             parent_id: The ID of the parent root or OU
-            
+
         Returns:
             Dictionary with Accounts key containing list of accounts,
             or Error key if an error occurred.

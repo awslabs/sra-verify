@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sraverify",
-    version="0.1.3",
+    version="0.1.4",
     author="SRA Verify team",
     author_email="schiefj@amazon.com",
     description="AWS Security Reference Architecture Verification Tool",
@@ -26,6 +26,16 @@ setup(
         "boto3>=1.26.0",
         "colorama>=0.4.4"
     ],
+    extras_require={
+        "dev": [
+            "hypothesis>=6.0",
+            "pytest>=7.0",
+        ],
+        "test": [
+            "hypothesis>=6.0",
+            "pytest>=7.0",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "sraverify=sraverify.main:main"

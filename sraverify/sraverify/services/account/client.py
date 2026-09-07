@@ -2,34 +2,38 @@
 Account client for interacting with AWS Account Management service.
 """
 from typing import Dict, Optional, Any
-import boto3
 from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class AccountClient:
     """Client for interacting with AWS Account Management service."""
-    
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+
+    def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize Account client for a specific region.
-        
+
         Args:
             region: AWS region name
-            session: AWS session to use (if None, a new session will be created)
+            ctx: The per-scan ``ScanContext`` used to obtain the underlying
+                boto3 client. The client is fetched via
+                ``ctx.get_client('account', region=region)`` so it picks up
+                the scan's bounded ``Client_Config`` and is shared across
+                checks in the same scan.
         """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('account', region_name=region)
-    
+        self.ctx = ctx
+        self.client = ctx.get_client('account', region=region)
+
     def get_alternate_contact(self, contact_type: str, account_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Get alternate contact information for the specified type.
-        
+
         Args:
             contact_type: Type of contact (BILLING, OPERATIONS, or SECURITY)
             account_id: Optional account ID (defaults to current account)
-            
+
         Returns:
             Dictionary containing contact details or error information
         """
@@ -37,7 +41,7 @@ class AccountClient:
             params = {"AlternateContactType": contact_type}
             if account_id:
                 params["AccountId"] = account_id
-                
+
             return self.client.get_alternate_contact(**params)
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')

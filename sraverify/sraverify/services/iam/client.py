@@ -1,9 +1,8 @@
 """
 IAM client for interacting with AWS IAM service.
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-import boto3
 from botocore.exceptions import (
     ClientError,
     ConnectTimeoutError,
@@ -12,25 +11,30 @@ from botocore.exceptions import (
 )
 
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class IAM_Client:
     """Client for interacting with AWS IAM service.
 
-    IAM is a global AWS service, so the underlying boto3 client is always
-    pinned to ``us-east-1`` regardless of the session's configured region.
+    IAM is a global AWS service, so the underlying boto3 client is requested
+    from the :class:`ScanContext` without a region. The context's per-scan
+    client cache stores it under the ``"__global__"`` cache-key sentinel so it
+    is shared across every caller in the scan.
     """
 
-    def __init__(self, session: Optional[boto3.Session] = None):
+    def __init__(self, ctx: ScanContext):
         """
         Initialize IAM client.
 
         Args:
-            session: AWS session to use (if None, a new session will be created)
+            ctx: Per-scan :class:`ScanContext` that owns the boto3 session,
+                bounded ``Client_Config``, and the per-scan client cache.
         """
-        self.session = session or boto3.Session()
-        # IAM is a global service, always use us-east-1
-        self.client = self.session.client('iam', region_name='us-east-1')
+        self.ctx = ctx
+        # IAM is a global service; request the client without a region so the
+        # context caches it under the "__global__" sentinel.
+        self.client = ctx.get_client('iam', region=None)
 
     def list_users(self) -> Dict[str, Any]:
         """

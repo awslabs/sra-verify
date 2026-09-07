@@ -15,7 +15,7 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         self._clients.clear()
         # Use first region specified, or us-east-1 as fallback
         region = self.regions[0] if self.regions else "us-east-1"
-        self._clients[region] = SecurityIncidentResponseClient(region, session=self.session)
+        self._clients[region] = SecurityIncidentResponseClient(region, ctx=self._ctx)
 
     def get_delegated_administrators(self) -> Dict[str, Any]:
         """Get delegated administrators for Security Incident Response."""
@@ -38,7 +38,7 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         sir_region = self.discover_sir_region()
         client = self.get_client(sir_region)
         if not client:
-            self._clients[sir_region] = SecurityIncidentResponseClient(sir_region, session=self.session)
+            self._clients[sir_region] = SecurityIncidentResponseClient(sir_region, ctx=self._ctx)
             client = self.get_client(sir_region)
         return client.get_membership(membership_id)
 
@@ -47,7 +47,7 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         sir_region = self.discover_sir_region()
         client = self.get_client(sir_region)
         if not client:
-            self._clients[sir_region] = SecurityIncidentResponseClient(sir_region, session=self.session)
+            self._clients[sir_region] = SecurityIncidentResponseClient(sir_region, ctx=self._ctx)
             client = self.get_client(sir_region)
         return client.batch_get_member_account_details(membership_id, account_ids)
 
@@ -80,7 +80,7 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         for region in regions_to_try:
             try:
                 # Create a temporary client for this region
-                temp_client = SecurityIncidentResponseClient(region, session=self.session)
+                temp_client = SecurityIncidentResponseClient(region, ctx=self._ctx)
                 response = temp_client.list_memberships()
 
                 if "Error" not in response:

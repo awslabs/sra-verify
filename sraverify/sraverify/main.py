@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 
 from sraverify.core.session import get_session
 from sraverify.core.logging import logger, configure_logging
+from sraverify.core.scan_context import ScanContext
 from sraverify.utils.outputs import write_csv_output
 from sraverify.utils.progress import ScanProgress
 from sraverify.utils.banner import print_banner
@@ -62,7 +63,11 @@ class SRAVerify:
 
     def __init__(self, profile: Optional[str] = None, role_arn: Optional[str] = None,
                  regions: Optional[List[str]] = None, session: Optional[Session] = None,
-                 debug: bool = False):
+                 debug: bool = False,
+                 connect_timeout: Optional[float] = None,
+                 read_timeout: Optional[float] = None,
+                 max_attempts: Optional[int] = None,
+                 max_pool_connections: Optional[int] = None):
         """
         Initialize SRA Verify.
 
@@ -72,10 +77,26 @@ class SRAVerify:
             regions: List of AWS regions to check
             session: Existing AWS session to use (if provided)
             debug: Enable debug logging
+            connect_timeout: Optional override for the boto3 connect timeout (seconds)
+                applied to every client built during ``run_checks``. ``None``
+                keeps the ``ScanContext`` default (10s).
+            read_timeout: Optional override for the boto3 read timeout (seconds)
+                applied to every client built during ``run_checks``. ``None``
+                keeps the ``ScanContext`` default (30s).
+            max_attempts: Optional override for the boto3 retry ``max_attempts``
+                applied to every client built during ``run_checks``. ``None``
+                keeps the ``ScanContext`` default (3).
+            max_pool_connections: Optional override for the boto3
+                ``max_pool_connections`` applied to every client built during
+                ``run_checks``. ``None`` keeps the ``ScanContext`` default (50).
         """
         configure_logging(debug)
         self.regions = regions
         self.session = session if session else get_session(profile=profile, role_arn=role_arn)
+        self._connect_timeout = connect_timeout
+        self._read_timeout = read_timeout
+        self._max_attempts = max_attempts
+        self._max_pool_connections = max_pool_connections
         self.progress = None
 
     def get_available_checks(self, account_type: str = 'all') -> Dict[str, Dict[str, str]]:
@@ -190,56 +211,78 @@ class SRAVerify:
         if show_progress:
             self.progress = ScanProgress(len(checks_to_run))
 
-        # Run checks by service
-        for service_name, checks in service_checks.items():
-            if self.progress:
-                self.progress.update(service_name)
-            logger.debug(f"Running {len(checks)} checks for service {service_name}")
+        # Construct the per-scan context. It owns the session, region list,
+        # audit/log-archive account lists, the bounded ``Client_Config``, the
+        # per-scan boto3 client cache, and every cached AWS API response. A
+        # fresh context is built per ``run_checks`` call and dropped in the
+        # ``finally`` below so its boto3 clients become collectible when the
+        # call returns (Requirements 3.1, 3.3).
+        ctx = ScanContext(
+            session=self.session,
+            regions=self.regions,
+            audit_accounts=audit_accounts or [],
+            log_archive_accounts=log_archive_accounts or [],
+            connect_timeout=self._connect_timeout,
+            read_timeout=self._read_timeout,
+            max_attempts=self._max_attempts,
+            max_pool_connections=self._max_pool_connections,
+        )
 
-            for check_id, check_class in checks:
-                logger.debug(f"Initializing check {check_id}")
-                check = check_class()
-                check.initialize(self.session, regions=self.regions)
-
-                # Pass audit and log archive accounts to the check if it needs them
-                if audit_accounts:
-                    check._audit_accounts = audit_accounts
-                if log_archive_accounts:
-                    check._log_archive_accounts = log_archive_accounts
-
-                try:
-                    logger.debug(f"Executing check {check_id}: {check.check_name}")
-                    findings = check.execute()
-                    all_findings.extend(findings)
-                    logger.debug(f"Check {check_id} completed with {len(findings)} findings")
-                except Exception as e:
-                    logger.error(f"Error running check {check_id}: {e}", exc_info=True)
-                    # Add a failure finding
-                    all_findings.append({
-                        "CheckId": check_id,
-                        "Status": "ERROR",
-                        "Region": "global",
-                        "Severity": "UNKNOWN",
-                        "Title": f"Error running {check_id}",
-                        "Description": f"An error occurred while running check {check_id}",
-                        "ResourceId": None,
-                        "ResourceType": None,
-                        "AccountId": None,
-                        "CheckedValue": None,
-                        "ActualValue": str(e),
-                        "Remediation": "Check the error message and try again",
-                        "Service": service_name,
-                        "CheckLogic": None,
-                        "AccountType": check.account_type
-                    })
-
+        try:
+            # Run checks by service
+            for service_name, checks in service_checks.items():
                 if self.progress:
-                    self.progress.increment()
+                    self.progress.update(service_name)
+                logger.debug(f"Running {len(checks)} checks for service {service_name}")
 
-        if self.progress:
-            self.progress.finish()
+                for check_id, check_class in checks:
+                    logger.debug(f"Initializing check {check_id}")
+                    check = check_class()
+                    # Hand the shared context to the check. Audit and
+                    # log-archive account lists flow through ``ctx`` rather
+                    # than through direct mutation on the check instance
+                    # (Requirement 3.4).
+                    check.initialize(ctx)
 
-        return all_findings
+                    try:
+                        logger.debug(f"Executing check {check_id}: {check.check_name}")
+                        findings = check.execute()
+                        all_findings.extend(findings)
+                        logger.debug(f"Check {check_id} completed with {len(findings)} findings")
+                    except Exception as e:
+                        logger.error(f"Error running check {check_id}: {e}", exc_info=True)
+                        # Add a failure finding
+                        all_findings.append({
+                            "CheckId": check_id,
+                            "Status": "ERROR",
+                            "Region": "global",
+                            "Severity": "UNKNOWN",
+                            "Title": f"Error running {check_id}",
+                            "Description": f"An error occurred while running check {check_id}",
+                            "ResourceId": None,
+                            "ResourceType": None,
+                            "AccountId": None,
+                            "CheckedValue": None,
+                            "ActualValue": str(e),
+                            "Remediation": "Check the error message and try again",
+                            "Service": service_name,
+                            "CheckLogic": None,
+                            "AccountType": check.account_type
+                        })
+
+                    if self.progress:
+                        self.progress.increment()
+
+            if self.progress:
+                self.progress.finish()
+
+            return all_findings
+        finally:
+            # Drop the local reference so the ``ScanContext`` (and the boto3
+            # clients it caches) become collectible as soon as ``run_checks``
+            # returns. This is the mechanism that gives the long-running MCP
+            # server per-scan isolation without an explicit cache-clear step.
+            del ctx
 
 
 def parse_args():
@@ -264,6 +307,19 @@ def parse_args():
     parser.add_argument('--list-services', action='store_true', help='List available services')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 
+    # Bounded boto3 Client_Config knobs forwarded into the per-scan
+    # ScanContext. Defaults match the ScanContext defaults (10s connect,
+    # 30s read, 3 retry attempts, 50 pool connections); when these flags
+    # are omitted the ScanContext defaults take effect.
+    parser.add_argument('--connect-timeout', type=float, default=None,
+                        help='boto3 connect timeout in seconds (default: 10)')
+    parser.add_argument('--read-timeout', type=float, default=None,
+                        help='boto3 read timeout in seconds (default: 30)')
+    parser.add_argument('--max-attempts', type=int, default=None,
+                        help='boto3 retry max_attempts (default: 3)')
+    parser.add_argument('--max-pool-connections', type=int, default=None,
+                        help='boto3 max_pool_connections (default: 50)')
+
     return parser.parse_args()
 
 
@@ -273,7 +329,16 @@ def main():
 
     # Create SRAVerify instance
     regions = [r.strip() for r in args.regions.split(',')] if args.regions else None
-    sra = SRAVerify(profile=args.profile, role_arn=args.role, regions=regions, debug=args.debug)
+    sra = SRAVerify(
+        profile=args.profile,
+        role_arn=args.role,
+        regions=regions,
+        debug=args.debug,
+        connect_timeout=args.connect_timeout,
+        read_timeout=args.read_timeout,
+        max_attempts=args.max_attempts,
+        max_pool_connections=args.max_pool_connections,
+    )
 
     if args.list_checks:
         checks = sra.get_available_checks(args.account_type)

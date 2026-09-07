@@ -8,7 +8,7 @@ from sraverify.core.logging import logger
 
 class SRA_CONFIG_07(ConfigCheck):
     """Check if Config administration for the AWS Organization has a delegated administrator."""
-    
+
     def __init__(self):
         """Initialize the check."""
         super().__init__()
@@ -28,33 +28,32 @@ class SRA_CONFIG_07(ConfigCheck):
         self.resource_type = "AWS::Organizations::Account"
         # Initialize parameters as an empty dict
         self.params = {}
-    
-    def initialize(self, session, regions=None, **kwargs):
+
+    def initialize(self, ctx, **kwargs):
         """
-        Initialize check with AWS session, regions, and parameters.
-        
+        Initialize check with the per-scan ``ScanContext`` and parameters.
+
         Args:
-            session: AWS session to use for the check
-            regions: List of AWS regions to check
+            ctx: The :class:`ScanContext` for the current scan
             **kwargs: Additional parameters for the check
         """
-        super().initialize(session, regions)
+        super().initialize(ctx)
         # Store parameters
         self.params = kwargs
         logger.debug(f"Initialized {self.check_id} with parameters: {self.params}")
-    
+
     def execute(self) -> List[Dict[str, Any]]:
         """
         Execute the check.
-        
+
         Returns:
             List of findings
         """
         findings = []
-        
+
         # Get delegated administrators for both Config service principals
         delegated_admins = self.get_delegated_administrators()
-        
+
         if not delegated_admins:
             # No delegated administrator found for either service principal
             findings.append(
@@ -76,15 +75,15 @@ class SRA_CONFIG_07(ConfigCheck):
                 )
             )
             return findings
-        
+
         # Group delegated admins by service principal to check coverage
         service_principals_covered = set()
         admin_accounts = {}
-        
+
         for admin in delegated_admins:
             admin_id = admin.get('Id', 'Unknown')
             admin_name = admin.get('Name', 'Unknown')
-            
+
             # In a real implementation, we would know which service principal this admin is for
             # For now, we'll just track unique admin accounts
             if admin_id not in admin_accounts:
@@ -94,14 +93,14 @@ class SRA_CONFIG_07(ConfigCheck):
                 }
             else:
                 admin_accounts[admin_id]['count'] += 1
-        
+
         # Check if we have full coverage of service principals
         if len(delegated_admins) >= 2:
             # We have at least one delegated admin for each service principal
             for admin_id, info in admin_accounts.items():
                 admin_name = info['name']
                 service_count = info['count']
-                
+
                 if service_count == 2:
                     # This account is delegated for both service principals
                     findings.append(
@@ -139,7 +138,7 @@ class SRA_CONFIG_07(ConfigCheck):
             admin_list = []
             for admin_id, info in admin_accounts.items():
                 admin_list.append(f"{admin_id} ({info['name']})")
-            
+
             findings.append(
                 self.create_finding(
                     status="WARN",
@@ -158,5 +157,5 @@ class SRA_CONFIG_07(ConfigCheck):
                     )
                 )
             )
-        
+
         return findings

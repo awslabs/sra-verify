@@ -1,26 +1,91 @@
 """Security Lake client for interacting with AWS Security Lake service."""
 
-from typing import Dict, List, Optional, Any
-import boto3
-from botocore.exceptions import ClientError
+from typing import Dict, List, Any
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class SecurityLakeClient:
     """Client for interacting with AWS Security Lake service."""
 
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+    def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize Security Lake client.
 
         Args:
             region: AWS region name
-            session: Optional boto3 session
+            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
+                ``Client_Config``, and per-scan boto3 client cache. Underlying
+                boto3 clients are obtained via ``ctx.get_client(...)`` so the
+                bounded timeouts and retry policy are applied and the same
+                client instance is reused across all wrappers in this scan.
         """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('securitylake', region_name=region)
-        self.org_client = self.session.client('organizations', region_name=region)
+        self.ctx = ctx
+        self.client = ctx.get_client('securitylake', region=region)
+        self.org_client = ctx.get_client('organizations', region=region)
+
+    def _log_aws_failure(self, operation: str, e: Exception) -> None:
+        """Classify a botocore exception and log it at the right severity.
+
+        Centralizes the "is this an opt-in / unreachable region (debug),
+        a missing IAM permission (warning), or a real service issue (error)"
+        decision so every Security Lake API call site uses the same
+        contract:
+
+        * ``EndpointConnectionError`` / ``ConnectTimeoutError`` /
+          ``ReadTimeoutError`` / other ``BotoCoreError`` — the Security
+          Lake endpoint isn't reachable in this region (commonly an
+          opt-in region where Security Lake is unavailable, or a
+          transient network issue). Logged at debug.
+        * ``ClientError`` with ``UnauthorizedException`` — Security Lake
+          isn't enabled in this region/account. Routine for a
+          multi-region sweep, logged at debug.
+        * ``ClientError`` with ``AccessDeniedException`` — the calling
+          IAM principal is genuinely missing a Security Lake permission.
+          A security verification tool silently returning empty here
+          would produce false negatives, so this is logged at warning
+          to surface the misconfiguration to the operator.
+        * Any other ``ClientError`` — throttling, validation errors,
+          service issues. Logged at error.
+        * Any other ``Exception`` (defensive fallback) — logged at
+          error.
+
+        The caller is responsible for returning whatever empty value
+        (``[]``, ``{}``, ``None``, ``False``) is appropriate for the
+        method.
+        """
+        if isinstance(e, (EndpointConnectionError, ConnectTimeoutError, ReadTimeoutError)):
+            logger.debug(
+                f"Security Lake endpoint unreachable in {self.region} during {operation}: {e}"
+            )
+        elif isinstance(e, ClientError):
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code == 'UnauthorizedException':
+                logger.debug(
+                    f"Security Lake not enabled in {self.region} ({operation}): {e}"
+                )
+            elif error_code == 'AccessDeniedException':
+                logger.warning(
+                    f"Access denied during {operation} in {self.region} "
+                    f"(scan results for SecurityLake checks in this region "
+                    f"will be incomplete): {e}"
+                )
+            else:
+                logger.error(f"Error during {operation} in {self.region}: {e}")
+        elif isinstance(e, BotoCoreError):
+            logger.debug(
+                f"Botocore error during {operation} in {self.region}: {e}"
+            )
+        else:
+            logger.error(f"Unexpected error during {operation} in {self.region}: {e}")
 
     def is_security_lake_enabled(self):
         """
@@ -33,8 +98,8 @@ class SecurityLakeClient:
             response = self.client.list_data_lakes(regions=[self.region])
             data_lakes = response.get('dataLakes', [])
             return len(data_lakes) > 0
-        except ClientError as e:
-            logger.debug(f"Error checking Security Lake status in {self.region}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure("checking Security Lake status", e)
             return False
 
     def get_organization_configuration(self):
@@ -50,8 +115,8 @@ class SecurityLakeClient:
         except self.client.exceptions.ResourceNotFoundException:
             logger.debug(f"No organization configuration found in region {self.region}")
             return {}
-        except ClientError as e:
-            logger.error(f"Error getting organization configuration in {self.region}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure("getting organization configuration", e)
             return {}
 
     def list_data_lakes(self):
@@ -67,8 +132,8 @@ class SecurityLakeClient:
         except self.client.exceptions.ResourceNotFoundException:
             logger.debug(f"No data lakes found in region {self.region}")
             return []
-        except ClientError as e:
-            logger.error(f"Error listing data lakes in {self.region}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure("listing data lakes", e)
             return []
 
     def list_log_sources(self, regions=None, accounts=None):
@@ -88,7 +153,7 @@ class SecurityLakeClient:
                 params['regions'] = regions
             if accounts:
                 params['accounts'] = accounts
-                
+
             response = self.client.list_log_sources(**params)
             log_sources = response.get("sources", [])
 
@@ -102,8 +167,8 @@ class SecurityLakeClient:
         except self.client.exceptions.ResourceNotFoundException:
             logger.debug(f"No log sources found in region {self.region}")
             return []
-        except ClientError as e:
-            logger.error(f"Error listing log sources in {self.region}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure("listing log sources", e)
             return []
 
     def list_subscribers(self):
@@ -126,8 +191,8 @@ class SecurityLakeClient:
         except self.client.exceptions.ResourceNotFoundException:
             logger.debug(f"No subscribers found in region {self.region}")
             return []
-        except ClientError as e:
-            logger.error(f"Error listing subscribers in {self.region}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure("listing subscribers", e)
             return []
 
     def get_delegated_admin(self):
@@ -178,14 +243,14 @@ class SecurityLakeClient:
             KMS key ID or None if error
         """
         try:
-            sqs = self.session.client('sqs', region_name=self.region)
+            sqs = self.ctx.get_client('sqs', region=self.region)
             response = sqs.get_queue_attributes(
                 QueueUrl=queue_url,
                 AttributeNames=["KmsMasterKeyId"]
             )
             return response.get("Attributes", {}).get("KmsMasterKeyId")
-        except ClientError as e:
-            logger.error(f"Error getting SQS queue encryption for {queue_url}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure(f"getting SQS queue encryption for {queue_url}", e)
             return None
 
     def list_organization_accounts(self) -> List[Dict[str, Any]]:
@@ -213,10 +278,10 @@ class SecurityLakeClient:
     def get_data_lake_sources(self, account_id: str = None):
         """
         Get data lake sources for a specific account.
-        
+
         Args:
             account_id: AWS account ID string to check sources for
-            
+
         Returns:
             List of data lake sources or empty list if error
         """
@@ -230,18 +295,14 @@ class SecurityLakeClient:
                     else:
                         logger.error(f"Cannot extract account ID from dict: {account_id}")
                         return []
-                        
+
                 request_body["accounts"] = [account_id]
-                
+
             response = self.client.get_data_lake_sources(**request_body)
             return response.get("dataLakeSources", [])
         except self.client.exceptions.ResourceNotFoundException:
             logger.debug(f"No data lake sources found in region {self.region}")
             return []
-        except ClientError as e:
-            # Use debug level for UnauthorizedException as it's expected when Security Lake isn't enabled
-            if e.response.get('Error', {}).get('Code') == 'UnauthorizedException':
-                logger.debug(f"Security Lake not enabled in {self.region}: {e}")
-            else:
-                logger.error(f"Error getting data lake sources in {self.region}: {e}")
+        except (BotoCoreError, ClientError) as e:
+            self._log_aws_failure("getting data lake sources", e)
             return []

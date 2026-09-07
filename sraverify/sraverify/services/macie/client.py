@@ -2,31 +2,35 @@
 Macie client for interacting with AWS Macie service.
 """
 from typing import Dict, List, Optional, Any
-import boto3
 from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
 
 
 class MacieClient:
     """Client for interacting with AWS Macie service."""
-    
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+
+    def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize Macie client for a specific region.
-        
+
         Args:
             region: AWS region name
-            session: AWS session to use (if None, a new session will be created)
+            ctx: ScanContext that owns the per-scan boto3 session, the
+                bounded ``Client_Config``, and the ``(service, region)``
+                client cache. Underlying boto3 clients are obtained via
+                ``ctx.get_client(...)`` so they are de-duplicated and share
+                the bounded timeout/retry settings (see Requirement 2.12).
         """
         self.region = region
-        self.session = session or boto3.Session()
-        self.client = self.session.client('macie2', region_name=region)
-        self.org_client = self.session.client('organizations', region_name=region)
+        self.ctx = ctx
+        self.client = ctx.get_client('macie2', region=region)
+        self.org_client = ctx.get_client('organizations', region=region)
 
     def get_findings_publication_configuration(self) -> Dict[str, Any]:
         """
         Get the findings publication configuration for Macie.
-        
+
         Returns:
             Dictionary containing findings publication configuration
         """
@@ -48,11 +52,11 @@ class MacieClient:
         except Exception as e:
             logger.debug(f"Unexpected error getting Macie findings publication configuration in {self.region}: {e}")
             return {}
-    
+
     def get_classification_export_configuration(self) -> Dict[str, Any]:
         """
         Get the classification export configuration for Macie.
-        
+
         Returns:
             Dictionary containing classification export configuration
         """
@@ -72,14 +76,14 @@ class MacieClient:
         except Exception as e:
             logger.debug(f"Unexpected error getting Macie classification export configuration in {self.region}: {e}")
             return {}
-    
+
     def list_delegated_administrators(self, service_principal: str = "macie.amazonaws.com") -> List[Dict[str, Any]]:
         """
         List delegated administrators for Macie.
-        
+
         Args:
             service_principal: Service principal to check for delegated administrators
-            
+
         Returns:
             List of delegated administrators
         """
@@ -97,11 +101,11 @@ class MacieClient:
         except Exception as e:
             logger.error(f"Unexpected error listing delegated administrators: {e}")
             return []
-    
+
     def list_members(self) -> List[Dict[str, Any]]:
         """
         List Macie members.
-        
+
         Returns:
             List of Macie members
         """
@@ -109,10 +113,10 @@ class MacieClient:
             logger.debug(f"Listing Macie members in {self.region}")
             members = []
             paginator = self.client.get_paginator('list_members')
-            
+
             for page in paginator.paginate():
                 members.extend(page.get('members', []))
-            
+
             logger.debug(f"Found {len(members)} Macie members in {self.region}")
             return members
         except ClientError as e:
@@ -126,11 +130,11 @@ class MacieClient:
         except Exception as e:
             logger.debug(f"Unexpected error listing Macie members in {self.region}: {e}")
             return []
-    
+
     def list_organization_accounts(self) -> List[Dict[str, Any]]:
         """
         List all accounts in the AWS Organization.
-        
+
         Returns:
             List of accounts in the AWS Organization
         """
@@ -138,10 +142,10 @@ class MacieClient:
             logger.debug(f"Listing AWS Organization accounts in {self.region}")
             accounts = []
             paginator = self.org_client.get_paginator('list_accounts')
-            
+
             for page in paginator.paginate():
                 accounts.extend(page.get('Accounts', []))
-            
+
             logger.debug(f"Found {len(accounts)} AWS Organization accounts")
             return accounts
         except ClientError as e:
@@ -150,11 +154,11 @@ class MacieClient:
         except Exception as e:
             logger.error(f"Unexpected error listing AWS Organization accounts: {e}")
             return []
-    
+
     def describe_organization_configuration(self) -> Dict[str, Any]:
         """
         Describe the Macie organization configuration.
-        
+
         Returns:
             Dictionary containing Macie organization configuration
         """
@@ -174,17 +178,17 @@ class MacieClient:
         except Exception as e:
             logger.debug(f"Unexpected error describing Macie organization configuration in {self.region}: {e}")
             return {}
-    
+
     def get_account_id(self) -> Optional[str]:
         """
         Get the current account ID.
-        
+
         Returns:
             Current account ID or None if not available
         """
         try:
             logger.debug(f"Getting current account ID in {self.region}")
-            sts_client = self.session.client("sts")
+            sts_client = self.ctx.get_client("sts")
             response = sts_client.get_caller_identity()
             account_id = response["Account"]
             logger.debug(f"Current account ID: {account_id}")
@@ -195,10 +199,11 @@ class MacieClient:
         except Exception as e:
             logger.error(f"Unexpected error getting current account ID: {e}")
             return None
+
     def get_administrator_account(self) -> Dict[str, Any]:
         """
         Get the Macie administrator account.
-        
+
         Returns:
             Dictionary containing Macie administrator account information
         """

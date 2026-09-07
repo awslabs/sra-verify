@@ -1,21 +1,52 @@
-from typing import Dict, List, Optional, Any
-import boto3
+"""
+WAF client wrapping the 9 underlying boto3 services that WAF checks consult:
+CloudFront, ELBv2, WAFv2, API Gateway, AppSync, Cognito, App Runner, EC2, and
+Amplify.
+"""
+from typing import Dict, Any
+
 from botocore.exceptions import ClientError
+
 from sraverify.core.logging import logger
+from sraverify.core.scan_context import ScanContext
+
 
 class WAFClient:
-    def __init__(self, region: str, session: Optional[boto3.Session] = None):
+    def __init__(self, region: str, ctx: ScanContext):
+        """
+        Initialize a WAFClient for ``region``.
+
+        WAFClient wraps 9 underlying boto3 clients. Each is obtained through
+        the per-scan ``ScanContext.get_client(...)`` so the bounded
+        ``Client_Config`` is applied and the underlying boto3 clients
+        de-duplicate across all WAFClient instances built within a scan.
+
+        CloudFront is a global service and is always pinned to ``us-east-1``;
+        the other 8 clients are constructed for the supplied ``region``. This
+        preserves the pre-refactor region-pinning behavior. The WAF for
+        CloudFront global-scope concern is handled at the ``WAFCheck`` base
+        class layer (task 8.17), which still constructs a dedicated
+        ``WAFClient('us-east-1', ctx=...)`` for the CloudFront-scoped Web ACL
+        lookups.
+
+        Args:
+            region: AWS region name for the regional clients (ELBv2, WAFv2,
+                API Gateway, AppSync, Cognito, App Runner, EC2, Amplify).
+            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
+                ``Client_Config``, and per-scan boto3 client cache.
+        """
         self.region = region
-        self.session = session or boto3.Session()
-        self.cloudfront_client = self.session.client('cloudfront', region_name='us-east-1')  # CloudFront is global
-        self.elbv2_client = self.session.client('elbv2', region_name=region)
-        self.wafv2_client = self.session.client('wafv2', region_name=region)
-        self.apigateway_client = self.session.client('apigateway', region_name=region)
-        self.appsync_client = self.session.client('appsync', region_name=region)
-        self.cognito_idp_client = self.session.client('cognito-idp', region_name=region)
-        self.apprunner_client = self.session.client('apprunner', region_name=region)
-        self.ec2_client = self.session.client('ec2', region_name=region)
-        self.amplify_client = self.session.client('amplify', region_name=region)
+        self.ctx = ctx
+        # CloudFront is global; pin to us-east-1.
+        self.cloudfront_client = ctx.get_client('cloudfront', region='us-east-1')
+        self.elbv2_client = ctx.get_client('elbv2', region=region)
+        self.wafv2_client = ctx.get_client('wafv2', region=region)
+        self.apigateway_client = ctx.get_client('apigateway', region=region)
+        self.appsync_client = ctx.get_client('appsync', region=region)
+        self.cognito_idp_client = ctx.get_client('cognito-idp', region=region)
+        self.apprunner_client = ctx.get_client('apprunner', region=region)
+        self.ec2_client = ctx.get_client('ec2', region=region)
+        self.amplify_client = ctx.get_client('amplify', region=region)
 
     def list_distributions(self) -> Dict[str, Any]:
         try:

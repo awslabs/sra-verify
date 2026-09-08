@@ -35,6 +35,7 @@ from sraverify.services.securitylake import CHECKS as securitylake_checks
 from sraverify.services.securityincidentresponse import CHECKS as securityincidentresponse_checks
 from sraverify.services.organizations import CHECKS as organizations_checks
 from sraverify.services.iam import CHECKS as iam_checks
+from sraverify.services.iam_attack_paths import CHECKS as iam_attack_path_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
@@ -55,7 +56,8 @@ ALL_CHECKS = {
     **securitylake_checks,
     **securityincidentresponse_checks,
     **organizations_checks,
-    **iam_checks
+    **iam_checks,
+    **iam_attack_path_checks,
 }
 
 class SRAVerify:

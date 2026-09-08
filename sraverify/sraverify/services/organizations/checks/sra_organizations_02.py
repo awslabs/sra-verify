@@ -88,7 +88,7 @@ class SRA_ORGANIZATIONS_02(OrganizationsCheck):
         # Look for Security OU
         security_ou = None
         for ou in ous:
-            if ou.get("Name") == "Security":
+            if ou.get("Name") in {"Security", "Security OU"}:
                 security_ou = ou
                 break
         

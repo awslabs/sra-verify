@@ -1,21 +1,21 @@
 """Check if Security Hub findings are enabled for Security Lake."""
 
-from typing import List, Dict, Any
-from sraverify.services.securitylake.base import SecurityLakeCheck
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.services.securitylake.base import SecurityLakeCheck
 
 
 class SRA_SECURITYLAKE_08(SecurityLakeCheck):
     """Check if Security Hub findings are enabled for Security Lake."""
 
-    def __init__(self):
-        """Initialize check."""
-        super().__init__()
-        self.account_type = "log-archive"  # Check all org accounts from delegated admin
-        self.check_id = "SRA-SECURITYLAKE-08"
-        self.check_name = "Security Lake Security Hub findings enabled with version 2.0 for all organization accounts"
-        self.severity = "HIGH"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-SECURITYLAKE-08",
+        title="Security Lake Security Hub findings enabled with version 2.0 for all organization accounts",
+        description=(
             "This check verifies whether Amazon Security Lake is configured with "
             "SecurityHub findings log and event source version 2.0 for all active accounts in the organization. "
             "Security Hub findings help you understand your security posture in AWS and let you check your "
@@ -24,19 +24,40 @@ class SRA_SECURITYLAKE_08(SecurityLakeCheck):
             "an independent and duplicated stream of events. "
             "This check runs from the delegated administrator account "
             "and validates configuration across all organization member accounts."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Checks if the Security Hub findings log source version 2.0 is enabled in Security Lake "
             "for all active organization accounts. The check passes if the SH_FINDINGS log source version 2.0 is enabled. "
             "The check fails if the SH_FINDINGS log source is not enabled or configured with version 1.0."
-        )
+        ),
+        severity=Severity.HIGH,
+        # Check all org accounts from delegated admin
+        account_type=AccountType.LOG_ARCHIVE,
+        service="SecurityLake",
+        resource_type="AWS::SecurityLake::SecurityLake",
+        remediation=Remediation(
+            text=(
+                "Enable the SH_FINDINGS log source at version 2.0 in Security Lake "
+                "for every active organization account and Region."
+            ),
+            cli=(
+                "aws securitylake create-aws-log-source --sources "
+                "'[{\"regions\":[\"<region>\"],\"sourceName\":\"SH_FINDINGS\","
+                "\"sourceVersion\":\"2.0\"}]' --region <region>"
+            ),
+            console=(
+                "Security Lake console, Settings, Log sources, enable Security Hub "
+                "findings at version 2.0."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding per organization account per Region.
         """
 
         for region in self.regions:
@@ -60,11 +81,11 @@ class SRA_SECURITYLAKE_08(SecurityLakeCheck):
 
                 # Check Security Hub findings configuration
                 sh_findings_v2_enabled = self.check_log_source_configured(region, "SH_FINDINGS", account_id, "2.0")
-                
+
                 if not sh_findings_v2_enabled:
                     # Only check v1.0 if v2.0 is not enabled (uses cached data)
                     sh_findings_v1_enabled = self.check_log_source_configured(region, "SH_FINDINGS", account_id, "1.0")
-                    
+
                     if sh_findings_v1_enabled:
                         actual_value = f"Security Hub findings are configured with version 1.0 instead of 2.0 for account {account_id}"
                         remediation = (
@@ -81,27 +102,18 @@ class SRA_SECURITYLAKE_08(SecurityLakeCheck):
                             "Alternatively, use the AWS CLI command: "
                             f"aws securitylake create-aws-log-source --sources '[{{\"regions\":[\"{region}\"],\"sourceName\":\"SH_FINDINGS\",\"sourceVersion\":\"2.0\"}}]' --region {region}"
                         )
-                    
-                    self.findings.append(
-                        self.create_finding(
-                            status="FAIL",
-                            region=region,
-                            resource_id=resource_id,
-                            checked_value="Security Hub findings enabled with version 2.0",
-                            actual_value=actual_value,
-                            remediation=remediation
-                        )
+
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub findings enabled with version 2.0",
+                        actual_value=actual_value,
+                        remediation=remediation,
                     )
                 else:
-                    self.findings.append(
-                        self.create_finding(
-                            status="PASS",
-                            region=region,
-                            resource_id=resource_id,
-                            checked_value="Security Hub findings enabled with version 2.0",
-                            actual_value=f"Security Hub findings are enabled with version 2.0 in {region} for account {account_id}",
-                            remediation="No remediation needed"
-                        )
+                    yield self.passed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub findings enabled with version 2.0",
+                        actual_value=f"Security Hub findings are enabled with version 2.0 in {region} for account {account_id}",
                     )
-
-        return self.findings

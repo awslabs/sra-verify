@@ -24,14 +24,6 @@ class ConfigCheck(SecurityCheck):
         "config-multiaccountsetup.amazonaws.com"
     ]
 
-    def __init__(self):
-        """Initialize Config base check."""
-        super().__init__(
-            account_type="account",  # Default to account, can be overridden in child classes
-            service="Config",
-            resource_type="AWS::Config::ConfigurationRecorder"
-        )
-
     def _setup_clients(self):
         """Set up Config clients for each region."""
         # Clear existing clients

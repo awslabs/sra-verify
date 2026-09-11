@@ -1,38 +1,58 @@
 """Check if Security Lake SQS DLQ is encrypted with CMK."""
 
-from typing import List, Dict, Any
-from sraverify.services.securitylake.base import SecurityLakeCheck
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.services.securitylake.base import SecurityLakeCheck
 
 
 class SRA_SECURITYLAKE_03(SecurityLakeCheck):
     """Check if Security Lake SQS DLQ is encrypted with CMK."""
 
-    def __init__(self):
-        """Initialize check."""
-        super().__init__()
-        self.check_id = "SRA-SECURITYLAKE-03"
-        self.check_name = "Security Lake DLQ encrypted with CMK"
-        self.severity = "HIGH"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-SECURITYLAKE-03",
+        title="Security Lake DLQ encrypted with CMK",
+        description=(
             "This check verifies whether Security Lake SQS DLQ is encrypted in this "
             "region with a customer managed key from AWS KMS. You must use a customer "
             "managed KMS key for the encryption as you have greater control on the key "
             "usage and permission."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Gets all subscribers for Security Lake in the region. "
             "For each subscriber with a DLQ endpoint, checks if the queue is encrypted with a customer managed KMS key. "
             "The check passes if all DLQ queues are encrypted with customer managed keys (not AWS managed keys). "
             "The check fails if any DLQ queue is not encrypted or uses an AWS managed key (alias/aws/*)."
-        )
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.LOG_ARCHIVE,
+        service="SecurityLake",
+        resource_type="AWS::SecurityLake::SecurityLake",
+        remediation=Remediation(
+            text=(
+                "Encrypt every Security Lake dead-letter queue with a customer "
+                "managed KMS key rather than an AWS managed key."
+            ),
+            cli=(
+                "aws sqs set-queue-attributes --queue-url <dlq-url> "
+                "--attributes KmsMasterKeyId=<customer-managed-key-id>"
+            ),
+            console=(
+                "SQS console, select the dead-letter queue, Edit, Encryption, "
+                "Server-side encryption enabled, choose a customer managed KMS key."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding per Region.
         """
 
         for region in self.regions:
@@ -52,18 +72,15 @@ class SRA_SECURITYLAKE_03(SecurityLakeCheck):
 
             if not subscribers or not dlq_queues:
                 resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:dlq/none"
-                self.findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=resource_id,
-                        checked_value="DLQ queues present and encrypted with CMK",
-                        actual_value=f"No DLQ queues found - Security Lake may not be enabled in {region}",
-                        remediation=(
-                            "Enable Security Lake and configure subscribers with DLQ queues. In the Security Lake console, "
-                            "navigate to Subscribers and add subscribers with DLQ queue endpoints."
-                        )
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="DLQ queues present and encrypted with CMK",
+                    actual_value=f"No DLQ queues found - Security Lake may not be enabled in {region}",
+                    remediation=(
+                        "Enable Security Lake and configure subscribers with DLQ queues. In the Security Lake console, "
+                        "navigate to Subscribers and add subscribers with DLQ queue endpoints."
+                    ),
                 )
                 continue
 
@@ -82,19 +99,16 @@ class SRA_SECURITYLAKE_03(SecurityLakeCheck):
                 resource_id = f"arn:aws:sqs:{region}:{self.account_id}:{queue_name}"
 
                 logger.debug(f"Found {len(unencrypted_dlqs)} unencrypted DLQ queues in {region}")
-                self.findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=resource_id,
-                        checked_value="All DLQ queues encrypted with CMK",
-                        actual_value=f"The following DLQ queues are not encrypted with CMK: {', '.join([name for name, _ in unencrypted_dlqs])}",
-                        remediation=(
-                            "Configure DLQ queue encryption with a customer managed KMS key. In the SQS console, "
-                            "select each DLQ queue and under Server-side encryption, choose 'Enable server-side encryption' "
-                            "and select a customer managed KMS key."
-                        )
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="All DLQ queues encrypted with CMK",
+                    actual_value=f"The following DLQ queues are not encrypted with CMK: {', '.join([name for name, _ in unencrypted_dlqs])}",
+                    remediation=(
+                        "Configure DLQ queue encryption with a customer managed KMS key. In the SQS console, "
+                        "select each DLQ queue and under Server-side encryption, choose 'Enable server-side encryption' "
+                        "and select a customer managed KMS key."
+                    ),
                 )
             else:
                 # Use the first queue for the resource ID in the PASS case
@@ -102,15 +116,9 @@ class SRA_SECURITYLAKE_03(SecurityLakeCheck):
                 resource_id = f"arn:aws:sqs:{region}:{self.account_id}:{queue_name}"
 
                 logger.debug(f"All Security Lake DLQ queues are encrypted with CMK in {region}")
-                self.findings.append(
-                    self.create_finding(
-                        status="PASS",
-                        region=region,
-                        resource_id=resource_id,
-                        checked_value="All DLQ queues encrypted with CMK",
-                        actual_value=f"All Security Lake DLQ queues are encrypted with CMK in {region}",
-                        remediation="No remediation needed"
-                    )
+                yield self.passed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="All DLQ queues encrypted with CMK",
+                    actual_value=f"All Security Lake DLQ queues are encrypted with CMK in {region}",
                 )
-
-        return self.findings

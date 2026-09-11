@@ -1,8 +1,12 @@
 """
 Check for IAM users in an AWS account (SRA-IAM-01).
 """
+from collections.abc import Iterable
 from typing import Any, Dict, List, Set
 
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.iam.base import IAMCheck
 
 
@@ -15,12 +19,10 @@ class SRA_IAM_01(IAMCheck):
     account is a deviation worth reporting as a HIGH severity finding.
     """
 
-    def __init__(self):
-        """Initialize the IAM user detection check."""
-        super().__init__()
-        self.check_id = "SRA-IAM-01"
-        self.check_name = "Account contains no IAM users."
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-IAM-01",
+        title="Account contains no IAM users",
+        description=(
             "This check verifies that the AWS account contains no IAM users. "
             "AWS Security Reference Architecture (SRA) guidance recommends "
             "federated identity through AWS IAM Identity Center and assuming "
@@ -29,25 +31,44 @@ class SRA_IAM_01(IAMCheck):
             "risk of credential exposure, complicate credential rotation, and "
             "contribute to identity sprawl. Replace each IAM user with "
             "federated access through IAM Identity Center or an IAM role."
-        )
-        self.severity = "HIGH"
-        self.check_logic = (
+        ),
+        check_logic=(
             "Call the IAM ListUsers API against the global endpoint "
             "(us-east-1) and paginate until all users are retrieved. "
             "One FAIL finding is created for each IAM user returned by the "
             "API call. If no IAM users are returned, one PASS finding is "
             "created for the account. If the API call fails, one ERROR "
             "finding is created and no PASS or FAIL findings are produced."
-        )
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.APPLICATION,
+        service="IAM",
+        resource_type="AWS::IAM::User",
+        remediation=Remediation(
+            text=(
+                "Replace each IAM user with federated access through AWS IAM "
+                "Identity Center or with an IAM role that issues temporary "
+                "credentials, then delete the IAM user once migration is "
+                "complete."
+            ),
+            cli=(
+                "aws iam list-users\n"
+                "aws iam delete-user --user-name <user-name>"
+            ),
+            console=(
+                "IAM Identity Center console, Users, to provision federated "
+                "access; then IAM console, Users, select the user, Delete."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings for the account.
+        Yields:
+            One Finding per IAM user, or one Finding for the account.
         """
-        self._validate_metadata()
         region = self.GLOBAL_REGION  # "us-east-1"
 
         response = self.list_users()
@@ -56,8 +77,7 @@ class SRA_IAM_01(IAMCheck):
         if "Error" in response:
             message = response["Error"].get("Message") or ""
             actual_value = message[:1000] if message else "Unknown error"
-            self.findings.append(self.create_finding(
-                status="ERROR",
+            yield self.error(
                 region=region,
                 resource_id=self.account_id,
                 actual_value=actual_value,
@@ -65,8 +85,8 @@ class SRA_IAM_01(IAMCheck):
                     "Verify the execution role has the iam:ListUsers "
                     "permission attached."
                 ),
-            ))
-            return self.findings
+            )
+            return
 
         # Deduplicate users by ARN, preserving first occurrence.
         users = response.get("Users", [])
@@ -80,14 +100,12 @@ class SRA_IAM_01(IAMCheck):
 
         # PASS path: zero IAM users found in the account.
         if not distinct_users:
-            self.findings.append(self.create_finding(
-                status="PASS",
+            yield self.passed(
                 region=region,
                 resource_id=self.account_id,
                 actual_value="0 IAM users found in the account.",
-                remediation="No remediation needed.",
-            ))
-            return self.findings
+            )
+            return
 
         # FAIL path: one finding per distinct IAM user ARN.
         remediation = (
@@ -97,8 +115,7 @@ class SRA_IAM_01(IAMCheck):
             "complete."
         )
         for user in distinct_users:
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=user["Arn"],
                 actual_value=(
@@ -106,6 +123,4 @@ class SRA_IAM_01(IAMCheck):
                     "account."
                 ),
                 remediation=remediation,
-            ))
-
-        return self.findings
+            )

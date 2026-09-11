@@ -22,14 +22,6 @@ class InspectorCheck(SecurityCheck):
     #: Namespace key for this service's entries in ``ctx._cache``.
     NAMESPACE = "inspector"
 
-    def __init__(self):
-        """Initialize Inspector base check."""
-        super().__init__(
-            account_type="application",  # Default, can be overridden in subclasses
-            service="Inspector",
-            resource_type="AWS::Inspector::Assessment"
-        )
-
     def _setup_clients(self):
         """Set up Inspector clients for each region.
 

@@ -1,22 +1,21 @@
 """
 SRA-CLOUDTRAIL-02: Organization CloudTrail KMS Encryption.
 """
-from typing import List, Dict, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.cloudtrail.base import CloudTrailCheck
-from sraverify.core.logging import logger
 
 
 class SRA_CLOUDTRAIL_02(CloudTrailCheck):
     """Check if organization trails are encrypted with KMS."""
-    
-    def __init__(self):
-        """Initialize the check."""
-        super().__init__()
-        self.check_id = "SRA-CLOUDTRAIL-02"
-        self.check_name = "Organization trail is encrypted with KMS"
-        self.account_type = "management"
-        self.severity = "MEDIUM"
-        self.description = (
+
+    meta = CheckMeta(
+        check_id="SRA-CLOUDTRAIL-02",
+        title="Organization trail is encrypted with KMS",
+        description=(
             "This check verifies that your organization trail is encrypted with a KMS key. "
             "Log files delivered by CloudTrail to your bucket should be encrypted by using SSE-KMS. "
             "This is selected by default in the console but can be altered by users. With SSE-KMS "
@@ -24,76 +23,81 @@ class SRA_CLOUDTRAIL_02(CloudTrailCheck):
             "who can use the key. For a user to read log files they must have read permissions to "
             "the bucket and have permissions that allows decrypt permission on the key applied by "
             "the KMS key policy."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Check if organization trails have KmsKeyId configured."
-        )
-    
-    def execute(self) -> List[Dict[str, Any]]:
+        ),
+        severity=Severity.MEDIUM,
+        account_type=AccountType.MANAGEMENT,
+        service="CloudTrail",
+        resource_type="AWS::CloudTrail::Trail",
+        remediation=Remediation(
+            text=(
+                "Set a customer managed KMS key on the organization trail so that "
+                "delivered log files are encrypted with SSE-KMS."
+            ),
+            cli=(
+                "aws cloudtrail update-trail --name <trail-name> "
+                "--kms-key-id <kms-key-arn> --region <home-region>"
+            ),
+            console=(
+                "CloudTrail console, Trails, select the organization trail, Edit "
+                "General details, and set Log file SSE-KMS encryption to Enabled."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
-        
-        Returns:
-            List of findings
+
+        Yields:
+            One Finding per organization trail, or one Finding when none exist.
         """
-        findings = []
-        
         # Get organization trails
         org_trails = self.get_organization_trails()
-        
+
         if not org_trails:
-            findings.append(
-                self.create_finding(
-                    status="FAIL",
-                    region="global",
-                    resource_id=f"organization/{self.account_id}",
-                    checked_value="KmsKeyId: not empty",
-                    actual_value="No organization trails found",
-                    remediation=(
-                        "Create an organization trail with KMS encryption in the management account using the AWS CLI command: "
-                        f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{self.account_id} "
-                        f"--kms-key-id arn:aws:kms:{self.regions[0] if self.regions else 'us-east-1'}:{self.account_id}:key/YOUR_KMS_KEY_ID "
-                        f"--is-multi-region-trail --region {self.regions[0] if self.regions else 'us-east-1'}"
-                    )
-                )
+            yield self.failed(
+                region="global",
+                resource_id=f"organization/{self.account_id}",
+                checked_value="KmsKeyId: not empty",
+                actual_value="No organization trails found",
+                remediation=(
+                    "Create an organization trail with KMS encryption in the management account using the AWS CLI command: "
+                    f"aws cloudtrail create-trail --name org-trail --is-organization-trail --s3-bucket-name cloudtrail-logs-{self.account_id} "
+                    f"--kms-key-id arn:aws:kms:{self.regions[0] if self.regions else 'us-east-1'}:{self.account_id}:key/YOUR_KMS_KEY_ID "
+                    f"--is-multi-region-trail --region {self.regions[0] if self.regions else 'us-east-1'}"
+                ),
             )
-            return findings
-        
+            return
+
         # Check each organization trail for KMS encryption
         for trail in org_trails:
             trail_name = trail.get('Name', 'Unknown')
             trail_arn = trail.get('TrailARN', 'Unknown')
             kms_key_id = trail.get('KmsKeyId', '')
             home_region = trail.get('HomeRegion', 'Unknown')
-            
+
             if kms_key_id:
                 # Trail is encrypted with KMS
-                findings.append(
-                    self.create_finding(
-                        status="PASS",
-                        region="global",
-                        resource_id=trail_arn,
-                        checked_value="KmsKeyId: not empty",
-                        actual_value=f"Organization trail '{trail_name}' is encrypted with KMS key: {kms_key_id}",
-                        remediation="No remediation needed"
-                    )
+                yield self.passed(
+                    region="global",
+                    resource_id=trail_arn,
+                    checked_value="KmsKeyId: not empty",
+                    actual_value=f"Organization trail '{trail_name}' is encrypted with KMS key: {kms_key_id}",
                 )
             else:
                 # Trail is not encrypted with KMS
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region="global",
-                        resource_id=trail_arn,
-                        checked_value="KmsKeyId: not empty",
-                        actual_value=f"Organization trail '{trail_name}' is not encrypted with KMS",
-                        remediation=(
-                            f"Update the organization trail '{trail_name}' to use KMS encryption using the AWS CLI command: "
-                            f"aws cloudtrail update-trail --name {trail_name} "
-                            f"--kms-key-id arn:aws:kms:{home_region}:{self.account_id}:key/YOUR_KMS_KEY_ID "
-                            f"--region {home_region}"
-                        )
-                    )
+                yield self.failed(
+                    region="global",
+                    resource_id=trail_arn,
+                    checked_value="KmsKeyId: not empty",
+                    actual_value=f"Organization trail '{trail_name}' is not encrypted with KMS",
+                    remediation=(
+                        f"Update the organization trail '{trail_name}' to use KMS encryption using the AWS CLI command: "
+                        f"aws cloudtrail update-trail --name {trail_name} "
+                        f"--kms-key-id arn:aws:kms:{home_region}:{self.account_id}:key/YOUR_KMS_KEY_ID "
+                        f"--region {home_region}"
+                    ),
                 )
-        
-        return findings

@@ -1,83 +1,97 @@
 """
 SRA-CONFIG-02: AWS Config Delivery Channel Configured.
 """
-from typing import List, Dict, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.config.base import ConfigCheck
-from sraverify.core.logging import logger
 
 
 class SRA_CONFIG_02(ConfigCheck):
     """Check if AWS Config recorder is running."""
-    
-    def __init__(self):
-        """Initialize the check."""
-        super().__init__()
-        self.check_id = "SRA-CONFIG-02"
-        self.check_name = "AWS Config recorder is running"
-        self.account_type = "application"  
-        self.severity = "HIGH"
-        self.description = (
+
+    # NOTE (requirement 11.14): this check loops ``self.regions`` and also
+    # emits a ``region="global"`` row from its no-regions guard. It is a
+    # candidate for reclassification if a base-driven region loop is ever
+    # adopted. Flagged only -- restructuring here would move row keys.
+    meta = CheckMeta(
+        check_id="SRA-CONFIG-02",
+        title="AWS Config recorder is running",
+        description=(
             "This check verifies that configuration recorder is running. AWS Config configuration "
             "recorder must be started and running to record resource configurations. If you set up "
             "AWS Config by using the console or the AWS CLI, AWS Config automatically creates and "
             "then starts the configuration recorder for you. Users with right permission have the "
             "ability to stop configuration recorder."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Checks if AWS Config recorder is running by verifying the lastStatus is SUCCESS."
-        )
-    
-    def execute(self) -> List[Dict[str, Any]]:
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.APPLICATION,
+        service="Config",
+        resource_type="AWS::Config::ConfigurationRecorder",
+        remediation=Remediation(
+            text=(
+                "Start the AWS Config configuration recorder in every enabled Region and "
+                "confirm its last status is SUCCESS."
+            ),
+            cli=(
+                "aws configservice start-configuration-recorder "
+                "--configuration-recorder-name default --region <region>"
+            ),
+            console=(
+                "Config console in each Region, Settings, confirm Recording is on and the "
+                "recorder reports no delivery errors."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
-        
-        Returns:
-            List of findings
+
+        Yields:
+            One Finding per Region.
         """
-        findings = []
-        
         if not self.regions:
-            findings.append(
-                self.create_finding(
-                    status="ERROR",
-                    region="global",
-                    resource_id="config:global",
-                    actual_value="No regions specified for check",
-                    remediation="Specify at least one region when running the check"
-                )
+            yield self.error(
+                region="global",
+                resource_id="config:global",
+                actual_value="No regions specified for check",
+                remediation="Specify at least one region when running the check",
             )
-            return findings
-        
+            return
+
         # Check each region for configuration recorder status
         for region in self.regions:
             # Get configuration recorders for the region
             recorders = self.get_configuration_recorders(region)
-            
+
             # Get configuration recorder status for the region
             recorder_statuses = self.get_configuration_recorder_status(region)
-            
+
             if not recorders:
                 # No configuration recorder found in this region
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/default",
-                        actual_value="No configuration recorder found in this region",
-                        remediation=(
-                            f"First create a configuration recorder in {region} using: aws configservice put-configuration-recorder --configuration-recorder name=default,roleARN=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig --recording-group allSupported=true,includeGlobalResourceTypes=true --region {region}. "
-                            f"Then start the recorder with: aws configservice start-configuration-recorder --configuration-recorder-name default --region {region}"
-                        )
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/default",
+                    actual_value="No configuration recorder found in this region",
+                    remediation=(
+                        f"First create a configuration recorder in {region} using: aws configservice put-configuration-recorder --configuration-recorder name=default,roleARN=arn:aws:iam::{self.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig --recording-group allSupported=true,includeGlobalResourceTypes=true --region {region}. "
+                        f"Then start the recorder with: aws configservice start-configuration-recorder --configuration-recorder-name default --region {region}"
+                    ),
                 )
                 continue
-            
+
             # Configuration recorder exists, check if it's running
             recorder_name = recorders[0].get('name', 'default')
-            
+
             # Find the status for this recorder
             recorder_status = next((status for status in recorder_statuses if status.get('name') == recorder_name), None)
-            
+
             # Get the full ARN from the status if available
             recorder_arn = None
             if recorder_status and 'arn' in recorder_status:
@@ -85,38 +99,31 @@ class SRA_CONFIG_02(ConfigCheck):
             else:
                 # Construct the Config Recorder ARN if not available in status
                 recorder_arn = f"arn:aws:config:{region}:{self.account_id}:configurationRecorder/{recorder_name}"
-            
+
             if not recorder_status:
                 # No status found for this recorder
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=recorder_arn,
-                        actual_value=f"Configuration recorder '{recorder_name}' exists but status could not be determined",
-                        remediation=(
-                            f"Check the configuration recorder status in {region} and ensure it's properly configured"
-                        )
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=recorder_arn,
+                    actual_value=f"Configuration recorder '{recorder_name}' exists but status could not be determined",
+                    remediation=(
+                        f"Check the configuration recorder status in {region} and ensure it's properly configured"
+                    ),
                 )
                 continue
-            
+
             # Check if the recorder is recording
             is_recording = recorder_status.get('recording', False)
             last_status = recorder_status.get('lastStatus', 'UNKNOWN')
             last_error_code = recorder_status.get('lastErrorCode', '')
             last_error_message = recorder_status.get('lastErrorMessage', '')
-            
+
             if is_recording and last_status == "SUCCESS":
                 # Configuration recorder is running successfully
-                findings.append(
-                    self.create_finding(
-                        status="PASS",
-                        region=region,
-                        resource_id=recorder_arn,
-                        actual_value=f"Configuration recorder '{recorder_name}' is running with lastStatus: SUCCESS",
-                        remediation="No remediation needed"
-                    )
+                yield self.passed(
+                    region=region,
+                    resource_id=recorder_arn,
+                    actual_value=f"Configuration recorder '{recorder_name}' is running with lastStatus: SUCCESS",
                 )
             elif is_recording:
                 # Configuration recorder is recording but not in SUCCESS state
@@ -125,32 +132,24 @@ class SRA_CONFIG_02(ConfigCheck):
                     error_info += f", errorCode: {last_error_code}"
                 if last_error_message:
                     error_info += f", errorMessage: {last_error_message}"
-                
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=recorder_arn,
-                        actual_value=f"Configuration recorder '{recorder_name}' is recording but has issues: {error_info}",
-                        remediation=(
-                            f"Check the AWS Config logs and permissions in {region}. "
-                            f"Ensure the Config service role has the necessary permissions to record resources."
-                        )
-                    )
+
+                yield self.failed(
+                    region=region,
+                    resource_id=recorder_arn,
+                    actual_value=f"Configuration recorder '{recorder_name}' is recording but has issues: {error_info}",
+                    remediation=(
+                        f"Check the AWS Config logs and permissions in {region}. "
+                        f"Ensure the Config service role has the necessary permissions to record resources."
+                    ),
                 )
             else:
                 # Configuration recorder is not recording
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=recorder_arn,
-                        actual_value=f"Configuration recorder '{recorder_name}' is not recording",
-                        remediation=(
-                            f"Start the configuration recorder in {region} using the AWS CLI command: "
-                            f"aws configservice start-configuration-recorder --configuration-recorder-name {recorder_name} --region {region}"
-                        )
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=recorder_arn,
+                    actual_value=f"Configuration recorder '{recorder_name}' is not recording",
+                    remediation=(
+                        f"Start the configuration recorder in {region} using the AWS CLI command: "
+                        f"aws configservice start-configuration-recorder --configuration-recorder-name {recorder_name} --region {region}"
+                    ),
                 )
-        
-        return findings

@@ -25,14 +25,6 @@ class AccessAnalyzerCheck(SecurityCheck):
     # need to disambiguate by session region anymore.
     NAMESPACE = "accessanalyzer"
 
-    def __init__(self):
-        """Initialize IAM Access Analyzer base check."""
-        super().__init__(
-            account_type="application",
-            service="IAM Access Analyzer",
-            resource_type="AWS::AccessAnalyzer::Analyzer"
-        )
-
     def _setup_clients(self):
         """Set up AccessAnalyzer clients for enabled regions.
 

@@ -1,21 +1,21 @@
 """Check if CloudTrail S3 data events are enabled for Security Lake."""
 
-from typing import List, Dict, Any
-from sraverify.services.securitylake.base import SecurityLakeCheck
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.services.securitylake.base import SecurityLakeCheck
 
 
 class SRA_SECURITYLAKE_07(SecurityLakeCheck):
     """Check if CloudTrail S3 data events are enabled for Security Lake."""
 
-    def __init__(self):
-        """Initialize check."""
-        super().__init__()
-        self.account_type = "log-archive"  # Check all org accounts from delegated admin
-        self.check_id = "SRA-SECURITYLAKE-07"
-        self.check_name = "Security Lake CloudTrail S3 data events enabled with version 2.0 for all organization accounts"
-        self.severity = "HIGH"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-SECURITYLAKE-07",
+        title="Security Lake CloudTrail S3 data events enabled with version 2.0 for all organization accounts",
+        description=(
             "This check verifies whether Amazon Security Lake is configured with "
             "CloudTrail data event for S3 log and event source version 2.0 for all active accounts in the organization. "
             "CloudTrail data events, also known as data plane operations, show "
@@ -25,19 +25,40 @@ class SRA_SECURITYLAKE_07(SecurityLakeCheck):
             "from S3 through an independent and duplicated stream of events. "
             "This check runs from the delegated administrator account "
             "and validates configuration across all organization member accounts."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Checks if the CloudTrail S3 data events log source version 2.0 is enabled in Security Lake "
             "for all active organization accounts. The check passes if the S3_DATA log source version 2.0 is enabled. "
             "The check fails if the S3_DATA log source is not enabled or configured with version 1.0."
-        )
+        ),
+        severity=Severity.HIGH,
+        # Check all org accounts from delegated admin
+        account_type=AccountType.LOG_ARCHIVE,
+        service="SecurityLake",
+        resource_type="AWS::SecurityLake::SecurityLake",
+        remediation=Remediation(
+            text=(
+                "Enable the S3_DATA log source at version 2.0 in Security Lake for "
+                "every active organization account and Region."
+            ),
+            cli=(
+                "aws securitylake create-aws-log-source --sources "
+                "'[{\"regions\":[\"<region>\"],\"sourceName\":\"S3_DATA\","
+                "\"sourceVersion\":\"2.0\"}]' --region <region>"
+            ),
+            console=(
+                "Security Lake console, Settings, Log sources, enable CloudTrail S3 "
+                "data events at version 2.0."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding per organization account per Region.
         """
 
         for region in self.regions:
@@ -61,11 +82,11 @@ class SRA_SECURITYLAKE_07(SecurityLakeCheck):
 
                 # Check CloudTrail S3 data events configuration
                 s3_data_v2_enabled = self.check_log_source_configured(region, "S3_DATA", account_id, "2.0")
-                
+
                 if not s3_data_v2_enabled:
                     # Only check v1.0 if v2.0 is not enabled (uses cached data)
                     s3_data_v1_enabled = self.check_log_source_configured(region, "S3_DATA", account_id, "1.0")
-                    
+
                     if s3_data_v1_enabled:
                         actual_value = f"CloudTrail S3 data events are configured with version 1.0 instead of 2.0 for account {account_id}"
                         remediation = (
@@ -82,27 +103,18 @@ class SRA_SECURITYLAKE_07(SecurityLakeCheck):
                             "Alternatively, use the AWS CLI command: "
                             f"aws securitylake create-aws-log-source --sources '[{{\"regions\":[\"{region}\"],\"sourceName\":\"S3_DATA\",\"sourceVersion\":\"2.0\"}}]' --region {region}"
                         )
-                    
-                    self.findings.append(
-                        self.create_finding(
-                            status="FAIL",
-                            region=region,
-                            resource_id=resource_id,
-                            checked_value="CloudTrail S3 data events enabled with version 2.0",
-                            actual_value=actual_value,
-                            remediation=remediation
-                        )
+
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="CloudTrail S3 data events enabled with version 2.0",
+                        actual_value=actual_value,
+                        remediation=remediation,
                     )
                 else:
-                    self.findings.append(
-                        self.create_finding(
-                            status="PASS",
-                            region=region,
-                            resource_id=resource_id,
-                            checked_value="CloudTrail S3 data events enabled with version 2.0",
-                            actual_value=f"CloudTrail S3 data events are enabled with version 2.0 in {region} for account {account_id}",
-                            remediation="No remediation needed"
-                        )
+                    yield self.passed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="CloudTrail S3 data events enabled with version 2.0",
+                        actual_value=f"CloudTrail S3 data events are enabled with version 2.0 in {region} for account {account_id}",
                     )
-
-        return self.findings

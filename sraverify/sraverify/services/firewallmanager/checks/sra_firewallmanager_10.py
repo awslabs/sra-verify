@@ -1,71 +1,100 @@
-from typing import Dict, List, Any
+"""
+Check if Firewall Manager policy cleanup is enabled.
+"""
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.firewallmanager.base import FirewallManagerCheck
 
-class SRA_FIREWALLMANAGER_10(FirewallManagerCheck):
-    def __init__(self):
-        super().__init__()
-        self.check_id = "SRA-FIREWALLMANAGER-10"
-        self.check_name = "Firewall Manager policy cleanup is enabled"
-        self.description = "Verifies that AWS Firewall Manager policies have cleanup enabled to remove protections from resources that leave policy scope"
-        self.severity = "MEDIUM"
-        self.check_logic = "Calls list_policies() per region and checks that policies have DeleteUnusedFMManagedResources set to true"
 
-    def execute(self) -> List[Dict[str, Any]]:
+class SRA_FIREWALLMANAGER_10(FirewallManagerCheck):
+    """Check if Firewall Manager policy cleanup is enabled."""
+
+    meta = CheckMeta(
+        check_id="SRA-FIREWALLMANAGER-10",
+        title="Firewall Manager policy cleanup is enabled",
+        description=(
+            "Verifies that AWS Firewall Manager policies have cleanup enabled to remove "
+            "protections from resources that leave policy scope"
+        ),
+        check_logic=(
+            "Calls list_policies() per region and checks that policies have "
+            "DeleteUnusedFMManagedResources set to true"
+        ),
+        severity=Severity.MEDIUM,
+        account_type=AccountType.AUDIT,
+        service="FirewallManager",
+        resource_type="AWS::FMS::Policy",
+        remediation=Remediation(
+            text=(
+                "Enable automatic cleanup on every AWS Firewall Manager policy that "
+                "supports it, so protections are removed from resources once they leave "
+                "the policy scope. Shield Advanced and AWS WAF Classic policies do not "
+                "offer cleanup."
+            ),
+            cli="aws fms put-policy --policy file://policy-with-cleanup-enabled.json --region <region>",
+            console=(
+                "AWS Firewall Manager console, Security policies, select the policy, "
+                "Edit, Policy action, Automatically remove protections from resources "
+                "that leave the policy scope."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
+        """
+        Execute the check.
+
+        Yields:
+            One Finding per policy, or one Finding per Region where no policy exists.
+        """
         for region in self.regions:
             policies_response = self.list_policies(region)
-            
+
             if "Error" in policies_response:
-                self.findings.append(self.create_finding(
-                    status="ERROR",
+                yield self.error(
                     region=region,
                     resource_id=None,
                     actual_value=policies_response["Error"].get("Message", "Unknown error"),
                     remediation="Check IAM permissions for Firewall Manager API access"
-                ))
+                )
                 continue
-            
+
             policies = policies_response.get("PolicyList", [])
-            
+
             if not policies:
-                self.findings.append(self.create_finding(
-                    status="PASS",
+                yield self.passed(
                     region=region,
                     resource_id=None,
-                    actual_value="No Firewall Manager policies configured in region",
-                    remediation="No remediation needed"
-                ))
+                    actual_value="No Firewall Manager policies configured in region"
+                )
                 continue
-            
+
             for policy in policies:
                 policy_id = policy.get("PolicyId", "")
                 policy_name = policy.get("PolicyName", "Unknown")
                 security_service_type = policy.get("SecurityServiceType", "")
                 cleanup_enabled = policy.get("DeleteUnusedFMManagedResources", False)
-                
+
                 # Shield Advanced and WAF Classic don't support cleanup
                 if security_service_type in ["SHIELD_ADVANCED", "WAF"]:
-                    self.findings.append(self.create_finding(
-                        status="PASS",
+                    yield self.passed(
                         region=region,
                         resource_id=policy_id,
-                        actual_value=f"Policy '{policy_name}' ({security_service_type}) does not support cleanup",
-                        remediation="No remediation needed - cleanup not available for this policy type"
-                    ))
+                        actual_value=f"Policy '{policy_name}' ({security_service_type}) does not support cleanup"
+                    )
                 elif not cleanup_enabled:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
+                    yield self.failed(
                         region=region,
                         resource_id=policy_id,
                         actual_value=f"Policy '{policy_name}' has cleanup disabled",
                         remediation=f"Enable cleanup on policy '{policy_name}' to automatically remove protections from out-of-scope resources"
-                    ))
+                    )
                 else:
-                    self.findings.append(self.create_finding(
-                        status="PASS",
+                    yield self.passed(
                         region=region,
                         resource_id=policy_id,
-                        actual_value=f"Policy '{policy_name}' has cleanup enabled",
-                        remediation="No remediation needed"
-                    ))
-        
-        return self.findings
+                        actual_value=f"Policy '{policy_name}' has cleanup enabled"
+                    )

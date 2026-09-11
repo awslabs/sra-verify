@@ -21,14 +21,6 @@ class AccountCheck(SecurityCheck):
     #: calls made from this base class. Matches Requirement 5.11.
     NAMESPACE = "account"
 
-    def __init__(self):
-        """Initialize Account base check."""
-        super().__init__(
-            account_type="application",
-            service="Account",
-            resource_type="AWS::Account::AlternateContact"
-        )
-
     def _setup_clients(self):
         """Set up Account client wrappers for each region.
 

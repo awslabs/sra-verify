@@ -49,14 +49,6 @@ class MacieCheck(SecurityCheck):
     # need to disambiguate by account ID or session region anymore.
     NAMESPACE = "macie"
 
-    def __init__(self):
-        """Initialize Macie base check."""
-        super().__init__(
-            account_type="application",  # Default, can be overridden in subclasses
-            service="Macie",
-            resource_type="AWS::Macie::Session"
-        )
-
     def _setup_clients(self):
         """Set up Macie clients for each region.
 

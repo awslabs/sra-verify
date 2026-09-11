@@ -34,24 +34,6 @@ class WAFCheck(SecurityCheck):
     #: (Requirement 5.17).
     NAMESPACE = "waf"
 
-    def __init__(self):
-        """Initialize WAF base check.
-
-        The 9 instance-level cache dicts that the pre-refactor
-        ``__init__`` assigned (``_distributions_cache``,
-        ``_load_balancers_cache``, ``_rest_apis_cache``,
-        ``_graphql_apis_cache``, ``_user_pools_cache``,
-        ``_apprunner_services_cache``,
-        ``_verified_access_instances_cache``, ``_amplify_apps_cache``,
-        ``_web_acls_cache``) are gone; cached AWS responses now live on
-        the per-scan ``ScanContext`` under the ``"waf"`` namespace.
-        """
-        super().__init__(
-            account_type="application",
-            service="WAF",
-            resource_type="AWS::ElasticLoadBalancingV2::LoadBalancer"
-        )
-
     def _setup_clients(self):
         """Set up WAF clients per region.
 

@@ -22,14 +22,6 @@ class EC2Check(SecurityCheck):
     #: (Requirement 5.8).
     NAMESPACE = "ec2"
 
-    def __init__(self):
-        """Initialize EC2 base check."""
-        super().__init__(
-            account_type="application",
-            service="EC2",
-            resource_type="AWS::EC2::Instance"
-        )
-
     def _setup_clients(self):
         """Set up EC2 clients for each region.
 

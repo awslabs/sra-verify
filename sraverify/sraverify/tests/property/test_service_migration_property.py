@@ -37,6 +37,32 @@ have no cache attrs and route through ctx.
 
 **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10,
 5.11, 5.12, 5.13, 5.14, 5.15, 5.16, 5.17, 5.18**
+
+Repaired at check-contract-formalization task 15.2
+-------------------------------------------------
+
+``SecurityCheck`` is now an ``ABC`` whose ``execute()`` is an
+``abstractmethod``, so the ``row.cls()`` that sub-tests (b) and (c) used to
+default-construct a service base class raises ``TypeError``. That is the
+intended new behaviour -- a check class with no ``execute`` must fail at
+instantiation -- and service base classes legitimately do not implement
+``execute``; only leaf check classes do.
+
+Both sub-tests therefore construct through :func:`_concrete`, a minimal
+concrete subclass that implements ``execute`` and declares nothing else. All
+three invariants are unchanged: (a) still inspects ``row.cls`` itself, and
+(b) and (c) still observe the service base class's own behaviour, because the
+concrete subclass contributes no ``__init__``, no attributes, and no method
+overrides beyond ``execute``.
+
+No assertion was weakened or dropped. Nothing else in this module needed
+repair: it never touched ``create_finding`` / ``self.findings`` /
+``get_findings``, never read the instance metadata attributes that became
+``meta``, and never called ``execute()``, so the contract change is invisible
+to it apart from the instantiation above. ``ScanContext`` and the ``_has`` /
+``_get`` / ``_set`` primitives it mocks are untouched by that spec.
+
+**Validates: Requirements 6.1, 6.2, 13.6 (check-contract-formalization)**
 """
 from __future__ import annotations
 
@@ -64,6 +90,69 @@ from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.services.shield.base import ShieldCheck
 from sraverify.services.waf.base import WAFCheck
+
+
+# --------------------------------------------------------------------------- #
+# Concrete-subclass factory
+# --------------------------------------------------------------------------- #
+#
+# ``SecurityCheck`` is an ``ABC`` with an abstract ``execute()``. Service base
+# classes deliberately do not implement it -- only leaf check classes do -- so
+# a service base class is not instantiable on its own. Sub-tests (b) and (c)
+# need an *instance*, so they go through the minimal concrete subclass built
+# here.
+#
+# "Minimal" is load-bearing. The subclass adds exactly one name, ``execute``,
+# and nothing else: no ``__init__``, no attributes, no other overrides. So
+#   - sub-test (b)'s ``vars(instance)`` sees only what ``SecurityCheck.__init__``
+#     and the service base class put there, which is what it is asserting about;
+#   - sub-test (c)'s method resolution reaches the service base class's own
+#     typed accessor, unmediated.
+
+
+def _noop_execute(self) -> Any:  # noqa: ANN001 - bound as a method below
+    """Satisfy the abstract ``execute()`` without producing any Finding.
+
+    Never called by this module. It exists only so ``ABCMeta`` computes an
+    empty ``__abstractmethods__`` for the concrete subclass and instantiation
+    succeeds. Returning an empty iterator rather than ``None`` keeps it honest
+    against the ``Iterable[Finding]`` return type, so a future test that does
+    call it gets zero rows instead of a ``TypeError``.
+    """
+    return iter(())
+
+
+#: Memo so repeated ``_concrete(GuardDutyCheck)`` calls across the three
+#: parameterized tests build one class rather than one per call. Class creation
+#: runs ``SecurityCheck.__init_subclass__``, and while that hook returns
+#: silently here -- this module's file stem is not ``sra_*``, so the class is
+#: ineligible for registration and the registry is never touched -- there is no
+#: reason to run it 34 times.
+_CONCRETE_SUBCLASSES: dict[type, type] = {}
+
+
+def _concrete(cls: type) -> type:
+    """Return a minimal instantiable subclass of a service base class.
+
+    Args:
+        cls: The service base class under test, e.g. ``GuardDutyCheck``.
+
+    Returns:
+        A subclass of ``cls`` that implements ``execute`` and declares nothing
+        else. ``__module__`` is pinned to this test module so
+        ``SecurityCheck.__init_subclass__`` resolves a real module whose file
+        stem does not start with ``sra_``, takes its "not a check module" early
+        return, and leaves the registry untouched.
+    """
+    cached = _CONCRETE_SUBCLASSES.get(cls)
+    if cached is None:
+        cached = type(
+            f"_Concrete{cls.__name__}",
+            (cls,),
+            {"execute": _noop_execute, "__module__": __name__},
+        )
+        _CONCRETE_SUBCLASSES[cls] = cached
+    return cached
 
 
 # --------------------------------------------------------------------------- #
@@ -700,10 +789,14 @@ def test_no_instance_level_cache_attrs(row: ServiceRow) -> None:
     ``removed_instance_attrs`` tuple is empty so this assertion is a no-op
     that still keeps a row in the parameterised test for symmetry.
 
+    Constructed through ``_concrete(row.cls)`` because ``SecurityCheck`` is now
+    an ``ABC``; the subclass declares no ``__init__`` and no attributes, so
+    ``vars(instance)`` is exactly what ``row.cls()`` would have produced.
+
     Validates: Requirement 5.17 (the WAF instance-level cache dicts must be
     removed from ``__init__``).
     """
-    instance = row.cls()
+    instance = _concrete(row.cls)()
     leftover = [
         name for name in row.removed_instance_attrs if name in vars(instance)
     ]
@@ -741,8 +834,13 @@ def test_canonical_method_routes_through_ctx_set(row: ServiceRow) -> None:
     namespaced primitives are how cached data is written), and indirectly
     Requirement 6.3 (no individual check class is involved here -- only the
     service base class is).
+
+    Constructed through ``_concrete(row.cls)`` because ``SecurityCheck`` is now
+    an ``ABC``. The subclass overrides nothing but ``execute``, which this test
+    never calls, so the typed accessor that runs below is the service base
+    class's own.
     """
-    check = row.cls()
+    check = _concrete(row.cls)()
     mock_ctx = _make_mock_ctx(region=_REGION)
     check._ctx = mock_ctx
     # Service base classes may populate ``self._clients`` lazily in

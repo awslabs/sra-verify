@@ -57,14 +57,6 @@ class SecurityHubCheck(SecurityCheck):
 
     NAMESPACE = "securityhub"
 
-    def __init__(self):
-        """Initialize SecurityHub base check."""
-        super().__init__(
-            account_type="audit",  # Default to audit, can be overridden in child classes
-            service="SecurityHub",
-            resource_type="AWS::SecurityHub::Hub"
-        )
-
     def _setup_clients(self):
         """Set up SecurityHub clients for each region.
 

@@ -25,14 +25,6 @@ class CloudTrailCheck(SecurityCheck):
     # need to disambiguate by session region anymore.
     NAMESPACE = "cloudtrail"
 
-    def __init__(self):
-        """Initialize CloudTrail base check."""
-        super().__init__(
-            account_type="management",
-            service="CloudTrail",
-            resource_type="AWS::CloudTrail::Trail"
-        )
-
     def _setup_clients(self):
         """Set up CloudTrail clients for each region.
 

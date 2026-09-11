@@ -26,14 +26,6 @@ class GuardDutyCheck(SecurityCheck):
     # need to disambiguate by session region anymore.
     NAMESPACE = "guardduty"
 
-    def __init__(self):
-        """Initialize GuardDuty base check."""
-        super().__init__(
-            account_type="application",
-            service="GuardDuty",
-            resource_type="AWS::GuardDuty::Detector"
-        )
-
     def _setup_clients(self):
         """Set up GuardDuty clients for each region.
 

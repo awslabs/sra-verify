@@ -1,8 +1,4 @@
-"""
-EC2 security checks.
-"""
-from sraverify.services.ec2.checks.sra_ec2_01 import SRA_EC2_01
+"""EC2 security checks."""
+from sraverify.core.discovery import import_check_modules
 
-CHECKS = {
-    "SRA-EC2-01": SRA_EC2_01,
-}
+import_check_modules(f"{__name__}.checks")

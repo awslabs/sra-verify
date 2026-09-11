@@ -1,9 +1,4 @@
-from sraverify.services.account.checks.sra_account_01 import SRA_ACCOUNT_01
-from sraverify.services.account.checks.sra_account_02 import SRA_ACCOUNT_02
-from sraverify.services.account.checks.sra_account_03 import SRA_ACCOUNT_03
+"""Account security checks."""
+from sraverify.core.discovery import import_check_modules
 
-CHECKS = {
-    "SRA-ACCOUNT-01": SRA_ACCOUNT_01,
-    "SRA-ACCOUNT-02": SRA_ACCOUNT_02,
-    "SRA-ACCOUNT-03": SRA_ACCOUNT_03,
-}
+import_check_modules(f"{__name__}.checks")

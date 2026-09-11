@@ -21,14 +21,6 @@ class AuditManagerCheck(SecurityCheck):
     #: (Requirement 5.12).
     NAMESPACE = "auditmanager"
 
-    def __init__(self):
-        """Initialize Audit Manager base check."""
-        super().__init__(
-            account_type="application",
-            service="AuditManager",
-            resource_type="AWS::AuditManager::Account"
-        )
-
     def _setup_clients(self):
         """Set up Audit Manager clients for each region.
 

@@ -1,36 +1,60 @@
 """
 Check if organization has Service Control Policies configured.
 """
-from typing import Dict, List, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.organizations.base import OrganizationsCheck
 
 
 class SRA_ORGANIZATIONS_06(OrganizationsCheck):
     """Check if organization has Service Control Policies configured."""
 
-    def __init__(self):
-        """Initialize SCP check."""
-        super().__init__(resource_type="AWS::Organizations::Policy")
-        self.check_id = "SRA-ORGANIZATIONS-06"
-        self.check_name = "Organization has Service Control Policies configured"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-ORGANIZATIONS-06",
+        title="Organization has Service Control Policies configured",
+        description=(
             "This check verifies that the organization has at least one custom Service Control Policy (SCP) "
             "configured beyond the default FullAWSAccess policy. SCPs are essential for implementing "
             "permission guardrails across the organization to enforce security and compliance requirements."
-        )
-        self.severity = "HIGH"
-        self.check_logic = (
+        ),
+        check_logic=(
             "Call ListPolicies API with filter for SERVICE_CONTROL_POLICY type. "
             "Check passes if at least one custom SCP exists (AwsManaged=False), "
             "fails if only the default FullAWSAccess policy exists or no SCPs are found."
-        )
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.MANAGEMENT,
+        service="Organizations",
+        resource_type="AWS::Organizations::Policy",
+        remediation=Remediation(
+            text=(
+                "Enable the SERVICE_CONTROL_POLICY policy type on the organization "
+                "root and create at least one custom SCP that implements permission "
+                "guardrails, then attach it to the root or to an organizational unit."
+            ),
+            cli=(
+                "aws organizations enable-policy-type --root-id <root-id> "
+                "--policy-type SERVICE_CONTROL_POLICY\n"
+                "aws organizations create-policy --name <name> "
+                "--type SERVICE_CONTROL_POLICY --description <description> "
+                "--content file://scp.json"
+            ),
+            console=(
+                "AWS Organizations console, Policies, Service control policies, "
+                "Enable service control policies, then Create policy."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding for the organization's Service Control Policies.
         """
         # Organizations is a global service, use "global" as region
         region = "global"
@@ -51,8 +75,7 @@ class SRA_ORGANIZATIONS_06(OrganizationsCheck):
 
             # PolicyTypeNotEnabledException means SCPs are not enabled
             if error_code == "PolicyTypeNotEnabledException":
-                self.findings.append(self.create_finding(
-                    status="FAIL",
+                yield self.failed(
                     region=region,
                     resource_id=org_id,
                     actual_value="Service Control Policies are not enabled",
@@ -61,18 +84,17 @@ class SRA_ORGANIZATIONS_06(OrganizationsCheck):
                         "Navigate to AWS Organizations > Policies > Service control policies and enable SCPs. "
                         "Then create custom SCPs to implement permission guardrails."
                     ),
-                    checked_value="Custom SCPs configured"
-                ))
+                    checked_value="Custom SCPs configured",
+                )
             else:
-                self.findings.append(self.create_finding(
-                    status="ERROR",
+                yield self.error(
                     region=region,
                     resource_id=org_id,
                     actual_value=f"Error: {error_message}",
                     remediation="Check IAM permissions for Organizations API access",
-                    checked_value="Custom SCPs configured"
-                ))
-            return self.findings
+                    checked_value="Custom SCPs configured",
+                )
+            return
 
         policies = response.get("Policies", [])
 
@@ -82,8 +104,7 @@ class SRA_ORGANIZATIONS_06(OrganizationsCheck):
 
         if not policies:
             # No SCPs at all - SCPs might not be enabled
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=org_id,
                 actual_value="No Service Control Policies found",
@@ -92,13 +113,12 @@ class SRA_ORGANIZATIONS_06(OrganizationsCheck):
                     "Navigate to AWS Organizations > Policies > Service control policies and enable SCPs. "
                     "Then create custom SCPs to implement permission guardrails."
                 ),
-                checked_value="Custom SCPs configured"
-            ))
+                checked_value="Custom SCPs configured",
+            )
         elif custom_scp_count == 0:
             # Only AWS managed policies (FullAWSAccess)
             policy_names = [p.get("Name", "Unknown") for p in policies]
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=org_id,
                 actual_value=f"Only default policies found: {', '.join(policy_names)}",
@@ -108,18 +128,14 @@ class SRA_ORGANIZATIONS_06(OrganizationsCheck):
                     "Consider implementing SCPs for: denying root user actions, restricting regions, "
                     "preventing disabling of security services, and enforcing encryption."
                 ),
-                checked_value="Custom SCPs configured"
-            ))
+                checked_value="Custom SCPs configured",
+            )
         else:
             # Custom SCPs exist
             custom_scp_names = [p.get("Name", "Unknown") for p in custom_scps]
-            self.findings.append(self.create_finding(
-                status="PASS",
+            yield self.passed(
                 region=region,
                 resource_id=org_id,
                 actual_value=f"{custom_scp_count} custom SCP(s) configured: {', '.join(custom_scp_names)}",
-                remediation="No remediation needed",
-                checked_value="Custom SCPs configured"
-            ))
-
-        return self.findings
+                checked_value="Custom SCPs configured",
+            )

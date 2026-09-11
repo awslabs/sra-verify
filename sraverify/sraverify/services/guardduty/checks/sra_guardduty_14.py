@@ -1,136 +1,146 @@
 """
 Check if GuardDuty delegated admin account is the audit account.
 """
-from typing import Dict, List, Any
-from sraverify.services.guardduty.base import GuardDutyCheck
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.services.guardduty.base import GuardDutyCheck
 
 
 class SRA_GUARDDUTY_14(GuardDutyCheck):
     """Check if GuardDuty delegated admin account is the audit account."""
 
-    def __init__(self):
-        """Initialize GuardDuty delegated admin check."""
-        super().__init__()
-        self.check_id = "SRA-GUARDDUTY-14"
-        self.check_name = "GuardDuty delegated admin is audit account"
-        self.description = ("This check verifies whether GuardDuty delegated admin account is the audit account "
-                           "of your AWS organization. The audit account is dedicated to operating security services, "
-                           "monitoring AWS accounts, and automating security alerting and response. GuardDuty helps "
-                           "monitor resources for unusual and suspicious activities.")
-        self.severity = "HIGH"
-        self.check_logic = "Check if GuardDuty delegated administrator is the audit account using GuardDuty list-organization-admin-accounts API."
-        self.account_type = "management"
-        self._audit_accounts = []
-    
-    def execute(self) -> List[Dict[str, Any]]:
+    meta = CheckMeta(
+        check_id="SRA-GUARDDUTY-14",
+        title="GuardDuty delegated admin is audit account",
+        description=(
+            "This check verifies whether GuardDuty delegated admin account is the audit account "
+            "of your AWS organization. The audit account is dedicated to operating security services, "
+            "monitoring AWS accounts, and automating security alerting and response. GuardDuty helps "
+            "monitor resources for unusual and suspicious activities."
+        ),
+        check_logic=(
+            "Check if GuardDuty delegated administrator is the audit account using "
+            "GuardDuty list-organization-admin-accounts API."
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.MANAGEMENT,
+        service="GuardDuty",
+        resource_type="AWS::GuardDuty::Detector",
+        remediation=Remediation(
+            text=(
+                "Delegate GuardDuty administration to the audit account in every "
+                "enabled Region."
+            ),
+            cli=(
+                "aws guardduty enable-organization-admin-account "
+                "--admin-account-id <audit-account-id> --region <region>"
+            ),
+            console=(
+                "GuardDuty console in the management account, Settings, Accounts, "
+                "Delegated administrator, enter the audit account ID, Delegate."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
-        
-        Returns:
-            List of findings
+
+        Yields:
+            One Finding per Region, or one Finding describing why the GuardDuty
+            delegated administrator could not be evaluated.
         """
-        findings = []        
-        # Get the audit account ID from the _audit_accounts list
-        # This is populated by main.py from the CLI arguments
-        if not self._audit_accounts:
+        if not self.audit_accounts:
             logger.warning("Audit account ID not provided. Check cannot be completed.")
-            for region in self.regions:
-                findings.append(self.create_finding(
-                    status="ERROR", 
-                    region=region, 
-                    resource_id=f"guardduty:{region}", 
-                    actual_value="Audit account ID not provided", 
-                    remediation="Run sraverify with --audit-account parameter"
-                ))
-            return findings
-        
+            # Missing required input is not a regional condition, report once.
+            yield self.error(
+                region="global",
+                resource_id=f"guardduty:{self.account_id}",
+                actual_value="Audit account ID not provided",
+                remediation="Run sraverify with --audit-account parameter",
+            )
+            return
+
         # Use the first audit account in the list
-        audit_account_id = self._audit_accounts[0]
+        audit_account_id = self.audit_accounts[0]
         logger.debug(f"Using audit account ID: {audit_account_id}")
-        
+
         # Check all regions
         for region in self.regions:
             detector_id = self.get_detector_id(region)
-            
+
             # Handle regions where we can't access GuardDuty
             if not detector_id:
-                findings.append(self.create_finding(
-                    status="ERROR", 
-                    region=region, 
-                    resource_id=f"guardduty:{region}", 
-                    actual_value="Unable to access GuardDuty in this region", 
-                    remediation="Check permissions or if GuardDuty is supported in this region"
-                ))
+                yield self.error(
+                    region=region,
+                    resource_id=f"guardduty:{region}",
+                    actual_value="Unable to access GuardDuty in this region",
+                    remediation="Check permissions or if GuardDuty is supported in this region",
+                )
                 continue
-                
+
             # List organization admin accounts for GuardDuty
             admin_accounts_response = self.list_organization_admin_accounts(region)
-            
+
             # Check if there was an error in the response
             if "Error" in admin_accounts_response:
                 error_code = admin_accounts_response["Error"].get("Code", "Unknown")
                 error_message = admin_accounts_response["Error"].get("Message", "Unknown error")
-                
+
                 # Handle BadRequestException specifically for non-management accounts
                 if error_code == "BadRequestException" and "not the master account" in error_message:
-                    findings.append(self.create_finding(
-                        status="ERROR", 
-                        region=region, 
-                        resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"This check must be run from the organization management account", 
-                        remediation="Run this check from the AWS Organizations management account"
-                    ))
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=f"This check must be run from the organization management account",
+                        remediation="Run this check from the AWS Organizations management account",
+                    )
                 else:
-                    findings.append(self.create_finding(
-                        status="ERROR", 
-                        region=region, 
-                        resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"Error accessing GuardDuty organization information: {error_code}", 
-                        remediation="Check permissions and AWS Organizations configuration"
-                    ))
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=f"Error accessing GuardDuty organization information: {error_code}",
+                        remediation="Check permissions and AWS Organizations configuration",
+                    )
                 continue
-            
+
             admin_accounts = admin_accounts_response.get('AdminAccounts', [])
-            
+
             if admin_accounts:
                 # GuardDuty has an admin account
                 admin_account_id = admin_accounts[0].get('AdminAccountId')
                 admin_account_status = admin_accounts[0].get('AdminStatus', 'Unknown')
-                
+
                 # Check if the admin account is the audit account and is enabled
                 if admin_account_id == audit_account_id and admin_account_status == 'ENABLED':
-                    findings.append(self.create_finding(
-                        status="PASS", 
-                        region=region, 
-                        resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"GuardDuty delegated admin account is the audit account ({audit_account_id})", 
-                        remediation=""
-                    ))
+                    yield self.passed(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=f"GuardDuty delegated admin account is the audit account ({audit_account_id})",
+                    )
                 elif admin_account_id != audit_account_id:
-                    findings.append(self.create_finding(
-                        status="FAIL", 
-                        region=region, 
-                        resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"GuardDuty delegated admin account ({admin_account_id}) is not the audit account ({audit_account_id})", 
-                        remediation=f"Delegate GuardDuty administration to the audit account ({audit_account_id}) in {region}"
-                    ))
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=f"GuardDuty delegated admin account ({admin_account_id}) is not the audit account ({audit_account_id})",
+                        remediation=f"Delegate GuardDuty administration to the audit account ({audit_account_id}) in {region}",
+                    )
                 else:
-                    findings.append(self.create_finding(
-                        status="FAIL", 
-                        region=region, 
-                        resource_id=f"guardduty:{region}:{detector_id}", 
-                        actual_value=f"GuardDuty delegated admin is the audit account but status is {admin_account_status}", 
-                        remediation=f"Check the status of the delegated administrator account in {region}"
-                    ))
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=f"GuardDuty delegated admin is the audit account but status is {admin_account_status}",
+                        remediation=f"Check the status of the delegated administrator account in {region}",
+                    )
             else:
                 # No admin account for GuardDuty
-                findings.append(self.create_finding(
-                    status="FAIL", 
-                    region=region, 
-                    resource_id=f"guardduty:{region}:{detector_id}", 
-                    actual_value="GuardDuty service administration is not delegated to any account", 
-                    remediation=f"Delegate GuardDuty administration to the audit account ({audit_account_id}) using the Organizations service in {region}"
-                ))
-        
-        return findings
+                yield self.failed(
+                    region=region,
+                    resource_id=f"guardduty:{region}:{detector_id}",
+                    actual_value="GuardDuty service administration is not delegated to any account",
+                    remediation=f"Delegate GuardDuty administration to the audit account ({audit_account_id}) using the Organizations service in {region}",
+                )

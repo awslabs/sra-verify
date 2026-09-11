@@ -1,55 +1,76 @@
 """Check if Audit account has data access."""
 
-from typing import List, Dict, Any
-from sraverify.services.securitylake.base import SecurityLakeCheck
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.services.securitylake.base import SecurityLakeCheck
 
 
 class SRA_SECURITYLAKE_17(SecurityLakeCheck):
     """Check if Audit account has data access."""
 
-    def __init__(self):
-        """Initialize check."""
-        super().__init__()
-        self.check_id = "SRA-SECURITYLAKE-17"
-        self.check_name = "Security Lake audit account has data access"
-        self.severity = "HIGH"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-SECURITYLAKE-17",
+        title="Security Lake audit account has data access",
+        description=(
             "This check verifies whether the AWS Organization "
             "Audit account is set up as data access subscriber. These "
             "subscribers can directly access the S3 objects and receive "
             "notifications of new objects through a subscription endpoint or "
             "by polling an Amazon SQS queue."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Checks if the audit account is set up as a data access subscriber. "
             "The check passes if there is at least one subscriber with type DATA_ACCESS and "
             "the account ID matches the audit account ID. "
             "The check fails if no data access subscriber is found for the audit account."
-        )
-        self._audit_accounts = []
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.LOG_ARCHIVE,
+        service="SecurityLake",
+        resource_type="AWS::SecurityLake::SecurityLake",
+        remediation=Remediation(
+            text=(
+                "Create a Security Lake subscriber for the audit account with S3 data "
+                "access."
+            ),
+            cli=(
+                "aws securitylake create-subscriber --subscriber-name audit-data "
+                "--access-types S3 "
+                "--subscriber-identity principal=<audit-account-id>,externalId=<external-id> "
+                "--sources '[{\"awsLogSource\":{\"sourceName\":\"CLOUD_TRAIL_MGMT\","
+                "\"sourceVersion\":\"2.0\"}}]' --region <region>"
+            ),
+            console=(
+                "Security Lake console, Subscribers, Create subscriber, select the "
+                "audit account and Data access type."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
-        """Run check."""
-        findings = []
+    def execute(self) -> Iterable[Finding]:
+        """Run check.
 
+        Yields:
+            One Finding per Region, or a single global ERROR Finding.
+        """
         # Check if audit account ID is provided
-        if not self._audit_accounts:
+        if not self.audit_accounts:
             logger.warning("Audit account ID not provided. Check cannot be completed.")
-            findings.append(
-                self.create_finding(
-                    status="ERROR",
-                    region="global",
-                    resource_id=f"arn:aws:securitylake::global:subscriber/data-access",
-                    checked_value="Security tooling account has data access",
-                    actual_value="Audit account ID not provided",
-                    remediation="Run sraverify with --audit-account parameter"
-                )
+            yield self.error(
+                region="global",
+                resource_id=f"arn:aws:securitylake::global:subscriber/data-access",
+                checked_value="Security tooling account has data access",
+                actual_value="Audit account ID not provided",
+                remediation="Run sraverify with --audit-account parameter",
             )
-            return findings
+            return
 
         # Use the first audit account in the list
-        audit_account_id = self._audit_accounts[0]
+        audit_account_id = self.audit_accounts[0]
         logger.debug(f"Using audit account ID: {audit_account_id}")
 
         # Check each region
@@ -69,19 +90,16 @@ class SRA_SECURITYLAKE_17(SecurityLakeCheck):
 
             if not audit_subscriber:
                 logger.debug(f"Audit account is not set up as data access subscriber in {region}")
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=resource_id,
-                        checked_value=f"Audit account {audit_account_id} has data access",
-                        actual_value=f"Audit account {audit_account_id} is not set up as data access subscriber",
-                        remediation=(
-                            f"Set up the audit account {audit_account_id} as a data access subscriber in Security Lake. "
-                            "In the Security Lake console, navigate to Subscribers > Create subscriber and select "
-                            f"the audit account {audit_account_id} with Data access type."
-                        )
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value=f"Audit account {audit_account_id} has data access",
+                    actual_value=f"Audit account {audit_account_id} is not set up as data access subscriber",
+                    remediation=(
+                        f"Set up the audit account {audit_account_id} as a data access subscriber in Security Lake. "
+                        "In the Security Lake console, navigate to Subscribers > Create subscriber and select "
+                        f"the audit account {audit_account_id} with Data access type."
+                    ),
                 )
             else:
                 # Get subscriber ID for resource ID
@@ -89,15 +107,9 @@ class SRA_SECURITYLAKE_17(SecurityLakeCheck):
                 resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:subscriber/{subscriber_id}"
 
                 logger.debug(f"Audit account is set up as data access subscriber in {region}")
-                findings.append(
-                    self.create_finding(
-                        status="PASS",
-                        region=region,
-                        resource_id=resource_id,
-                        checked_value=f"Audit account {audit_account_id} has data access",
-                        actual_value=f"Audit account {audit_account_id} is set up as data access subscriber",
-                        remediation="No remediation needed"
-                    )
+                yield self.passed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value=f"Audit account {audit_account_id} has data access",
+                    actual_value=f"Audit account {audit_account_id} is set up as data access subscriber",
                 )
-
-        return findings

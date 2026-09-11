@@ -1,102 +1,93 @@
 """
 SRA-CONFIG-08: AWS Config Aggregator Authorization.
 """
-from typing import List, Dict, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.config.base import ConfigCheck
-from sraverify.core.logging import logger
 
 
 class SRA_CONFIG_08(ConfigCheck):
     """Check if Config delegated admin account is the Security Tooling (Audit) account."""
 
-    def __init__(self):
-        """Initialize the check."""
-        super().__init__()
-        self.check_id = "SRA-CONFIG-08"
-        self.check_name = "Config delegated admin account is the Security Tooling (Audit) account"
-        self.account_type = "management"  # This check applies to management account
-        self.severity = "MEDIUM"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-CONFIG-08",
+        title="Config delegated admin account is the Security Tooling (Audit) account",
+        description=(
             "This check verifies whether Config delegated admin account is the audit account of your "
             "AWS organization. The audit account is dedicated to operating security services, monitoring "
             "AWS accounts, and automating security alerting and response."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Compares the delegated admin account ID with the provided audit account ID."
-        )
-        self.resource_type = "AWS::Organizations::Account"
-        # Initialize audit account attribute
-        self._audit_accounts = []
+        ),
+        severity=Severity.MEDIUM,
+        account_type=AccountType.MANAGEMENT,
+        service="Config",
+        resource_type="AWS::Organizations::Account",
+        remediation=Remediation(
+            text=(
+                "Register the audit account as the AWS Config delegated administrator for "
+                "both the config.amazonaws.com and config-multiaccountsetup.amazonaws.com "
+                "service principals, deregistering any other account first."
+            ),
+            cli=(
+                "aws organizations register-delegated-administrator "
+                "--service-principal config.amazonaws.com --account-id <AUDIT_ACCOUNT_ID>\n"
+                "aws organizations register-delegated-administrator "
+                "--service-principal config-multiaccountsetup.amazonaws.com "
+                "--account-id <AUDIT_ACCOUNT_ID>"
+            ),
+            console=(
+                "Config console in the management account, Settings, Delegated administrator, "
+                "enter the audit account ID and delegate."
+            ),
+        ),
+    )
 
-    def initialize(self, ctx, **kwargs):
-        """
-        Initialize check with the per-scan ``ScanContext`` and parameters.
-
-        Args:
-            ctx: The :class:`ScanContext` for the current scan
-            **kwargs: Additional parameters for the check
-        """
-        super().initialize(ctx)
-
-        # Extract audit-account from kwargs
-        if 'audit-account' in kwargs:
-            # Handle both single value and list
-            audit_account = kwargs['audit-account']
-            if isinstance(audit_account, list):
-                self._audit_accounts = audit_account
-            else:
-                self._audit_accounts = [audit_account]
-            logger.debug(f"Audit account IDs set to: {self._audit_accounts}")
-        else:
-            logger.debug("No Audit account ID provided in parameters")
-
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One global Finding per delegated administrator account, or one
+            global Finding when the audit account is not the delegated
+            administrator.
         """
-        findings = []
-
         # Check if Audit account ID is provided
-        if not self._audit_accounts:
-            findings.append(
-                self.create_finding(
-                    status="ERROR",
-                    region="global",
-                    resource_id="delegated-admin/none",
-                    checked_value="Delegated administrator is audit account",
-                    actual_value="No audit account ID provided",
-                    remediation="Provide the audit account ID using the --audit-account parameter"
-                )
+        if not self.audit_accounts:
+            yield self.error(
+                region="global",
+                resource_id="delegated-admin/none",
+                checked_value="Delegated administrator is audit account",
+                actual_value="No audit account ID provided",
+                remediation="Provide the audit account ID using the --audit-account parameter",
             )
-            return findings
+            return
 
         # Get delegated administrators for both Config service principals
         delegated_admins = self.get_delegated_administrators()
 
         if not delegated_admins:
             # No delegated administrator found for either service principal
-            findings.append(
-                self.create_finding(
-                    status="FAIL",
-                    region="global",
-                    resource_id=f"delegated-admin/none",
-                    checked_value=f"Delegated administrator is audit account {', '.join(self._audit_accounts)}",
-                    actual_value=f"No delegated administrator found for Config service",
-                    remediation=(
-                        f"Register the audit account as a delegated administrator for Config using both service principals:\n"
-                        f"1. aws organizations register-delegated-administrator "
-                        f"--service-principal config.amazonaws.com "
-                        f"--account-id {self._audit_accounts[0]}\n"
-                        f"2. aws organizations register-delegated-administrator "
-                        f"--service-principal config-multiaccountsetup.amazonaws.com "
-                        f"--account-id {self._audit_accounts[0]}"
-                    )
-                )
+            yield self.failed(
+                region="global",
+                resource_id=f"delegated-admin/none",
+                checked_value=f"Delegated administrator is audit account {', '.join(self.audit_accounts)}",
+                actual_value=f"No delegated administrator found for Config service",
+                remediation=(
+                    f"Register the audit account as a delegated administrator for Config using both service principals:\n"
+                    f"1. aws organizations register-delegated-administrator "
+                    f"--service-principal config.amazonaws.com "
+                    f"--account-id {self.audit_accounts[0]}\n"
+                    f"2. aws organizations register-delegated-administrator "
+                    f"--service-principal config-multiaccountsetup.amazonaws.com "
+                    f"--account-id {self.audit_accounts[0]}"
+                ),
             )
-            return findings
+            return
 
         # Group delegated admins by account ID to check if the same account is used for both service principals
         admin_accounts = {}
@@ -114,7 +105,7 @@ class SRA_CONFIG_08(ConfigCheck):
 
         # Check if any of the audit accounts is a delegated administrator
         audit_account_found = False
-        for audit_account_id in self._audit_accounts:
+        for audit_account_id in self.audit_accounts:
             if audit_account_id in admin_accounts:
                 admin_info = admin_accounts[audit_account_id]
                 admin_name = admin_info['name']
@@ -123,35 +114,32 @@ class SRA_CONFIG_08(ConfigCheck):
                 # Check if the audit account is delegated for both service principals
                 if service_count == 2:
                     audit_account_found = True
-                    findings.append(
-                        self.create_finding(
-                            status="PASS",
-                            region="global",
-                            resource_id=f"delegated-admin/{audit_account_id}",
-                            checked_value=f"Delegated administrator is audit account {audit_account_id}",
-                            actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) for both service principals",
-                            remediation="No remediation needed"
-                        )
+                    yield self.passed(
+                        region="global",
+                        resource_id=f"delegated-admin/{audit_account_id}",
+                        checked_value=f"Delegated administrator is audit account {audit_account_id}",
+                        actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) for both service principals",
                     )
                 else:
                     audit_account_found = True
-                    findings.append(
-                        self.create_finding(
-                            status="WARN",
-                            region="global",
-                            resource_id=f"delegated-admin/{audit_account_id}",
-                            checked_value=f"Delegated administrator is audit account {audit_account_id} for both service principals",
-                            actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) but not for all required service principals",
-                            remediation=(
-                                f"Ensure the audit account is registered as a delegated administrator for both Config service principals:\n"
-                                f"1. aws organizations register-delegated-administrator "
-                                f"--service-principal config.amazonaws.com "
-                                f"--account-id {audit_account_id}\n"
-                                f"2. aws organizations register-delegated-administrator "
-                                f"--service-principal config-multiaccountsetup.amazonaws.com "
-                                f"--account-id {audit_account_id}"
-                            )
-                        )
+                    # Pre-migration this site emitted status="WARN", which is not
+                    # a legal Status member. A partially configured control is a
+                    # FAIL per the product principle, and the substantive
+                    # remediation below is preserved verbatim.
+                    yield self.failed(
+                        region="global",
+                        resource_id=f"delegated-admin/{audit_account_id}",
+                        checked_value=f"Delegated administrator is audit account {audit_account_id} for both service principals",
+                        actual_value=f"Config delegated administrator is the audit account {audit_account_id} ({admin_name}) but not for all required service principals",
+                        remediation=(
+                            f"Ensure the audit account is registered as a delegated administrator for both Config service principals:\n"
+                            f"1. aws organizations register-delegated-administrator "
+                            f"--service-principal config.amazonaws.com "
+                            f"--account-id {audit_account_id}\n"
+                            f"2. aws organizations register-delegated-administrator "
+                            f"--service-principal config-multiaccountsetup.amazonaws.com "
+                            f"--account-id {audit_account_id}"
+                        ),
                     )
 
         # If no audit account is a delegated administrator
@@ -161,24 +149,19 @@ class SRA_CONFIG_08(ConfigCheck):
             for admin_id, info in admin_accounts.items():
                 other_admins.append(f"{admin_id} ({info['name']})")
 
-            findings.append(
-                self.create_finding(
-                    status="FAIL",
-                    region="global",
-                    resource_id=f"delegated-admin/none",
-                    checked_value=f"Delegated administrator is audit account {', '.join(self._audit_accounts)}",
-                    actual_value=f"Config delegated administrator(s) {', '.join(other_admins)} are not the audit account {', '.join(self._audit_accounts)}",
-                    remediation=(
-                        f"1. Deregister the current delegated administrator(s).\n"
-                        f"2. Register the audit account as a delegated administrator for both Config service principals:\n"
-                        f"   aws organizations register-delegated-administrator "
-                        f"--service-principal config.amazonaws.com "
-                        f"--account-id {self._audit_accounts[0]}\n"
-                        f"   aws organizations register-delegated-administrator "
-                        f"--service-principal config-multiaccountsetup.amazonaws.com "
-                        f"--account-id {self._audit_accounts[0]}"
-                    )
-                )
+            yield self.failed(
+                region="global",
+                resource_id=f"delegated-admin/none",
+                checked_value=f"Delegated administrator is audit account {', '.join(self.audit_accounts)}",
+                actual_value=f"Config delegated administrator(s) {', '.join(other_admins)} are not the audit account {', '.join(self.audit_accounts)}",
+                remediation=(
+                    f"1. Deregister the current delegated administrator(s).\n"
+                    f"2. Register the audit account as a delegated administrator for both Config service principals:\n"
+                    f"   aws organizations register-delegated-administrator "
+                    f"--service-principal config.amazonaws.com "
+                    f"--account-id {self.audit_accounts[0]}\n"
+                    f"   aws organizations register-delegated-administrator "
+                    f"--service-principal config-multiaccountsetup.amazonaws.com "
+                    f"--account-id {self.audit_accounts[0]}"
+                ),
             )
-
-        return findings

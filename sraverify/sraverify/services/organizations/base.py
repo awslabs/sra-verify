@@ -34,20 +34,6 @@ class OrganizationsCheck(SecurityCheck):
     # need to disambiguate by account anymore.
     NAMESPACE = "organizations"
 
-    def __init__(self, resource_type: str = "AWS::Organizations::Organization"):
-        """
-        Initialize Organizations base check.
-
-        Args:
-            resource_type: AWS resource type for findings (default: Organization)
-        """
-        super().__init__(
-            account_type="management",
-            service="Organizations",
-            resource_type=resource_type
-        )
-        self._org_client = None
-
     def _setup_clients(self):
         """Set up Organizations client (global service, no per-region clients needed).
 

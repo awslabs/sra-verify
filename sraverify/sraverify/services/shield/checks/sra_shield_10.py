@@ -1,31 +1,56 @@
 """
 Check if health checks are configured for Shield Advanced protected resources.
 """
-from typing import Dict, List, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.shield.base import ShieldCheck
 
 
 class SRA_SHIELD_10(ShieldCheck):
     """Check if health checks are configured for Shield Advanced protected resources."""
 
-    def __init__(self):
-        """Initialize Shield Advanced health checks check."""
-        super().__init__()
-        self.check_id = "SRA-SHIELD-10"
-        self.check_name = "Health checks are configured for Shield Advanced protected resources"
-        self.description = ("This check verifies that Route 53 health checks are associated "
-                            "with Shield Advanced protected resources to enable health-based detection. "
-                            "Route 53 hosted zones are excluded as they don't support health-based detection.")
-        self.severity = "MEDIUM"
-        self.check_logic = ("List Shield protections and check HealthCheckIds field. "
-                            "Check fails if protected resources (excluding Route 53 hosted zones) lack health checks.")
+    meta = CheckMeta(
+        check_id="SRA-SHIELD-10",
+        title="Health checks are configured for Shield Advanced protected resources",
+        description=(
+            "This check verifies that Route 53 health checks are associated "
+            "with Shield Advanced protected resources to enable health-based detection. "
+            "Route 53 hosted zones are excluded as they don't support health-based detection."
+        ),
+        check_logic=(
+            "List Shield protections and check HealthCheckIds field. "
+            "Check fails if protected resources (excluding Route 53 hosted zones) lack health checks."
+        ),
+        severity=Severity.MEDIUM,
+        account_type=AccountType.APPLICATION,
+        service="Shield",
+        resource_type="AWS::Shield::Subscription",
+        remediation=Remediation(
+            text=(
+                "Associate a Route 53 health check with each Shield Advanced protected "
+                "resource."
+            ),
+            cli=(
+                "aws shield associate-health-check --protection-id <protection-id> "
+                "--health-check-arn arn:aws:route53:::healthcheck/<health-check-id> "
+                "--region us-east-1"
+            ),
+            console=(
+                "AWS WAF & Shield console, AWS Shield, Protected resources, select "
+                "the resource, Health check, Associate health check."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding per eligible Shield Advanced protected resource.
         """
         # Shield is a global service, check only in us-east-1
         region = "us-east-1"
@@ -34,21 +59,19 @@ class SRA_SHIELD_10(ShieldCheck):
         if "Error" in protections:
             error_code = protections["Error"].get("Code", "")
             if error_code == "ResourceNotFoundException":
-                self.findings.append(self.create_finding(
-                    status="FAIL",
+                yield self.failed(
                     region=region,
                     resource_id=None,
                     actual_value="Shield Advanced subscription not found",
                     remediation="Enable Shield Advanced subscription to protect resources"
-                ))
+                )
             else:
-                self.findings.append(self.create_finding(
-                    status="ERROR",
+                yield self.error(
                     region=region,
                     resource_id=None,
                     actual_value=protections["Error"].get("Message", "Unknown error"),
                     remediation="Check IAM permissions for Shield API access"
-                ))
+                )
         elif protections.get("Protections"):
             # Filter out Route 53 hosted zones as they don't support health-based detection
             eligible_protections = [
@@ -57,14 +80,12 @@ class SRA_SHIELD_10(ShieldCheck):
             ]
 
             if not eligible_protections:
-                self.findings.append(self.create_finding(
-                    status="PASS",
+                yield self.passed(
                     region=region,
                     resource_id="shield:health-checks",
-                    actual_value="No resources requiring health checks found (only Route 53 hosted zones protected)",
-                    remediation=""
-                ))
-                return self.findings
+                    actual_value="No resources requiring health checks found (only Route 53 hosted zones protected)"
+                )
+                return
 
             # Create a finding for each eligible protected resource
             for protection in eligible_protections:
@@ -73,28 +94,22 @@ class SRA_SHIELD_10(ShieldCheck):
                 health_check_ids = protection.get("HealthCheckIds", [])
 
                 if health_check_ids:
-                    self.findings.append(self.create_finding(
-                        status="PASS",
+                    yield self.passed(
                         region=region,
                         resource_id=resource_arn,
-                        actual_value=f"Health check configured: {len(health_check_ids)} health check(s)",
-                        remediation=""
-                    ))
+                        actual_value=f"Health check configured: {len(health_check_ids)} health check(s)"
+                    )
                 else:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
+                    yield self.failed(
                         region=region,
                         resource_id=resource_arn,
                         actual_value="No health check configured",
                         remediation="Associate a Route 53 health check with this Shield Advanced protected resource"
-                    ))
+                    )
         else:
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=None,
                 actual_value="No Shield Advanced protections found",
                 remediation="Enable Shield Advanced protection for resources and configure health checks"
-            ))
-
-        return self.findings
+            )

@@ -114,7 +114,15 @@ class MacieCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing classification export configuration
+            Dictionary containing the classification export configuration, or
+            the client error sentinel ``{"Error": {"Code", "Message"}}`` if the
+            API call failed. Callers must inspect for the ``"Error"`` key and
+            decide FAIL vs ERROR; ``MacieCheck.is_macie_disabled_error`` makes
+            that judgement.
+
+            An empty dict means only that no Macie client wrapper exists for
+            ``region``, which is also an undetermined state rather than a
+            negative verdict.
         """
         cache_key = f"export_configuration:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
@@ -123,17 +131,58 @@ class MacieCheck(SecurityCheck):
 
         client = self.get_client(region)
         if not client:
-            logger.warning(f"No Macie client available for region {region}")
+            logger.warning(f"Macie: No client available for region {region}")
             return {}
 
         # Get classification export configuration from client
         config = client.get_classification_export_configuration()
+
+        # Never cache a failure: leave the slot empty so a retry re-issues the
+        # call rather than replaying the error for the rest of the scan.
+        if "Error" in config:
+            return config
 
         # Cache the result under the macie namespace.
         self._ctx._set(self.NAMESPACE, cache_key, config)
         logger.debug(f"Cached Macie classification export configuration for {region}")
 
         return config
+
+    @staticmethod
+    def is_macie_disabled_error(error: Dict[str, Any]) -> bool:
+        """
+        Decide whether a Macie client error means "Macie is not enabled here".
+
+        Macie2 has no dedicated "not enabled" error code. When Macie is
+        disabled in a Region it answers ``AccessDeniedException`` with a
+        message saying so, which is the same code returned when the caller
+        simply lacks the IAM permission. The message is therefore the only
+        available discriminator, and getting it wrong in either direction is
+        costly: treating a permission failure as "not enabled" reports a
+        misconfiguration that was never established, and treating "not
+        enabled" as a permission failure hides a real finding behind an ERROR.
+
+        Args:
+            error: The ``Error`` sub-dict of a client error sentinel, i.e.
+                ``{"Code": ..., "Message": ...}``.
+
+        Returns:
+            True if AWS answered and the answer is that Macie is not enabled
+            (a FAIL). False if the call could not be completed (an ERROR).
+        """
+        code = error.get("Code", "")
+        message = error.get("Message", "")
+
+        # Macie session / configuration genuinely absent.
+        if code == "ResourceNotFoundException":
+            return True
+
+        # AccessDeniedException is overloaded; only the message separates
+        # "Macie is off" from "you may not ask".
+        if code == "AccessDeniedException" and "macie is not enabled" in message.lower():
+            return True
+
+        return False
 
     def get_macie_delegated_admin(self, region: str) -> List[Dict[str, Any]]:
         """

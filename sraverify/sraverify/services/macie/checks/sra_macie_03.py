@@ -72,15 +72,43 @@ class SRA_MACIE_03(MacieCheck):
             # Get classification export configuration using the base class method with caching
             export_config = self.get_classification_export_configuration(region)
 
-            # Check if the API call was successful
+            # No client wrapper for this Region: the control was not evaluated.
             if not export_config:
-                yield self.failed(
+                yield self.error(
                     region=region,
                     resource_id=f"macie2/{self.account_id}/{region}",
                     checked_value="S3 bucket in Log Archive account",
-                    actual_value="Failed to retrieve Macie classification export configuration",
-                    remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie GetClassificationExportConfiguration API"
+                    actual_value=f"No Macie client available for region {region}",
+                    remediation=f"Confirm that Macie is available in {region} and that the Region is reachable from the scanning environment"
                 )
+                continue
+
+            # The API call failed. Macie disabled in the Region is a FAIL, since
+            # AWS answered and the control is absent. Anything else is an ERROR:
+            # the control could not be evaluated.
+            if "Error" in export_config:
+                error = export_config["Error"]
+                error_code = error.get("Code", "Unknown")
+                error_message = error.get("Message", "Unknown error")
+                if self.is_macie_disabled_error(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="S3 bucket in Log Archive account",
+                        actual_value=f"Macie is not enabled in region {region}, so findings are not exported to the Log Archive account ({error_code})",
+                        remediation=(
+                            f"Enable Macie in {region}, then configure it to export findings to a S3 bucket in the Log Archive account "
+                            f"{log_archive_accounts[0]}: aws macie2 enable-macie --region {region}"
+                        )
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="S3 bucket in Log Archive account",
+                        actual_value=f"Could not determine the Macie findings export destination in {region}: {error_code}: {error_message}",
+                        remediation="Grant the member role macie2:GetClassificationExportConfiguration so the findings export destination can be read"
+                    )
                 continue
 
             # Check if export configuration exists

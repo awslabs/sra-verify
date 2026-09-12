@@ -5,8 +5,10 @@ from collections.abc import Iterable
 
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
+from sraverify.core.logging import logger
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.waf.base import WAFCheck
+from sraverify.services.waf.client import TRANSPORT_ERROR_CODES
 
 
 class SRA_WAF_06(WAFCheck):
@@ -53,14 +55,57 @@ class SRA_WAF_06(WAFCheck):
             One Finding per App Runner service.
         """
         for region in self.regions:
+            # App Runner does not exist in every Region. Where it has no
+            # endpoint there can be no App Runner service left unprotected, so
+            # there is nothing to report: emit no row at all. A FAIL would
+            # assert a misconfiguration that cannot exist, and an ERROR would
+            # claim we were unable to look when in fact there was nothing to
+            # look at. This fact cannot be changed by an AWS call, so the guard
+            # precedes the call.
+            if not self.region_supports_service("apprunner", region):
+                logger.debug(
+                    f"WAF: App Runner has no endpoint in {region}; "
+                    f"SRA-WAF-06 reports nothing for this Region"
+                )
+                continue
+
             services_response = self.get_apprunner_services(region)
 
-            if "Error" in services_response:
+            # An empty response means no WAF client wrapper exists for this
+            # Region, so the control was not evaluated. Reporting it as "no App
+            # Runner services found" would be a PASS we never established.
+            if not services_response:
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=services_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for App Runner and WAF API access"
+                    actual_value=f"No WAF client available for region {region}",
+                    remediation=f"Confirm that {region} is enabled for this account and reachable from the scanning environment"
+                )
+                continue
+
+            # App Runner is supported here but the call still failed, so the
+            # control could not be evaluated. A transport failure and a denied
+            # permission need different advice.
+            if "Error" in services_response:
+                error = services_response["Error"]
+                error_code = error.get("Code", "Unknown")
+                error_message = error.get("Message", "Unknown error")
+                if error_code in TRANSPORT_ERROR_CODES:
+                    remediation = (
+                        f"App Runner is available in {region} but its endpoint could not be "
+                        f"reached. Check network egress and DNS resolution from the scanning "
+                        f"environment, then re-run."
+                    )
+                else:
+                    remediation = (
+                        "Grant the member role apprunner:ListServices so App Runner services "
+                        "can be enumerated"
+                    )
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=f"Could not list App Runner services in {region}: {error_code}: {error_message}",
+                    remediation=remediation
                 )
                 continue
 

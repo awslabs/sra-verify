@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sraverify",
-    version="0.1.4",
+    version="0.2.0",
     author="SRA Verify team",
     author_email="schiefj@amazon.com",
     description="AWS Security Reference Architecture Verification Tool",
@@ -21,7 +21,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.11",
     install_requires=[
         "boto3>=1.26.0",
         "colorama>=0.4.4"

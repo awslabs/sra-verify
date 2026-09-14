@@ -1,40 +1,61 @@
 """Check if Route 53 log source is enabled for Security Lake."""
 
-from typing import List, Dict, Any
-from sraverify.services.securitylake.base import SecurityLakeCheck
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.services.securitylake.base import SecurityLakeCheck
 
 
 class SRA_SECURITYLAKE_06(SecurityLakeCheck):
     """Check if Route 53 log source is enabled for Security Lake."""
 
-    def __init__(self):
-        """Initialize check."""
-        super().__init__()
-        self.account_type = "log-archive"  # Check from log archive account
-        self.check_id = "SRA-SECURITYLAKE-06"
-        self.check_name = "Security Lake Route 53 log source enabled with version 2.0 for all organization accounts"
-        self.severity = "HIGH"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-SECURITYLAKE-06",
+        title="Security Lake Route 53 log source enabled with version 2.0 for all organization accounts",
+        description=(
             "This check verifies whether Amazon Security Lake is configured with "
             "Route 53 log and event source version 2.0 for all active accounts in the organization. "
             "Route 53 resolver query logs track DNS queries made by resources within Amazon VPC. "
             "Security Lake collects resolver query logs directly from Route 53 through an independent "
             "and duplicated stream of events. This check runs from the delegated administrator account "
             "and validates configuration across all organization member accounts."
-        )
-        self.check_logic = (
+        ),
+        check_logic=(
             "Checks if the Route 53 log source is enabled in Security Lake with version 2.0. "
             "The check passes if the ROUTE53 log source is configured. "
             "The check fails if the ROUTE53 log source is not configured."
-        )
+        ),
+        severity=Severity.HIGH,
+        # Check from log archive account
+        account_type=AccountType.LOG_ARCHIVE,
+        service="SecurityLake",
+        resource_type="AWS::SecurityLake::SecurityLake",
+        remediation=Remediation(
+            text=(
+                "Enable the ROUTE53 log source at version 2.0 in Security Lake for "
+                "every active organization account and Region."
+            ),
+            cli=(
+                "aws securitylake create-aws-log-source --sources "
+                "'[{\"regions\":[\"<region>\"],\"sourceName\":\"ROUTE53\","
+                "\"sourceVersion\":\"2.0\"}]' --region <region>"
+            ),
+            console=(
+                "Security Lake console, Settings, Log sources, enable Route 53 "
+                "resolver query logs at version 2.0."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding per organization account per Region.
         """
         for region in self.regions:
             logger.debug(f"Checking if Route 53 log source is enabled in {region}")
@@ -79,26 +100,17 @@ class SRA_SECURITYLAKE_06(SecurityLakeCheck):
                             f"aws securitylake create-aws-log-source --sources '[{{\"regions\":[\"{region}\"],\"sourceName\":\"ROUTE53\",\"sourceVersion\":\"2.0\"}}]' --region {region}"
                         )
 
-                    self.findings.append(
-                        self.create_finding(
-                            status="FAIL",
-                            region=region,
-                            resource_id=resource_id,
-                            checked_value="Route 53 log source enabled with version 2.0",
-                            actual_value=actual_value,
-                            remediation=remediation
-                        )
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Route 53 log source enabled with version 2.0",
+                        actual_value=actual_value,
+                        remediation=remediation,
                     )
                 else:
-                    self.findings.append(
-                        self.create_finding(
-                            status="PASS",
-                            region=region,
-                            resource_id=resource_id,
-                            checked_value="Route 53 log source enabled with version 2.0",
-                            actual_value=f"Route 53 log source is configured in {region} for account {account_id}",
-                            remediation="No remediation needed"
-                        )
+                    yield self.passed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Route 53 log source enabled with version 2.0",
+                        actual_value=f"Route 53 log source is configured in {region} for account {account_id}",
                     )
-
-        return self.findings

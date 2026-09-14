@@ -8,7 +8,7 @@ Cache keys are scoped by ``account_id`` (e.g., ``"users:111111111111"``)
 because the per-scan context is per-session but a single SRA Verify run can
 in principle span account boundaries via assumed-role sessions.
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
@@ -33,15 +33,6 @@ class IAMCheck(SecurityCheck):
     # IAM is a global service; all API calls target this endpoint and every
     # finding produced by an IAM check reports this region.
     GLOBAL_REGION: str = "us-east-1"
-
-    def __init__(self):
-        """Initialize the IAM base check with SRA-standard metadata."""
-        super().__init__(
-            account_type="application",
-            service="IAM",
-            resource_type="AWS::IAM::User",
-        )
-        self._iam_client: Optional[IAM_Client] = None
 
     def _setup_clients(self):
         """Set up the IAM client (global service, no per-region clients).

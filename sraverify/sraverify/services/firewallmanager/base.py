@@ -39,14 +39,6 @@ class FirewallManagerCheck(SecurityCheck):
     #: calls made from this base class. Matches Requirement 5.13.
     NAMESPACE = "firewallmanager"
 
-    def __init__(self):
-        """Initialize Firewall Manager base check."""
-        super().__init__(
-            account_type="audit",
-            service="FirewallManager",
-            resource_type="AWS::FMS::Policy"
-        )
-
     def _setup_clients(self):
         """Set up Firewall Manager client wrappers.
 

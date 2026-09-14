@@ -191,7 +191,7 @@ Resources:
                   echo "Running in AWS region: $AWS_DEFAULT_REGION"
 
                   # Get list of all accounts using management role
-                  account_list=$(aws organizations list-accounts --query 'Accounts[?Status==`ACTIVE`].Id' --output text)
+                  account_list=$(aws organizations list-accounts --query 'Accounts[?State==`ACTIVE` || Status==`ACTIVE`].Id' --output text)
                   echo "Found accounts: $account_list"
                   export account_list
 
@@ -284,7 +284,17 @@ Resources:
                           all_dfs = []
                           for file in csv_files:
                               try:
-                                  df = pd.read_csv(file)
+                                  # Every column in the findings schema is a string.
+                                  # Without dtype=str, pandas type-infers AccountId as
+                                  # int64 and strips the leading zero from a 12-digit
+                                  # account ID (010526246989 -> 10526246989); if any
+                                  # cell in the column is blank it becomes float64 and
+                                  # every ID gains a ".0" suffix. Both break joins on
+                                  # AccountId in the dashboards.
+                                  # keep_default_na=False stops free-text finding cells
+                                  # whose value happens to be "NA", "NULL", "None" etc.
+                                  # from being read as NaN and written back out empty.
+                                  df = pd.read_csv(file, dtype=str, keep_default_na=False)
                                   all_dfs.append(df)
                               except Exception as e:
                                   print(f"Error reading file {file}: {str(e)}")

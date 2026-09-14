@@ -57,8 +57,22 @@ class MacieClient:
         """
         Get the classification export configuration for Macie.
 
+        Returns either the raw API response on success or the standard client
+        error sentinel ``{"Error": {"Code": ..., "Message": ...}}`` on failure.
+
+        The sentinel is required rather than a bare ``{}``: Macie returns
+        ``AccessDeniedException`` both when Macie is disabled in the Region
+        (the control is genuinely absent -> FAIL) and when the member role
+        lacks ``macie2:GetClassificationExportConfiguration`` (the control
+        could not be evaluated -> ERROR). Collapsing both to ``{}`` makes the
+        two indistinguishable to the caller, which forced an undetermined
+        state to be reported as a definite FAIL. The code and message are
+        preserved verbatim so the check can make that judgement; see
+        ``MacieCheck.is_macie_disabled_error``.
+
         Returns:
-            Dictionary containing classification export configuration
+            Dictionary containing the classification export configuration, or
+            the error sentinel.
         """
         try:
             logger.debug(f"Getting Macie classification export configuration in {self.region}")
@@ -66,16 +80,19 @@ class MacieClient:
             logger.debug(f"Macie classification export configuration in {self.region}: {response}")
             return response
         except ClientError as e:
-            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
-            error_message = str(e)
-            if error_code == 'AccessDeniedException' or 'Macie is not enabled' in error_message:
-                logger.debug(f"Access denied when getting Macie classification export configuration in {self.region}. Macie might not be enabled in this region.")
-            else:
-                logger.debug(f"Error getting Macie classification export configuration in {self.region}: {e}")
-            return {}
+            error_code = e.response.get('Error', {}).get('Code', '')
+            error_message = e.response.get('Error', {}).get('Message', str(e))
+            logger.error(
+                f"Error getting Macie classification export configuration in "
+                f"{self.region}: {error_code}: {error_message}"
+            )
+            return {"Error": {"Code": error_code, "Message": error_message}}
         except Exception as e:
-            logger.debug(f"Unexpected error getting Macie classification export configuration in {self.region}: {e}")
-            return {}
+            logger.error(
+                f"Unexpected error getting Macie classification export configuration in "
+                f"{self.region}: {type(e).__name__}: {e}"
+            )
+            return {"Error": {"Code": type(e).__name__, "Message": str(e)}}
 
     def list_delegated_administrators(self, service_principal: str = "macie.amazonaws.com") -> List[Dict[str, Any]]:
         """

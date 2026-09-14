@@ -21,14 +21,6 @@ class S3Check(SecurityCheck):
     #: calls made from this base class. Matches Requirement 5.6.
     NAMESPACE = "s3"
 
-    def __init__(self):
-        """Initialize S3 base check."""
-        super().__init__(
-            account_type="application",
-            service="S3",
-            resource_type="AWS::S3::AccountPublicAccessBlock"
-        )
-
     def _setup_clients(self):
         """Set up S3 client wrappers for each region.
 

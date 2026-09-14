@@ -2,7 +2,9 @@
 
 SRA Verify is a security assessment tool that automates the verification of [AWS Security Reference Architecture (SRA)](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/welcome.html) implementations across multiple AWS accounts and regions. It provides detailed findings and actionable remediation steps to ensure your AWS environment follows security best practices.
 
-The tool performs automated security checks across multiple AWS services including CloudTrail, GuardDuty, IAM Access Analyzer, AWS Config, Security Hub, and S3. It supports multi-account environments and can run checks specific to management, audit, and log archive accounts while providing detailed findings with remediation guidance.
+The tool performs **158 automated security checks across 18 AWS services**: Account, Audit Manager, CloudTrail, Config, EC2, Firewall Manager, GuardDuty, IAM, IAM Access Analyzer, Inspector, Macie, Organizations, S3, Security Hub, Security Incident Response, Security Lake, Shield, and WAF. It supports multi-account environments and can run checks specific to management, audit, and log archive accounts while providing detailed findings with remediation guidance.
+
+For the full check inventory, see [docs/checks.txt](./docs/checks.txt) or run `sraverify --list-checks`.
 
 >Note: SRA Verify contains checks for several services, but may not contain a check for every consideration of the AWS Security Reference Architecture. Review the [AWS Prescriptive Guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/welcome.html) for more information on AWS Security Reference Architecture.
 
@@ -175,40 +177,96 @@ In this step you will clone the Github repository and run the tool.
 5. Run sraverify
 
     ```bash
-    usage: sraverify [-h] [--profile PROFILE] [--role ROLE] [--regions REGIONS] [--output OUTPUT] [--check CHECK]
-                    [--service SERVICE] [--account-type {application,audit,log-archive,management,all}]
-                    [--audit-account ACCOUNTID1,ACCOUNTID2] [--log-archive-account ACCOUNTID1,ACCOUNTID2] [--list-checks]
-                    [--list-services] [--debug]
+    usage: sraverify [-h] [--profile PROFILE] [--role ROLE] [--regions REGIONS]
+                     [--output OUTPUT] [--check CHECK] [--service SERVICE]
+                     [--account-type {application,audit,log-archive,management,all}]
+                     [--audit-account ACCOUNTID1,ACCOUNTID2]
+                     [--log-archive-account ACCOUNTID1,ACCOUNTID2] [--list-checks]
+                     [--list-services] [--debug]
+                     [--connect-timeout CONNECT_TIMEOUT]
+                     [--read-timeout READ_TIMEOUT] [--max-attempts MAX_ATTEMPTS]
+                     [--max-pool-connections MAX_POOL_CONNECTIONS]
 
     SRA Verify - Security Rule Assessment Verification Tool
 
     options:
-    -h, --help            show this help message and exit
-    --profile PROFILE     AWS profile to use
-    --role ROLE           ARN of IAM role to assume
-    --regions REGIONS     Comma-separated list of AWS regions to check
-    --output OUTPUT       Output file name (default: sraverify_findings.csv)
-    --check CHECK         Run a specific check (e.g., SRA-GD-1)
-    --service SERVICE     Run checks for a specific service (e.g., GuardDuty)
-    --account-type {application,audit,log-archive,management,all}
-                            Type of accounts to run checks against: application, audit, log-archive, management, or all
-                            (default: all)
-    --audit-account ACCOUNTID1,ACCOUNTID2
-                            AWS accounts used for Audit/Security Tooling, use comma separated values
-    --log-archive-account ACCOUNTID1,ACCOUNTID2
-                            AWS accounts used for Logging, use comma separated values
-    --list-checks         List available checks
-    --list-services       List available services
-    --debug               Enable debug logging
+      -h, --help            show this help message and exit
+      --profile PROFILE     AWS profile to use
+      --role ROLE           ARN of IAM role to assume
+      --regions REGIONS     Comma-separated list of AWS regions to check
+      --output OUTPUT       Output file name (default: sraverify_findings.csv)
+      --check CHECK         Run a specific check (e.g., SRA-GUARDDUTY-01)
+      --service SERVICE     Run checks for a specific service (e.g., GuardDuty)
+      --account-type {application,audit,log-archive,management,all}
+                            Type of accounts to run checks against: application,
+                            audit, log-archive, management, all (default: all)
+      --audit-account ACCOUNTID1,ACCOUNTID2
+                            AWS accounts used for Audit/Security Tooling, use
+                            comma separated values
+      --log-archive-account ACCOUNTID1,ACCOUNTID2
+                            AWS accounts used for Logging, use comma separated
+                            values
+      --list-checks         List available checks
+      --list-services       List available services
+      --debug               Enable debug logging
+      --connect-timeout CONNECT_TIMEOUT
+                            boto3 connect timeout in seconds (default: 10)
+      --read-timeout READ_TIMEOUT
+                            boto3 read timeout in seconds (default: 30)
+      --max-attempts MAX_ATTEMPTS
+                            boto3 retry max_attempts (default: 3)
+      --max-pool-connections MAX_POOL_CONNECTIONS
+                            boto3 max_pool_connections (default: 50)
     ```
 
 6. Review these detailed examples
-   - Run specific service checks:
+   - Run specific service checks. `--service` is case-insensitive but matches the service
+     name in full, so `--service Security` matches nothing:
    ```bash
    sraverify --service CloudTrail --regions us-east-1
    ```
 
-   - Run a single check:
+   - Run a single check. Check IDs are matched exactly and are case-sensitive:
    ```bash
-   sraverify --check SRA-CT-1 --regions us-east-1
+   sraverify --check SRA-CLOUDTRAIL-01 --regions us-east-1
    ```
+
+   - Run the checks for one account type, supplying the account IDs the checks compare
+     against:
+   ```bash
+   sraverify --account-type audit --audit-account 111122223333 --regions us-east-1
+   ```
+
+   - List the catalog. Both of these exit immediately without making any AWS API call, so
+     they need no credentials:
+   ```bash
+   sraverify --list-checks
+   sraverify --list-services
+   ```
+
+### Output file naming
+When `--output` is omitted, a timestamp is inserted before the extension, producing
+`sraverify_findings_YYYYmmdd_HHMMSS.csv`. Supplying `--output` with any other path writes to
+that path unchanged.
+
+### Exit codes
+Wrap `sraverify` in automation using these codes rather than by parsing its output.
+
+| Code  | Meaning                                                                                                                                                                                                                                                    |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** | A report was written. This holds regardless of how many FAIL or ERROR rows it contains — a FAIL is the tool working, not the tool failing.                                                                                                                 |
+| **1** | The scan ran but the output file could not be written. The path and reason are logged, and no scan summary is printed. Often transient (a full disk, a stale working directory) and worth a retry.                                                         |
+| **2** | Usage error, raised before any AWS call. **No file is created.** Either `--check` named an unknown ID (up to three near-miss suggestions are logged) or the filter combination matched no checks, for example `--account-type audit --service CloudTrail`. |
+
+Exit 0 on a report full of FAILs is deliberate. The CodeBuild deployment fans `sraverify`
+out across every active account with GNU `parallel`, so a non-zero status from one member
+account would be treated as a failed job. A non-zero code means only "this invocation
+produced no usable report", which is what lets the consolidation step tell a missing CSV
+from an empty one.
+
+### Run the tests
+The test suite needs no AWS credentials and makes no AWS API calls.
+
+```bash
+cd sraverify && pytest -q
+```

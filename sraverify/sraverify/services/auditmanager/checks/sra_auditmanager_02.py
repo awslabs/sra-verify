@@ -1,80 +1,117 @@
 """
 Check if Audit Manager delegated admin is the audit account.
 """
-from typing import Dict, List, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.auditmanager.base import AuditManagerCheck
 
 
 class SRA_AUDITMANAGER_02(AuditManagerCheck):
     """Check if Audit Manager delegated admin is the audit account."""
 
-    def __init__(self):
-        """Initialize Audit Manager delegated admin check."""
-        super().__init__()
-        self.account_type = "management"
-        self.check_id = "SRA-AUDITMANAGER-02"
-        self.check_name = "Audit Manager delegated admin is the audit account"
-        self.description = "This check verifies that the AWS Audit Manager delegated administrator is configured as the audit account. The delegated administrator should be the security tooling account to centralize audit management."
-        self.severity = "HIGH"
-        self.check_logic = "Get organization admin account using GetOrganizationAdminAccount API and verify it matches the audit account ID."
-    
-    def execute(self) -> List[Dict[str, Any]]:
+    meta = CheckMeta(
+        check_id="SRA-AUDITMANAGER-02",
+        title="Audit Manager delegated admin is the audit account",
+        description=(
+            "This check verifies that the AWS Audit Manager delegated administrator "
+            "is configured as the audit account. The delegated administrator should "
+            "be the security tooling account to centralize audit management."
+        ),
+        check_logic=(
+            "Get organization admin account using GetOrganizationAdminAccount API "
+            "and verify it matches the audit account ID."
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.MANAGEMENT,
+        service="AuditManager",
+        resource_type="AWS::AuditManager::Account",
+        remediation=Remediation(
+            text=(
+                "Register the audit (security tooling) account as the AWS Audit "
+                "Manager delegated administrator in every enabled Region, so "
+                "assessments and evidence collection are managed centrally rather "
+                "than from the organization management account."
+            ),
+            cli=(
+                "aws auditmanager register-organization-admin-account "
+                "--admin-account-id <audit-account-id> --region <region>"
+            ),
+            console=(
+                "AWS Console, Audit Manager, Settings, Delegated administrator, Edit."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
-        
-        Returns:
-            List of findings
+
+        Yields:
+            One Finding per region, or one Finding describing why the
+            delegated administrator could not be evaluated.
         """
+        # The audit account IDs are required input: without them there is
+        # nothing to compare the delegated administrator against, so the
+        # control cannot be evaluated and the row is an ERROR rather than a
+        # FAIL. The guard sits ahead of the region loop because
+        # get_organization_admin_account is an AWS call whose result cannot
+        # change this outcome. A missing --audit-account is also not a
+        # regional condition, so it is reported once with region="global"
+        # rather than fanned out across the Regions being scanned.
+        if not self.audit_accounts:
+            yield self.error(
+                region="global",
+                resource_id=None,
+                actual_value="Audit account ID not provided",
+                remediation="Re-run the check with the --audit-account parameter so the delegated administrator can be compared against the audit account"
+            )
+            return
+
         for region in self.regions:
             admin_response = self.get_organization_admin_account(region)
-            
+
             if "Error" in admin_response:
                 error_code = admin_response["Error"].get("Code", "")
                 error_message = admin_response["Error"].get("Message", "")
-                
+
                 if error_code == "ResourceNotFoundException":
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
+                    yield self.failed(
                         region=region,
                         resource_id=None,
                         actual_value="No delegated administrator configured",
                         remediation=f"Configure a delegated administrator for Audit Manager in {region} using RegisterOrganizationAdminAccount API"
-                    ))
+                    )
                 elif "Please complete AWS Audit Manager setup" in error_message:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
+                    yield self.failed(
                         region=region,
                         resource_id=None,
                         actual_value="Audit Manager setup not completed in this account",
                         remediation=f"Complete AWS Audit Manager setup from the home page in {region} before configuring delegated administrator"
-                    ))
+                    )
                 else:
-                    self.findings.append(self.create_finding(
-                        status="ERROR",
+                    yield self.error(
                         region=region,
                         resource_id=None,
-                        actual_value=error_message,
+                        actual_value=error_message or "Unknown error",
                         remediation="Check IAM permissions for Audit Manager API access"
-                    ))
+                    )
             else:
                 admin_account_id = admin_response.get("adminAccountId")
-                audit_accounts = getattr(self, '_audit_accounts', [])
-                
+                audit_accounts = self.audit_accounts
+
                 if admin_account_id in audit_accounts:
-                    self.findings.append(self.create_finding(
-                        status="PASS",
+                    yield self.passed(
                         region=region,
                         resource_id=f"auditmanager:admin:{admin_account_id}",
-                        actual_value=admin_account_id,
-                        remediation=""
-                    ))
+                        actual_value=admin_account_id
+                    )
                 else:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
+                    yield self.failed(
                         region=region,
                         resource_id=f"auditmanager:admin:{admin_account_id}",
-                        actual_value=admin_account_id,
+                        actual_value=admin_account_id or "No delegated administrator account ID returned",
                         remediation=f"Change delegated administrator to audit account in {region}. Current admin: {admin_account_id}, Expected audit accounts: {audit_accounts}"
-                    ))
-        
-        return self.findings
+                    )

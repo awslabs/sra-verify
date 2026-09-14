@@ -34,24 +34,6 @@ class WAFCheck(SecurityCheck):
     #: (Requirement 5.17).
     NAMESPACE = "waf"
 
-    def __init__(self):
-        """Initialize WAF base check.
-
-        The 9 instance-level cache dicts that the pre-refactor
-        ``__init__`` assigned (``_distributions_cache``,
-        ``_load_balancers_cache``, ``_rest_apis_cache``,
-        ``_graphql_apis_cache``, ``_user_pools_cache``,
-        ``_apprunner_services_cache``,
-        ``_verified_access_instances_cache``, ``_amplify_apps_cache``,
-        ``_web_acls_cache``) are gone; cached AWS responses now live on
-        the per-scan ``ScanContext`` under the ``"waf"`` namespace.
-        """
-        super().__init__(
-            account_type="application",
-            service="WAF",
-            resource_type="AWS::ElasticLoadBalancingV2::LoadBalancer"
-        )
-
     def _setup_clients(self):
         """Set up WAF clients per region.
 
@@ -212,9 +194,70 @@ class WAFCheck(SecurityCheck):
             return {}
 
         services = client.list_services()
+
+        # Never cache a failure: leave the slot empty so a retry re-issues the
+        # call instead of replaying the error for the rest of the scan.
+        if "Error" in services:
+            return services
+
         self._ctx._set(self.NAMESPACE, cache_key, services)
         logger.debug(f"WAF: Cached App Runner services for {region}")
         return services
+
+    def region_supports_service(self, boto3_service_name: str, region: str) -> bool:
+        """
+        Report whether ``boto3_service_name`` has an endpoint in ``region``.
+
+        This is an offline lookup against the endpoint data bundled with
+        botocore — no AWS call, no credentials. It exists so a check can
+        distinguish "this service does not exist in this Region" from "this
+        service is unreachable from here", which a transport error alone
+        cannot tell you: a Region with no endpoint and a Region behind a
+        broken network both surface as ``EndpointConnectionError``.
+
+        The partition is derived from ``region`` rather than defaulting to
+        ``aws``, so a GovCloud or China scan is not measured against the
+        commercial partition's Region list.
+
+        On any lookup problem this returns True, deliberately. A false
+        "supported" costs one honest ERROR row; a false "unsupported" would
+        silently suppress a Region and could hide a real finding.
+
+        The unknown-service-id case needs that fail-open explicitly:
+        ``get_available_regions`` answers ``[]`` for a name botocore has never
+        heard of rather than raising, so a typo or a renamed service id would
+        otherwise read as "supported nowhere" and silently disable the calling
+        check in every Region. The service id is therefore validated against
+        ``get_available_services()`` first, which also keeps a genuinely empty
+        Region list meaningful: App Runner really does have no endpoints in
+        ``aws-us-gov``, and that is a fact rather than a lookup failure.
+
+        Args:
+            boto3_service_name: boto3/botocore service id, e.g. ``"apprunner"``.
+            region: AWS Region name.
+
+        Returns:
+            True if the service has an endpoint in that Region, or if support
+            could not be determined.
+        """
+        try:
+            session = self.session
+            if boto3_service_name not in session.get_available_services():
+                logger.warning(
+                    f"WAF: {boto3_service_name!r} is not a known boto3 service id; "
+                    f"assuming it is available in {region} rather than skipping the Region"
+                )
+                return True
+            partition = session.get_partition_for_region(region)
+            return region in session.get_available_regions(
+                boto3_service_name, partition_name=partition
+            )
+        except Exception as e:
+            logger.debug(
+                f"WAF: Could not determine whether {boto3_service_name} is available in "
+                f"{region} ({type(e).__name__}: {e}); assuming it is"
+            )
+            return True
 
     def get_verified_access_instances(self, region: str) -> Dict[str, Any]:
         """

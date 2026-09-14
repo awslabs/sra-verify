@@ -5,10 +5,24 @@ Amplify.
 """
 from typing import Dict, Any
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 
 from sraverify.core.logging import logger
 from sraverify.core.scan_context import ScanContext
+
+# botocore transport failures, as they appear in the ``Code`` field of this
+# client's error sentinel. These mean "the call did not reach AWS", which is
+# always an undetermined state rather than a negative verdict.
+TRANSPORT_ERROR_CODES = frozenset({
+    "EndpointConnectionError",
+    "ConnectTimeoutError",
+    "ReadTimeoutError",
+})
 
 
 class WAFClient:
@@ -91,11 +105,47 @@ class WAFClient:
             return {"Error": {"Message": str(e)}}
 
     def list_services(self) -> Dict[str, Any]:
+        """
+        List App Runner services in this Region.
+
+        Returns the raw API response on success, or the error sentinel
+        ``{"Error": {"Code": ..., "Message": ...}}``.
+
+        Transport failures are caught explicitly alongside ``ClientError``.
+        App Runner is not available in every Region, and in a Region with no
+        App Runner endpoint the hostname does not resolve at all, which
+        botocore raises as ``EndpointConnectionError`` — a ``BotoCoreError``,
+        not a ``ClientError``. Left uncaught it escapes ``execute()`` and the
+        orchestrator collapses the entire check into one synthetic ERROR row,
+        discarding the rows already yielded for the Regions that did work.
+
+        The sentinel deliberately does not decide whether an unreachable
+        endpoint is a finding. ``SRA-WAF-06`` tests Region support up front
+        via ``WAFCheck.region_supports_service`` so it can tell "App Runner
+        does not exist here" from "App Runner is unreachable from here".
+        """
         try:
             return self.apprunner_client.list_services()
         except ClientError as e:
-            logger.error(f"Error listing App Runner services in {self.region}: {e}")
-            return {"Error": {"Message": str(e)}}
+            error_code = e.response.get('Error', {}).get('Code', '')
+            error_message = e.response.get('Error', {}).get('Message', str(e))
+            logger.error(
+                f"Error listing App Runner services in {self.region}: "
+                f"{error_code}: {error_message}"
+            )
+            return {"Error": {"Code": error_code, "Message": error_message}}
+        except (EndpointConnectionError, ConnectTimeoutError, ReadTimeoutError) as e:
+            logger.error(
+                f"Network error listing App Runner services in {self.region}: "
+                f"{type(e).__name__}: {e}"
+            )
+            return {"Error": {"Code": type(e).__name__, "Message": str(e)}}
+        except Exception as e:
+            logger.error(
+                f"Unexpected error listing App Runner services in {self.region}: "
+                f"{type(e).__name__}: {e}"
+            )
+            return {"Error": {"Code": type(e).__name__, "Message": str(e)}}
 
     def describe_verified_access_instances(self) -> Dict[str, Any]:
         try:

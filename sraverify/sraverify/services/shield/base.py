@@ -29,14 +29,6 @@ class ShieldCheck(SecurityCheck):
     #: (Requirement 5.10).
     NAMESPACE = "shield"
 
-    def __init__(self):
-        """Initialize Shield base check."""
-        super().__init__(
-            account_type="application",
-            service="Shield",
-            resource_type="AWS::Shield::Subscription"
-        )
-
     def _setup_clients(self):
         """Set up Shield clients for each region.
 

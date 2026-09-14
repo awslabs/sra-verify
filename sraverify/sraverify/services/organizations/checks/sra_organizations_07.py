@@ -1,38 +1,63 @@
 """
 Check if organization has Resource Control Policies configured.
 """
-from typing import Dict, List, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.organizations.base import OrganizationsCheck
 
 
 class SRA_ORGANIZATIONS_07(OrganizationsCheck):
     """Check if organization has Resource Control Policies configured."""
 
-    def __init__(self):
-        """Initialize RCP check."""
-        super().__init__(resource_type="AWS::Organizations::Policy")
-        self.check_id = "SRA-ORGANIZATIONS-07"
-        self.check_name = "Organization has Resource Control Policies configured"
-        self.description = (
+    meta = CheckMeta(
+        check_id="SRA-ORGANIZATIONS-07",
+        title="Organization has Resource Control Policies configured",
+        description=(
             "This check verifies that the organization has at least one custom Resource Control Policy (RCP) "
             "configured beyond the default RCPFullAWSAccess policy. RCPs are a type of organization policy "
             "that help you centrally establish data perimeter controls across AWS resources in your organization. "
             "RCPs complement SCPs by controlling what resources can be accessed rather than what actions "
             "principals can perform."
-        )
-        self.severity = "MEDIUM"
-        self.check_logic = (
+        ),
+        check_logic=(
             "Call ListPolicies API with filter for RESOURCE_CONTROL_POLICY type. "
             "Check passes if at least one custom RCP exists (AwsManaged=False), "
             "fails if only the default RCPFullAWSAccess policy exists or no RCPs are found."
-        )
+        ),
+        severity=Severity.MEDIUM,
+        account_type=AccountType.MANAGEMENT,
+        service="Organizations",
+        resource_type="AWS::Organizations::Policy",
+        remediation=Remediation(
+            text=(
+                "Enable the RESOURCE_CONTROL_POLICY policy type on the organization "
+                "root and create at least one custom RCP that establishes data "
+                "perimeter controls, then attach it to the root or to an "
+                "organizational unit."
+            ),
+            cli=(
+                "aws organizations enable-policy-type --root-id <root-id> "
+                "--policy-type RESOURCE_CONTROL_POLICY\n"
+                "aws organizations create-policy --name <name> "
+                "--type RESOURCE_CONTROL_POLICY --description <description> "
+                "--content file://rcp.json"
+            ),
+            console=(
+                "AWS Organizations console, Policies, Resource control policies, "
+                "Enable resource control policies, then Create policy."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding for the organization's Resource Control Policies.
         """
         # Organizations is a global service, use "global" as region
         region = "global"
@@ -53,8 +78,7 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
 
             # PolicyTypeNotEnabledException means RCPs are not enabled
             if error_code == "PolicyTypeNotEnabledException":
-                self.findings.append(self.create_finding(
-                    status="FAIL",
+                yield self.failed(
                     region=region,
                     resource_id=org_id,
                     actual_value="Resource Control Policies are not enabled",
@@ -63,18 +87,17 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
                         "Navigate to AWS Organizations > Policies > Resource control policies and enable RCPs. "
                         "Then create RCPs to implement data perimeter controls across your organization."
                     ),
-                    checked_value="RCPs configured"
-                ))
+                    checked_value="RCPs configured",
+                )
             else:
-                self.findings.append(self.create_finding(
-                    status="ERROR",
+                yield self.error(
                     region=region,
                     resource_id=org_id,
                     actual_value=f"Error: {error_message}",
                     remediation="Check IAM permissions for Organizations API access",
-                    checked_value="RCPs configured"
-                ))
-            return self.findings
+                    checked_value="RCPs configured",
+                )
+            return
 
         policies = response.get("Policies", [])
 
@@ -84,8 +107,7 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
 
         if not policies:
             # No RCPs at all - RCPs might not be enabled
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=org_id,
                 actual_value="No Resource Control Policies found",
@@ -95,13 +117,12 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
                     "Then create RCPs to implement data perimeter controls such as restricting access "
                     "to resources based on organization membership or network location."
                 ),
-                checked_value="Custom RCPs configured"
-            ))
+                checked_value="Custom RCPs configured",
+            )
         elif custom_rcp_count == 0:
             # Only AWS managed policies (RCPFullAWSAccess)
             policy_names = [p.get("Name", "Unknown") for p in policies]
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=org_id,
                 actual_value=f"Only default policies found: {', '.join(policy_names)}",
@@ -111,18 +132,14 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
                     "Consider implementing RCPs for: restricting access to resources based on organization "
                     "membership, enforcing HTTPS connections, and cross-service confused deputy protection."
                 ),
-                checked_value="Custom RCPs configured"
-            ))
+                checked_value="Custom RCPs configured",
+            )
         else:
             # Custom RCPs exist
             custom_rcp_names = [p.get("Name", "Unknown") for p in custom_rcps]
-            self.findings.append(self.create_finding(
-                status="PASS",
+            yield self.passed(
                 region=region,
                 resource_id=org_id,
                 actual_value=f"{custom_rcp_count} custom RCP(s) configured: {', '.join(custom_rcp_names)}",
-                remediation="No remediation needed",
-                checked_value="Custom RCPs configured"
-            ))
-
-        return self.findings
+                checked_value="Custom RCPs configured",
+            )

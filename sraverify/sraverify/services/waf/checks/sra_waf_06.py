@@ -1,47 +1,129 @@
-from typing import Dict, List, Any
+"""
+Check if App Runner services are associated with AWS WAF.
+"""
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.logging import logger
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.waf.base import WAFCheck
+from sraverify.services.waf.client import TRANSPORT_ERROR_CODES
+
 
 class SRA_WAF_06(WAFCheck):
-    def __init__(self):
-        super().__init__()
-        self.resource_type = "AWS::AppRunner::Service"
-        self.check_id = "SRA-WAF-06"
-        self.check_name = "App Runner services should be associated with AWS WAF"
-        self.description = "Ensures that all App Runner services are protected by AWS WAF web ACLs to filter malicious traffic"
-        self.severity = "HIGH"
-        self.check_logic = "Lists all App Runner services and verifies each has a WAF web ACL associated"
+    """Check if App Runner services are associated with AWS WAF."""
 
-    def execute(self) -> List[Dict[str, Any]]:
+    meta = CheckMeta(
+        check_id="SRA-WAF-06",
+        title="App Runner services should be associated with AWS WAF",
+        description=(
+            "Ensures that all App Runner services are protected by AWS WAF web "
+            "ACLs to filter malicious traffic"
+        ),
+        check_logic=(
+            "Lists all App Runner services and verifies each has a WAF web ACL "
+            "associated"
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.APPLICATION,
+        service="WAF",
+        resource_type="AWS::AppRunner::Service",
+        remediation=Remediation(
+            text=(
+                "Associate a regional WAF Web ACL with every App Runner service so "
+                "that malicious requests are filtered before they reach the "
+                "container."
+            ),
+            cli=(
+                "aws wafv2 associate-web-acl "
+                "--web-acl-arn arn:aws:wafv2:<region>:<account-id>:regional/webacl/<name>/<id> "
+                "--resource-arn <app-runner-service-arn> --region <region>"
+            ),
+            console=(
+                "AWS App Runner console, select the service, Configuration, "
+                "AWS WAF, Edit, associate a web ACL."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
+        """
+        Execute the check.
+
+        Yields:
+            One Finding per App Runner service.
+        """
         for region in self.regions:
+            # App Runner does not exist in every Region. Where it has no
+            # endpoint there can be no App Runner service left unprotected, so
+            # there is nothing to report: emit no row at all. A FAIL would
+            # assert a misconfiguration that cannot exist, and an ERROR would
+            # claim we were unable to look when in fact there was nothing to
+            # look at. This fact cannot be changed by an AWS call, so the guard
+            # precedes the call.
+            if not self.region_supports_service("apprunner", region):
+                logger.debug(
+                    f"WAF: App Runner has no endpoint in {region}; "
+                    f"SRA-WAF-06 reports nothing for this Region"
+                )
+                continue
+
             services_response = self.get_apprunner_services(region)
 
-            if "Error" in services_response:
-                self.findings.append(self.create_finding(
-                    status="ERROR",
+            # An empty response means no WAF client wrapper exists for this
+            # Region, so the control was not evaluated. Reporting it as "no App
+            # Runner services found" would be a PASS we never established.
+            if not services_response:
+                yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=services_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for App Runner and WAF API access"
-                ))
+                    actual_value=f"No WAF client available for region {region}",
+                    remediation=f"Confirm that {region} is enabled for this account and reachable from the scanning environment"
+                )
+                continue
+
+            # App Runner is supported here but the call still failed, so the
+            # control could not be evaluated. A transport failure and a denied
+            # permission need different advice.
+            if "Error" in services_response:
+                error = services_response["Error"]
+                error_code = error.get("Code", "Unknown")
+                error_message = error.get("Message", "Unknown error")
+                if error_code in TRANSPORT_ERROR_CODES:
+                    remediation = (
+                        f"App Runner is available in {region} but its endpoint could not be "
+                        f"reached. Check network egress and DNS resolution from the scanning "
+                        f"environment, then re-run."
+                    )
+                else:
+                    remediation = (
+                        "Grant the member role apprunner:ListServices so App Runner services "
+                        "can be enumerated"
+                    )
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=f"Could not list App Runner services in {region}: {error_code}: {error_message}",
+                    remediation=remediation
+                )
                 continue
 
             services = services_response.get("ServiceSummaryList", [])
 
             if not services:
-                self.findings.append(self.create_finding(
-                    status="PASS",
+                yield self.passed(
                     region=region,
                     resource_id="No App Runner services",
-                    actual_value="No App Runner services found",
-                    remediation="No action needed"
-                ))
+                    actual_value="No App Runner services found"
+                )
                 continue
 
             for service in services:
                 service_arn = service.get("ServiceArn")
                 service_name = service.get("ServiceName")
                 service_id = service.get("ServiceId")
-                
+
                 client = self.get_client(region)
                 if not client:
                     continue
@@ -51,41 +133,34 @@ class SRA_WAF_06(WAFCheck):
                 if "Error" in web_acl_response:
                     error_code = web_acl_response["Error"].get("Code")
                     if error_code == "AccessDeniedException":
-                        self.findings.append(self.create_finding(
-                            status="ERROR",
+                        yield self.error(
                             region=region,
                             resource_id=service_name or service_id,
                             actual_value=web_acl_response["Error"].get("Message", "Access denied"),
                             remediation="Check IAM permissions for wafv2:GetWebACLForResource and apprunner:DescribeWebAclForService"
-                        ))
+                        )
                     else:
-                        self.findings.append(self.create_finding(
-                            status="FAIL",
+                        yield self.failed(
                             region=region,
                             resource_id=service_name or service_id,
                             actual_value="No WAF Web ACL associated",
                             remediation="Associate a WAF Web ACL with this App Runner service using the AWS Console, CLI, or API"
-                        ))
+                        )
                     continue
 
                 web_acl = web_acl_response.get("WebACL")
 
                 if web_acl:
                     web_acl_name = web_acl.get("Name", "Unknown")
-                    self.findings.append(self.create_finding(
-                        status="PASS",
+                    yield self.passed(
                         region=region,
                         resource_id=service_name or service_id,
-                        actual_value=f"WAF Web ACL associated: {web_acl_name}",
-                        remediation="No action needed"
-                    ))
+                        actual_value=f"WAF Web ACL associated: {web_acl_name}"
+                    )
                 else:
-                    self.findings.append(self.create_finding(
-                        status="FAIL",
+                    yield self.failed(
                         region=region,
                         resource_id=service_name or service_id,
                         actual_value="No WAF Web ACL associated",
                         remediation="Associate a WAF Web ACL with this App Runner service using the AWS Console, CLI, or API"
-                    ))
-
-        return self.findings
+                    )

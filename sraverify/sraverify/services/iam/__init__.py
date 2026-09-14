@@ -1,9 +1,4 @@
-"""
-IAM security checks.
-"""
-from sraverify.services.iam.checks.sra_iam_01 import SRA_IAM_01
+"""IAM security checks."""
+from sraverify.core.discovery import import_check_modules
 
-# Register checks
-CHECKS = {
-    "SRA-IAM-01": SRA_IAM_01,
-}
+import_check_modules(f"{__name__}.checks")

@@ -61,10 +61,23 @@ class SecurityIncidentResponseClient:
             return {"Error": {"Code": e.response['Error']['Code'], "Message": e.response['Error']['Message']}}
 
     def list_accounts(self) -> Dict[str, Any]:
-        """List all accounts in the organization."""
+        """
+        List all accounts in the organization, following pagination.
+
+        ``organizations:ListAccounts`` returns at most 20 accounts per page.
+        Reading only the first page would silently drop the remaining accounts,
+        and because SRA-SECURITYINCIDENTRESPONSE-04 asserts that *every* active
+        account is covered, a dropped account becomes an all-PASS result rather
+        than a visible failure. Matches the paginated approach already used by
+        the macie, securityhub and securitylake clients.
+        """
         try:
-            response = self.org_client.list_accounts()
-            return response
+            accounts: List[Dict[str, Any]] = []
+            paginator = self.org_client.get_paginator('list_accounts')
+            for page in paginator.paginate():
+                accounts.extend(page.get('Accounts', []))
+            logger.debug(f"Found {len(accounts)} organization accounts")
+            return {"Accounts": accounts}
         except ClientError as e:
             logger.error(f"Error listing organization accounts in {self.region}: {e}")
             return {"Error": {"Code": e.response['Error']['Code'], "Message": e.response['Error']['Message']}}

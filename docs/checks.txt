@@ -81,7 +81,7 @@ Available checks:
   SRA-MACIE-01: Macie publish policy findings to Security Hub is enabled (Macie) [application]
   SRA-MACIE-02: Macie publish classification findings to Security Hub is enabled (Macie) [application]
   SRA-MACIE-03: Macie findings exported to a S3 bucket in Log Archive account are encrypted at rest (Macie) [application]
-  SRA-MACIE-04: Checks that findings are being exported to S3 in the log archive account are encrypted at rest (Macie) [application]
+  SRA-MACIE-04: Macie findings exported to S3 in the log archive account are encrypted at rest with a KMS key (Macie) [application]
   SRA-MACIE-05: Macie administration for the AWS Organization has a delegated administrator (Macie) [management]
   SRA-MACIE-06: Macie delegated admin account is the Security Tooling (Audit) account (Macie) [management]
   SRA-MACIE-07: All active member accounts have relationship with delegated admin account enabled (Macie) [audit]

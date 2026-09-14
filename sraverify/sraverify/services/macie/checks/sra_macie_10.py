@@ -1,81 +1,87 @@
 """
 SRA-MACIE-10: Macie member account limit not reached.
 """
-from typing import List, Dict, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.macie.base import MacieCheck
-from sraverify.core.logging import logger
 
 
 class SRA_MACIE_10(MacieCheck):
     """Check if Macie member account limit not reached."""
-    
-    def __init__(self):
-        """Initialize the check."""
-        super().__init__()
-        self.check_id = "SRA-MACIE-10"
-        self.check_name = "Macie member account limit not reached"
-        self.description = (
+
+    meta = CheckMeta(
+        check_id="SRA-MACIE-10",
+        title="Macie member account limit not reached",
+        description=(
             "This check verifies whether the maximum number of allowed member accounts are already associated with the "
             "delegated administrator account for the AWS Organization."
-        )
-        self.severity = "MEDIUM"
-        self.account_type = "audit"
-        self.check_logic = "Check runs macie2 describe-organization-configuration. PASS if maxaccountlimitreached = False"
-        self.resource_type = "AWS::Macie::Session"
-    
-    def execute(self) -> List[Dict[str, Any]]:
+        ),
+        check_logic=(
+            "Check runs macie2 describe-organization-configuration. PASS if maxaccountlimitreached = False"
+        ),
+        severity=Severity.MEDIUM,
+        account_type=AccountType.AUDIT,
+        service="Macie",
+        resource_type="AWS::Macie::Session",
+        remediation=Remediation(
+            text=(
+                "Open an AWS Support case requesting an increase to the Macie member "
+                "account quota for the delegated administrator account."
+            ),
+            cli=(
+                "aws support create-case --subject 'Increase Macie member account limit' "
+                "--service-code amazon-macie --category-code other "
+                "--severity-code low --communication-body '<details>'"
+            ),
+            console=(
+                "AWS Support Center, Create case, Service limit increase, "
+                "select Macie, request a higher member account limit."
+            ),
+        ),
+    )
+
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
-        
-        Returns:
-            List of findings
+
+        Yields:
+            One Finding per Region.
         """
-        findings = []
-        
         for region in self.regions:
             # Get organization configuration using the base class method with caching
             org_config = self.get_organization_configuration(region)
-            
+
             # Check if the API call was successful
             if not org_config:
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=f"macie2/{self.account_id}/{region}",
-                        checked_value="maxAccountLimitReached: false",
-                        actual_value="Failed to retrieve Macie organization configuration",
-                        remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie DescribeOrganizationConfiguration API"
-                    )
+                yield self.failed(
+                    region=region,
+                    resource_id=f"macie2/{self.account_id}/{region}",
+                    checked_value="maxAccountLimitReached: false",
+                    actual_value="Failed to retrieve Macie organization configuration",
+                    remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie DescribeOrganizationConfiguration API"
                 )
                 continue
-            
+
             # Check if max account limit is reached
             max_account_limit_reached = org_config.get('maxAccountLimitReached', False)
-            
+
             if not max_account_limit_reached:
-                findings.append(
-                    self.create_finding(
-                        status="PASS",
-                        region=region,
-                        resource_id=f"macie2/{self.account_id}/{region}",
-                        checked_value="maxAccountLimitReached: false",
-                        actual_value=f"Macie member account limit not reached in region {region}",
-                        remediation="No remediation needed"
-                    )
+                yield self.passed(
+                    region=region,
+                    resource_id=f"macie2/{self.account_id}/{region}",
+                    checked_value="maxAccountLimitReached: false",
+                    actual_value=f"Macie member account limit not reached in region {region}"
                 )
             else:
-                findings.append(
-                    self.create_finding(
-                        status="FAIL",
-                        region=region,
-                        resource_id=f"macie2/{self.account_id}/{region}",
-                        checked_value="maxAccountLimitReached: false",
-                        actual_value=f"Macie member account limit reached in region {region}",
-                        remediation=(
-                            "Contact AWS Support to request an increase in the Macie member account limit"
-                        )
+                yield self.failed(
+                    region=region,
+                    resource_id=f"macie2/{self.account_id}/{region}",
+                    checked_value="maxAccountLimitReached: false",
+                    actual_value=f"Macie member account limit reached in region {region}",
+                    remediation=(
+                        "Contact AWS Support to request an increase in the Macie member account limit"
                     )
                 )
-        
-        return findings

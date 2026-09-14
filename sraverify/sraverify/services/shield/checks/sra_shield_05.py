@@ -1,30 +1,55 @@
 """
 Check if Shield Advanced is configured for Elastic IP addresses.
 """
-from typing import Dict, List, Any
+from collections.abc import Iterable
+
+from sraverify.core.enums import AccountType, Severity
+from sraverify.core.finding import Finding
+from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.shield.base import ShieldCheck
 
 
 class SRA_SHIELD_05(ShieldCheck):
     """Check if Shield Advanced is configured for Elastic IP addresses."""
 
-    def __init__(self):
-        """Initialize Shield Advanced Elastic IP protection check."""
-        super().__init__()
-        self.check_id = "SRA-SHIELD-05"
-        self.check_name = "Shield Advanced is configured for Elastic IP addresses"
-        self.description = ("This check verifies that AWS Shield Advanced is protecting "
-                            "at least one Elastic IP address.")
-        self.severity = "HIGH"
-        self.check_logic = ("List Shield protections and filter by Elastic IP ARNs. "
-                            "Check fails if no Elastic IP addresses are protected.")
+    meta = CheckMeta(
+        check_id="SRA-SHIELD-05",
+        title="Shield Advanced is configured for Elastic IP addresses",
+        description=(
+            "This check verifies that AWS Shield Advanced is protecting "
+            "at least one Elastic IP address."
+        ),
+        check_logic=(
+            "List Shield protections and filter by Elastic IP ARNs. "
+            "Check fails if no Elastic IP addresses are protected."
+        ),
+        severity=Severity.HIGH,
+        account_type=AccountType.APPLICATION,
+        service="Shield",
+        resource_type="AWS::Shield::Subscription",
+        remediation=Remediation(
+            text=(
+                "Enable Shield Advanced protection for Elastic IP addresses in the "
+                "AWS Shield console."
+            ),
+            cli=(
+                "aws shield create-protection --name <protection-name> "
+                "--resource-arn arn:aws:ec2:<region>:<account-id>:eip-allocation/<allocation-id> "
+                "--region us-east-1"
+            ),
+            console=(
+                "AWS WAF & Shield console, AWS Shield, Protected resources, "
+                "Add resources to protect, select the Elastic IP address."
+            ),
+        ),
+    )
 
-    def execute(self) -> List[Dict[str, Any]]:
+    def execute(self) -> Iterable[Finding]:
         """
         Execute the check.
 
-        Returns:
-            List of findings
+        Yields:
+            One Finding for the Elastic IP protection posture.
         """
         # Shield is a global service, check only in us-east-1
         region = "us-east-1"
@@ -33,21 +58,19 @@ class SRA_SHIELD_05(ShieldCheck):
         if "Error" in protections:
             error_code = protections["Error"].get("Code", "")
             if error_code == "ResourceNotFoundException":
-                self.findings.append(self.create_finding(
-                    status="FAIL",
+                yield self.failed(
                     region=region,
                     resource_id=None,
                     actual_value="Shield Advanced subscription not found",
                     remediation="Enable Shield Advanced subscription to protect resources"
-                ))
+                )
             else:
-                self.findings.append(self.create_finding(
-                    status="ERROR",
+                yield self.error(
                     region=region,
                     resource_id=None,
                     actual_value=protections["Error"].get("Message", "Unknown error"),
                     remediation="Check IAM permissions for Shield API access"
-                ))
+                )
         elif protections.get("Protections"):
             # Filter for Elastic IPs by checking ResourceArn
             eip_protections = [
@@ -57,28 +80,22 @@ class SRA_SHIELD_05(ShieldCheck):
 
             if eip_protections:
                 protected_count = len(eip_protections)
-                self.findings.append(self.create_finding(
-                    status="PASS",
+                yield self.passed(
                     region=region,
                     resource_id="shield:eip-protections",
-                    actual_value=f"{protected_count} Elastic IP address(es) protected",
-                    remediation=""
-                ))
+                    actual_value=f"{protected_count} Elastic IP address(es) protected"
+                )
             else:
-                self.findings.append(self.create_finding(
-                    status="FAIL",
+                yield self.failed(
                     region=region,
                     resource_id=None,
                     actual_value="No Elastic IP addresses protected",
                     remediation="Enable Shield Advanced protection for Elastic IP addresses in the AWS Shield console"
-                ))
+                )
         else:
-            self.findings.append(self.create_finding(
-                status="FAIL",
+            yield self.failed(
                 region=region,
                 resource_id=None,
                 actual_value="No Elastic IP addresses protected",
                 remediation="Enable Shield Advanced protection for Elastic IP addresses in the AWS Shield console"
-            ))
-
-        return self.findings
+            )

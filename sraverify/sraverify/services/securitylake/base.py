@@ -48,16 +48,6 @@ class SecurityLakeCheck(SecurityCheck):
 
     NAMESPACE = "securitylake"
 
-    def __init__(self):
-        """Initialize Security Lake service."""
-        super().__init__(
-            account_type="log-archive",
-            service="SecurityLake",
-            resource_type="AWS::SecurityLake::SecurityLake"
-        )
-        # Initialize log archive account attribute
-        self._log_archive_accounts = None
-
     def _setup_clients(self):
         """Set up Security Lake clients for each region.
 

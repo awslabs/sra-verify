@@ -21,8 +21,9 @@ specs at `sra-verify/.kiro/specs/`. The four steering files are `product.md`
 this file (layout, architecture, contracts), and
 `creating_checks_best_practices.md` (authoritative for check-authoring detail).
 
-As of this writing `sra-verify/.kiro/` is untracked in git — `git ls-files
-.kiro` returns nothing, and it is not covered by any ignore rule.
+`sra-verify/.kiro/` is tracked in git — 16 files, the four steering docs plus
+the three specs and their `.config.kiro` files. Edits to steering and specs are
+therefore part of a commit like any other change.
 
 ## The scanner repo
 
@@ -521,11 +522,9 @@ pytest config file.
   `ListMemberships` across regions on **every** call.
 - `IAMCheck._validate_metadata` is dead and unusable: it validates `check_name`,
   which no longer exists on any check.
-- The developer README at `sra-verify/sraverify/README.md` is still pre-refactor
-  and wrong on five counts — `check_type=`,
-  `get_session_accountId(self.session)`, `create_finding(..., account_id=...)`,
-  `Client(region, session=self.session)`, and class-level `_resource_cache = {}`.
-- `setup.py` says version `0.1.4`; `sraverify/__init__.py` says `0.1.0`.
+- The version lives in two hand-maintained places, `setup.py` and
+  `sraverify/__init__.py` (`__version__`), both `0.2.0`. Nothing single-sources
+  it and they have drifted once already, so change both together.
 - `requirements.txt` pins boto3 differently from `setup.py`.
 - `build/`, `dist/`, and `*.egg-info/` are checked into the working tree.
 

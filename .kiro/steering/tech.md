@@ -19,10 +19,12 @@ There is no `pyproject.toml`, no Makefile, no tox/nox, no pytest config file, an
 ### Known inconsistencies (do not "fix" without asking)
 
 - `sra-verify-mcp/pyproject.toml` declares `requires-python = ">=3.10"`, which cannot satisfy the scanner's 3.11 floor. The MCP repo's declared floor and its dependency are in conflict.
-- `setup.py` version is `0.1.4`; `sraverify/__init__.py` has `__version__ = "0.1.0"`.
 - `requirements.txt` pins `boto3>=1.40.5`; `setup.py` says `boto3>=1.26.0`.
 - `build/`, `dist/`, and `*.egg-info/` are present in the working tree as stale artifacts. They are gitignored and untracked, so they are local debris rather than committed content — but they shadow a fresh build if you read from them.
-- `sra-verify/sraverify/README.md` is the pre-refactor developer guide and is wrong on five counts: `check_type=`, `get_session_accountId(self.session)`, `create_finding(..., account_id=...)`, `Client(region, session=self.session)`, and class-level `_resource_cache = {}`. Do not follow it; follow `structure.md` and `creating_checks_best_practices.md`.
+
+The version is `0.2.0` in **two** places that must be kept in step by hand — `setup.py` and `sraverify/__init__.py` (`__version__`). Nothing single-sources it, and they have already drifted once (`0.1.4` vs `0.1.0`), so change both together. `sra-verify-mcp/pyproject.toml` pins `sraverify>=0.1.4` and is a third copy, in the other repo.
+
+`sra-verify/sraverify/README.md` is the developer guide and is current as of the check-contract branch: it documents `ScanContext`, automatic registration and the four-way identity cross-check, `CheckMeta`, the three keyword-only finding helpers, FAIL-vs-ERROR, and `Finding.FIELDS`. It agrees with this file and with `creating_checks_best_practices.md`; if the three ever disagree, the steering files win and the README is the one to correct.
 
 ## Commands
 

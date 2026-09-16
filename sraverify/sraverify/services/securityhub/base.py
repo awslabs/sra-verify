@@ -361,7 +361,10 @@ class SecurityHubCheck(SecurityCheck):
             message = getattr(e, "response", {}).get("Error", {}).get(
                 "Message"
             ) or str(e)
-            logger.error(
+            # ``debug``, matching AWSClient.aws_error: a failed AWS call is an
+            # observation, not a verdict, and this tier cannot tell a semantic
+            # refusal from a broken scan. See that method for the full reasoning.
+            logger.debug(
                 f"aws_call_failed operation=DescribeOrganization "
                 f"region={self.regions[0] if self.regions else 'global'} "
                 f"code={code} message={message!r}"

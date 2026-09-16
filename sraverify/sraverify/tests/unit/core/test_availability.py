@@ -149,10 +149,10 @@ def test_the_other_candidate_services_answer_in_the_four_region_scan(
 ) -> None:
     """Every candidate service is present in the Regions the baseline scanned.
 
-    Pinned so that adding an availability guard to a check cannot silently
-    delete rows from the gate's comparison window. If any of these ever
-    answers ``False``, the guard for that service starts suppressing a Region
-    the baseline has rows for, and the gate would read that as removed rows.
+    Pinned so that adding an availability guard to a check cannot silently delete
+    rows from the report. If any of these ever answers ``False``, the guard for that
+    service starts suppressing a Region the baseline has rows for, and the rows
+    simply vanish rather than reporting anything.
     """
     assert service_available_in_region(service_id, region) is True
 

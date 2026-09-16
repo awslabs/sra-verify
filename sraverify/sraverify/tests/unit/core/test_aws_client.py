@@ -126,15 +126,25 @@ def guard_log() -> Any:
 
     handler = _Collector()
     target = logging.getLogger("sraverify")
+    # The record is emitted at ``debug`` and the logger sits at INFO, so without
+    # this the handler never sees it and every assertion below passes vacuously.
+    previous = target.level
+    target.setLevel(logging.DEBUG)
     target.addHandler(handler)
     try:
         yield records
     finally:
         target.removeHandler(handler)
+        target.setLevel(previous)
 
 
 def _errors(records: list[logging.LogRecord]) -> list[str]:
-    """Return the messages of the ``ERROR``-level records.
+    """Return the ``aws_call_failed`` messages, whatever level they carry.
+
+    Selected by the structured prefix rather than by level. The record sits at
+    ``debug`` -- see :meth:`AWSClient.aws_error` -- so a level filter here would
+    silently match nothing and turn every assertion into a tautology. The prefix
+    is also what actually identifies the record.
 
     Args:
         records: Captured records.
@@ -142,7 +152,11 @@ def _errors(records: list[logging.LogRecord]) -> list[str]:
     Returns:
         Formatted messages.
     """
-    return [r.getMessage() for r in records if r.levelno >= logging.ERROR]
+    return [
+        r.getMessage()
+        for r in records
+        if r.getMessage().startswith("aws_call_failed ")
+    ]
 
 
 def _client_error(
@@ -527,11 +541,14 @@ def test_an_empty_response_is_a_legitimate_success(
 def test_a_client_error_emits_exactly_one_parseable_record(
     client: _ExampleClient, guard_log: Any
 ) -> None:
-    """Requirement 1.8: one record, at ``error``, four fields in the gate's order.
+    """Requirement 1.8: one record, at ``debug``, four fields in a fixed order.
 
-    Exactly one, because the gate attributes records to checks by position and
-    counts them: two records would make one failure look like two, and none would
-    leave a FAIL-to-ERROR transition unevidenced and reject the batch.
+    Exactly one, so ``grep -c aws_call_failed`` on a ``--debug`` log answers "how
+    many calls failed". Two records would make one failure look like two, and none
+    would leave an ERROR row with no way to recover the code and message behind it.
+
+    ``debug`` is asserted here rather than assumed: at ``error`` this record made an
+    audit-account scan print five ERROR lines and then report ``Error: 0``.
     """
     client.client.describe_thing.side_effect = _client_error()
 
@@ -539,6 +556,17 @@ def test_a_client_error_emits_exactly_one_parseable_record(
 
     messages = _errors(guard_log)
     assert len(messages) == 1, f"expected exactly one record, got {messages}"
+
+    levels = [
+        r.levelno
+        for r in guard_log
+        if r.getMessage().startswith("aws_call_failed ")
+    ]
+    assert levels == [logging.DEBUG], (
+        f"the record must sit at DEBUG, not {[logging.getLevelName(v) for v in levels]}: "
+        f"this tier cannot tell a semantic refusal from a broken scan, so any higher "
+        f"level claims a severity only is_not_configured can assign"
+    )
 
     match = _LOG_RE.match(messages[0])
     assert match is not None, f"unparseable log line: {messages[0]!r}"
@@ -552,8 +580,8 @@ def test_the_region_in_the_record_comes_from_the_client(guard_log: Any) -> None:
     """Why the ``except`` clause carries no ``region=`` either.
 
     Every client already stores its Region. Passing it per call site was noise
-    with a failure mode: a copy-pasted method could log the wrong Region and the
-    gate would attribute the failure to a Region that succeeded.
+    with a failure mode: a copy-pasted method could log the wrong Region, and the
+    record would then blame a Region that succeeded.
     """
     other = _ExampleClient(region="eu-west-3")
     other.client.describe_thing.side_effect = _client_error()
@@ -616,9 +644,8 @@ def test_the_message_field_always_round_trips_through_json(
     This is why ``message`` is JSON-encoded and last, and why the encoding lives
     in one method rather than in 92 hand-written ``except`` clauses. An AWS
     message containing a newline would otherwise split the record across two
-    lines, and the gate's per-line parser would read the tail as a separate
-    malformed record -- silently dropping the evidence that admits a FAIL-to-ERROR
-    transition.
+    lines, so a per-line reader would take the tail for a separate malformed
+    record and the count would no longer be one-per-failure.
     """
     client.client.describe_thing.side_effect = _client_error(message=message)
 

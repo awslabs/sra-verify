@@ -76,8 +76,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import pytest
+from botocore.exceptions import ClientError
 
 from sraverify.core import registry
+from sraverify.core.aws_client import AWSClient
 from sraverify.core.check import SecurityCheck
 from sraverify.core.enums import AccountType, Severity, Status
 from sraverify.core.finding import Finding
@@ -718,4 +720,134 @@ def test_a_write_failure_at_the_default_output_path_names_the_resolved_path(
     assert not list(tmp_path.iterdir()), (
         f"the write-failure path left "
         f"{[p.name for p in tmp_path.iterdir()]} behind"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# An ERROR-level log record means an ERROR row
+# --------------------------------------------------------------------------- #
+
+class _FailingClient(AWSClient):
+    """A client whose one method always fails, so ``aws_error`` runs for real."""
+
+    def __init__(self) -> None:
+        """Build without a ScanContext; ``aws_error`` reads only ``self.region``."""
+        self.region = _PROBE_REGION
+        self.ctx = None
+
+    def describe_thing(self) -> Any:
+        """Fail the way a disabled service does.
+
+        Returns:
+            The error result for a semantic refusal.
+        """
+        return self.aws_error(
+            ClientError(
+                {
+                    "Error": {
+                        "Code": "AccessDeniedException",
+                        "Message": "Macie is not enabled",
+                    }
+                },
+                "DescribeThing",
+            )
+        )
+
+
+def _execute_semantic_fail(self: SecurityCheck) -> Iterator[Finding]:
+    """Fail an AWS call, classify it as semantic, and yield FAIL.
+
+    The shape of eight of the ten Macie checks on an organization where Macie is
+    switched off: the call really does fail, and the correct verdict is still a
+    finding rather than an inability to determine.
+    """
+    result = _FailingClient().describe_thing()
+    assert "Error" in result, "the probe's client did not produce an error result"
+    yield self.failed(
+        region=_PROBE_REGION,
+        resource_id="probe/not-enabled",
+        actual_value="Probe service is not enabled, so the control is absent",
+    )
+
+
+def test_no_error_level_records_without_error_rows(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+    logged: list[logging.LogRecord],
+) -> None:
+    """A failed AWS call that becomes a FAIL emits nothing at ``ERROR``.
+
+    The inconsistency this pins was observed on a live audit-account scan: five
+    ``aws_call_failed`` records printed at ``ERROR``, and then the summary
+    reported ``Error: 0``, because every one of the five was semantic and became
+    a FAIL row. An operator reasonably reads five ERROR lines as five problems.
+
+    The rule is a correspondence, not a silence: an ERROR-level record means an
+    ERROR row exists. ``AWSClient.aws_error`` therefore emits at ``debug``,
+    because the client tier cannot know which verdict its failure will become --
+    only ``is_not_configured``, one tier up, can.
+    ``test_a_scan_with_fail_and_error_rows_exits_0`` covers the other direction,
+    where a check that genuinely breaks *is* logged at ``ERROR``.
+
+    Both runs are asserted, because the demotion is only defensible if the record
+    survives: a default run is silent, and the same scan under ``--debug`` still
+    yields the record for anyone auditing the classification.
+    """
+    session = _NoAwsSession()
+    monkeypatch.setattr(main_module, "get_session", lambda **kwargs: session)
+    probe = _make_probe_check(1, _execute_semantic_fail)
+
+    def scan(argv_extra: list[str], name: str) -> tuple[list[str], list[str]]:
+        """Run one scan and return its row statuses and the records it logged."""
+        output = tmp_path / name
+        start = len(logged)
+        with _isolated_registry([probe]), _seeded_scan_context(monkeypatch):
+            code = _run_cli(
+                monkeypatch,
+                [
+                    "--output", str(output),
+                    "--regions", _PROBE_REGION,
+                    *argv_extra,
+                ],
+            )
+        assert code == 0
+        capsys.readouterr()
+        _, rows = _read_csv(output)
+        return [row["Status"] for row in rows], [
+            r.getMessage()
+            for r in logged[start:]
+            if r.getMessage().startswith("aws_call_failed ")
+        ]
+
+    # ---- default run: one FAIL row, and nothing at ERROR ------------------ #
+    statuses, failures = scan([], "default.csv")
+    assert statuses == [Status.FAIL.value], (
+        f"expected exactly one FAIL row, got {statuses!r}"
+    )
+
+    errors = [r for r in logged if r.levelno >= logging.ERROR]
+    assert errors == [], (
+        f"a scan whose report holds no ERROR row emitted "
+        f"{len(errors)} ERROR-level record(s): "
+        f"{[r.getMessage() for r in errors]!r}"
+    )
+    assert failures == [], (
+        f"the diagnostic reached a default run's stderr: {failures!r}"
+    )
+
+    # ---- --debug: the record is still there, and still not an error ------- #
+    statuses, failures = scan(["--debug"], "debug.csv")
+    assert statuses == [Status.FAIL.value]
+    assert len(failures) == 1, (
+        f"expected the one aws_call_failed record under --debug, got {failures!r}"
+    )
+    assert failures[0].startswith("aws_call_failed operation=DescribeThing "), (
+        failures[0]
+    )
+
+    errors = [r for r in logged if r.levelno >= logging.ERROR]
+    assert errors == [], (
+        f"--debug promoted a semantic failure to ERROR: "
+        f"{[r.getMessage() for r in errors]!r}"
     )

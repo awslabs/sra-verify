@@ -96,13 +96,34 @@ class AWSClient:
         The only line a client's ``except`` clause contains. See the module
         docstring for why it takes nothing but the exception.
 
-        Emits exactly one ``error``-level record::
+        Emits exactly one ``debug``-level record::
 
             aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
 
         ``message`` is last and ``json.dumps``-encoded -- quoted, with embedded
         newlines and quotes escaped -- so an AWS message containing a newline
         cannot break the one-line promise: one failed call is always one line.
+
+        ``debug`` rather than ``error``, because **this tier cannot know how bad
+        this is.** A failed AWS call is not a verdict. ``AccessDeniedException:
+        Macie is not enabled`` is a normal, expected observation that the check
+        tier turns into a FAIL row; ``AccessDeniedException`` naming a principal
+        and an action is a broken scan. Only the check tier can tell them apart,
+        via ``is_not_configured``, and a log level is a classification -- so
+        emitting ``error`` here assigns a severity one tier before the
+        information needed to assign it exists.
+
+        Emitting it at ``error`` made the tool contradict itself: an audit-account
+        scan printed five ERROR lines and then reported ``Error: 0``, because all
+        five failures were semantic and became FAIL rows. The invariant now is
+        that an ERROR-level record means an ERROR row, and
+        ``test_no_error_level_records_without_error_rows`` holds it.
+
+        Nothing is lost by the demotion. A semantic failure's FAIL row states the
+        reason in ``ActualValue``; an ERROR row carries the operation, code and
+        message verbatim. The report is the artefact, the summary counts the
+        ERROR rows, and ``--debug`` still yields every raw record for anyone
+        auditing a classification.
 
         Args:
             e: The caught exception. Must be a ``ClientError`` or ``BotoCoreError``.
@@ -140,7 +161,7 @@ class AWSClient:
                 f"defect and must propagate."
             )
 
-        logger.error(
+        logger.debug(
             f"aws_call_failed operation={operation} region={self.region} "
             f"code={code} message={json.dumps(message)}"
         )

@@ -1542,5 +1542,6 @@ def test_securityincidentresponse_declares_no_namespace() -> None:
     assert "NAMESPACE" not in vars(cls), (
         "securityincidentresponse now declares a NAMESPACE. That is a real "
         "improvement, but it is Non-Goal 6 for this feature -- it moves the "
-        "Region cell on genuine verdicts, which the gate reads as a regression."
+        "Region cell on genuine verdicts, which cannot be separated from a "
+        "regression when diffing two scans."
     )

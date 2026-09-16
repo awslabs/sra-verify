@@ -148,7 +148,9 @@ from sraverify.core.logging import logger
 
 `core/logging.py` strips the root logger's handlers at import time and installs a **stderr-only** handler. `logger.propagate = False`; boto3/botocore/urllib3 are forced to WARNING and propagate to the stderr root handler.
 
-Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes, `logger.warning` for a missing client, `logger.error` for an API failure.
+Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes, `logger.warning` for a missing client, and `logger.debug` for a failed AWS call.
+
+**`logger.error` is reserved for something that produced an ERROR row.** A failed AWS call is not one: `AccessDeniedException: Macie is not enabled` is a normal observation the check tier turns into a FAIL. The client tier cannot tell that from a broken scan — only `is_not_configured` can — so a client that logged at `error` would be classifying one tier before the information exists. An audit-account scan did exactly that: five ERROR lines, then `Error: 0` in the summary. `test_no_error_level_records_without_error_rows` holds the correspondence.
 
 **stdout being empty is a contract, and it is asserted** — `tests/property/test_stdout_contract_property.py` holds that nothing in the package writes to it. Two consumers depend on it:
 
@@ -159,7 +161,7 @@ Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes, 
   aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
   ```
 
-  with `message` last and `json.dumps`-encoded, so an AWS message containing an embedded newline cannot break the one-line promise. One failed call is one line, which is what lets `grep -c aws_call_failed` answer "how many calls failed" on a build log.
+  at **`debug`**, with `message` last and `json.dumps`-encoded, so an AWS message containing an embedded newline cannot break the one-line promise. One failed call is one line, which is what lets `grep -c aws_call_failed` answer "how many calls failed" on a `--debug` log. It sits at `debug` because the report is the artefact that carries the verdict: a semantic failure's FAIL row states the reason, an ERROR row carries the operation, code and message verbatim, and the summary counts the ERROR rows.
 
   Keep it that way, and resist adding a second record per failure or a per-check progress line. On a 13-account organization a scan already emits ~528 of these; anything emitted per check rather than per failure adds ~900 more and drowns them. A `check_done` marker at `info` did exactly that and was removed.
 

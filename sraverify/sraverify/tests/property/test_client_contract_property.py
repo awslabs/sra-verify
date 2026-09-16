@@ -492,7 +492,7 @@ _INSPECTOR = (
     # First page only (Requirement 1.13): <=20 accounts. Recorded as a deferred
     # correction, not fixed here -- adding pagination changes the success path's
     # call count and could surface accounts the first page omitted, which would
-    # move verdicts and break the gate's no-PASS-changes promise.
+    # move verdicts, which this feature holds fixed.
     ClientAdapter(
         method="list_organization_accounts",
         boto_service="organizations",
@@ -1188,26 +1188,35 @@ def client_log() -> Any:
 
     handler = _Collector()
     target = logging.getLogger("sraverify")
+    # The record is emitted at ``debug`` and the logger sits at INFO, so without
+    # this the handler never sees it and Property 1 passes vacuously.
+    previous = target.level
+    target.setLevel(logging.DEBUG)
     target.addHandler(handler)
     try:
         yield records
     finally:
         target.removeHandler(handler)
+        target.setLevel(previous)
 
 
 def _failure_lines(records: list[logging.LogRecord]) -> list[str]:
     """Return the ``aws_call_failed`` messages among the records.
 
+    Selected by the structured prefix rather than by level: the record sits at
+    ``debug`` (see :meth:`AWSClient.aws_error`), so filtering on ``ERROR`` would
+    match nothing and make this property vacuous.
+
     Args:
         records: Captured records.
 
     Returns:
-        Messages at ``ERROR`` that begin with the structured prefix.
+        Messages that begin with the structured prefix.
     """
     return [
         r.getMessage()
         for r in records
-        if r.levelno >= logging.ERROR and r.getMessage().startswith("aws_call_failed ")
+        if r.getMessage().startswith("aws_call_failed ")
     ]
 
 
@@ -1334,10 +1343,10 @@ def test_every_client_method_logs_exactly_one_structured_failure(
 ) -> None:
     """Property 1: one parseable ``aws_call_failed`` record per failure.
 
-    Exactly one, because the gate attributes records to checks by position and
-    counts them: a method that logged twice would make one failure look like two,
-    and a method that logged none would leave a FAIL-to-ERROR transition with no
-    evidence and reject the batch.
+    Exactly one, so ``grep -c aws_call_failed`` on a ``--debug`` log answers "how
+    many calls failed". A method that logged twice would make one failure look like
+    two; one that logged none would leave an ERROR row with no way to recover the
+    code and message behind it.
     """
     wrapper, boto_mock = _build_wrapper(target)
     _arm_raise(

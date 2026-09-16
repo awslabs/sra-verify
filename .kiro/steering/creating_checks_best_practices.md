@@ -358,15 +358,22 @@ only separable from its report because the report goes to a file and the
 diagnostics go to stderr — which is what lets you redirect one without losing the
 other.
 
-`AWSClient.aws_error` emits exactly one record per failure, in one line:
+`AWSClient.aws_error` emits exactly one record per failure, in one line, at `debug`:
 
 ```
 aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
 ```
 
 `message` is last and `json.dumps`-encoded, so an AWS message containing a newline
-cannot break the one-line promise the gate's parser depends on. Do not add a second
-log record for the same failure — "exactly one" is asserted per client method.
+cannot break the one-line promise: one failed call is always one line. Do not add a
+second log record for the same failure — "exactly one" is asserted per client method.
+
+**Never raise the level.** `logger.error` means an ERROR row was produced. A failed AWS
+call is not one on its own: `AccessDeniedException: Macie is not enabled` is a normal
+observation that becomes a FAIL, and this tier cannot tell it from a broken scan —
+only `is_not_configured`, one tier up, can. Logging it at `error` is classifying before
+the information exists, and it made an audit-account scan print five ERROR lines and
+then report `Error: 0`.
 
 ## Error handling: three tiers
 

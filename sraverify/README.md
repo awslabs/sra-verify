@@ -829,15 +829,20 @@ Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes,
 **stdout being empty is a contract**, asserted by
 `tests/property/test_stdout_contract_property.py`. The MCP server speaks JSON-RPC over
 stdout, so one stray `print` corrupts the protocol. And one structured record on stderr
-keeps a scan's failures greppable — `AWSClient.aws_error` emits exactly one
+keeps a scan's failures greppable under `--debug` — `AWSClient.aws_error` emits exactly one
 
 ```
 aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
 ```
 
-per failed call, with `message` last and `json.dumps`-encoded so an AWS message containing
-an embedded newline cannot break the one-line promise. One failed call is one line, so
-`grep -c aws_call_failed` answers "how many calls failed" on any scan log.
+per failed call at **`debug`**, with `message` last and `json.dumps`-encoded so an AWS message
+containing an embedded newline cannot break the one-line promise. One failed call is one line, so
+`grep -c aws_call_failed` answers "how many calls failed" on a `--debug` log.
+
+`logger.error` is reserved for something that produced an ERROR row. A failed AWS call is not
+one — `AccessDeniedException: Macie is not enabled` becomes a FAIL — and the client tier cannot
+tell a semantic refusal from a broken scan, so logging it at `error` would classify one tier
+before `is_not_configured` runs.
 
 ## Library usage
 

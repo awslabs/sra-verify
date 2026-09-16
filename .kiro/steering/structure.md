@@ -439,9 +439,11 @@ can be typed wrong. Three rules make it work:
   `self.region`; the operation comes from `e.operation_name` where botocore has it,
   and is `UNKNOWN_OPERATION` (`"Request"`) for a `BotoCoreError`, which never
   completed a request and so has no operation to claim. It logs exactly one
-  `aws_call_failed operation=… region=… code=… message=…` record, `message`
-  JSON-encoded so an AWS message with a newline cannot break the one-line promise
-  makes the log greppable: one failure is one line, always.
+  `aws_call_failed operation=… region=… code=… message=…` record at `debug`, with
+  `message` JSON-encoded so an AWS message containing a newline cannot break the
+  one-line promise: one failure is one line, always. `debug` rather than `error`
+  because this tier cannot know whether the failure is semantic — an `error` here
+  would claim a severity that only `is_not_configured` can assign.
 - **Acquisition is constructor-only.** `ctx.get_client` reads bundled endpoint data
   and issues no network call, so its failure is a deterministic defect, not an AWS
   outcome. Inside a `try` it would be caught as a `BotoCoreError` and turned into
@@ -583,15 +585,15 @@ The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collect
 The client-error-contract modules are the largest block and are worth knowing by
 name, because between them they hold the whole contract:
 
-| Module | What it holds |
-| --- | --- |
-| `test_client_contract_property.py` | All 92 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return |
-| `test_accessor_cache_property.py` | Every public base method classified as `accessor`, `accessor_uncached`, `helper`, `client_lookup` or `derived`, proven total and exact against the real classes; then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key |
-| `test_check_classification_property.py` | Catalog-wide over all 158 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call |
-| `test_discriminator_property.py` | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, and `is_not_configured` conservative on anything undeclared |
-| `test_no_confessing_fail_property.py` | Static, by AST, over all 158 check modules: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access |
-| `test_availability_property.py` | `service_available_in_region` is offline, cached, and fails open |
-| `test_stdout_contract_property.py` | Nothing in the package writes to stdout |
+| Module                                  | What it holds                                                                                                                                                                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_client_contract_property.py`      | All 92 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return |
+| `test_accessor_cache_property.py`       | Every public base method classified as `accessor`, `accessor_uncached`, `helper`, `client_lookup` or `derived`, proven total and exact against the real classes; then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                   |
+| `test_check_classification_property.py` | Catalog-wide over all 158 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                            |
+| `test_discriminator_property.py`        | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, and `is_not_configured` conservative on anything undeclared                                                                                                                              |
+| `test_no_confessing_fail_property.py`   | Static, by AST, over all 158 check modules: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                        |
+| `test_availability_property.py`         | `service_available_in_region` is offline, cached, and fails open                                                                                                                                                                                                          |
+| `test_stdout_contract_property.py`      | Nothing in the package writes to stdout                                                                                                                                                                                                                                   |
 
 Two of these carry an **adapter table** that is *prescriptive*, not descriptive:
 the `ClientAdapter` tables in `test_client_contract_property.py` name the boto3

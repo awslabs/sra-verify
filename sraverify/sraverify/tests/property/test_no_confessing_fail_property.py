@@ -437,8 +437,8 @@ def test_the_confessing_patterns_match_what_they_should(
 ) -> None:
     """The detector is tested, not just used.
 
-    A pattern set this consequential -- it gates 28 modules and the gate's
-    totals -- should not be trusted on inspection. The negative cases matter
+    A pattern set this consequential -- it gates 28 modules -- should not be
+    trusted on inspection. The negative cases matter
     more than the positives: an over-broad pattern would force a genuine
     "the control is absent" FAIL to be reworded into something vaguer, which is
     the opposite of the intent.

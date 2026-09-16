@@ -60,7 +60,7 @@ def test_transport_error_codes_names_the_three_transport_subclasses() -> None:
 
 
 def test_no_client_code_is_stable() -> None:
-    """``NoClient`` is compared as a literal by checks and by the gate."""
+    """``NoClient`` is compared as a literal by checks."""
     assert NO_CLIENT_CODE == "NoClient"
 
 

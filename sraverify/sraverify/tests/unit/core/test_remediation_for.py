@@ -162,23 +162,35 @@ def test_the_no_client_code_points_at_the_regions_flag(check: SecurityCheck) -> 
         "UnauthorizedException",
     ],
 )
-def test_every_spelling_of_access_denied_points_at_the_member_role(
+def test_every_spelling_of_access_denied_gets_permission_shaped_advice(
     check: SecurityCheck, code: str
 ) -> None:
-    """AWS spells "not permitted" four ways; all four get the same advice.
+    """AWS spells "not permitted" four ways; none may fall through to the generic bucket.
 
     ``s3control`` says ``AccessDenied``, ``macie2`` and most others say
     ``AccessDeniedException``, ``ec2`` says ``UnauthorizedOperation``, and
     ``securitylake`` says ``UnauthorizedException``. Matching one literal would
-    leave the other three falling through to the generic bucket.
+    leave the other three landing on "investigate the code in the scan log", which
+    is what the generic bucket says and is much less useful than naming a cause.
+
+    The assertion is *permission-shaped advice*, not one exact sentence. With a
+    message that discriminates nothing -- ``"m"`` here -- all four land in the
+    cause-not-stated bucket, which offers the IAM grant and the delegated
+    administrator together. Requiring "Grant the member role" verbatim would be
+    requiring the helper to guess between them, which is what
+    ``_IAM_DENIAL_NEEDLES`` exists to stop it doing.
     """
     text = check._remediation_for(
         error_result(code=code, message="m", operation="GetDetector")["Error"]
     )
 
-    assert "Grant the member role" in text
     assert "GetDetector" in text
-    assert "1-sraverify-member-roles.yaml" in text
+    assert "1-sraverify-member-roles.yaml" in text, (
+        f"{code} did not offer the IAM cause: {text!r}"
+    )
+    assert "scan log" not in text, (
+        f"{code} fell through to the generic bucket: {text!r}"
+    )
 
 
 def test_an_unrecognized_code_gets_the_generic_wording(check: SecurityCheck) -> None:
@@ -432,3 +444,177 @@ def test_is_not_configured_reads_the_class_not_the_instance() -> None:
         )
         is False
     )
+
+
+# --------------------------------------------------------------------------- #
+# The wrong-account bucket
+#
+# Several AWS services refuse an organization-scoped read from any account that
+# is not the delegated administrator, and report it as ``AccessDeniedException``
+# -- the same code a genuine IAM gap produces. Both messages below were observed
+# on a 13-account organization scan on 2026-09-16 from an account that *held* the
+# action, and reproduced with ``AdministratorAccess``, which is what establishes
+# that IAM was not the constraint.
+#
+# Before this bucket existed, 500 of 501 ERROR rows in that report told the
+# operator to grant a permission the role already had.
+# --------------------------------------------------------------------------- #
+
+#: The verbatim message ``securitylake`` returns to a non-delegated-administrator.
+_SECURITYLAKE_REFUSAL = (
+    "The request failed because you don't have sufficient permissions to perform "
+    "this operation for your organization. Contact your administrator for assistance."
+)
+
+#: The verbatim message ``macie2`` returns to an account that is not the Macie
+#: administrator.
+_MACIE_REFUSAL = (
+    "The request failed because you must be the Macie administrator for an "
+    "organization to perform this operation"
+)
+
+#: A genuine IAM denial, verbatim, for contrast. This one *should* keep the
+#: grant-the-permission wording, because granting it is the fix.
+_IAM_DENIAL = (
+    "User: arn:aws:sts::111122223333:assumed-role/SRAMemberRole/sraverify-session "
+    "is not authorized to perform: iam:ListUsers on resource: arn:aws:iam::"
+    "111122223333:user/"
+)
+
+
+@pytest.mark.parametrize(
+    "message,operation",
+    [
+        (_SECURITYLAKE_REFUSAL, "ListLogSources"),
+        (_SECURITYLAKE_REFUSAL, "ListSubscribers"),
+        (_SECURITYLAKE_REFUSAL, "GetDataLakeSources"),
+        (_MACIE_REFUSAL, "DescribeOrganizationConfiguration"),
+    ],
+)
+def test_a_wrong_account_refusal_does_not_advise_granting_a_permission(
+    check: SecurityCheck, message: str, operation: str
+) -> None:
+    """The advice must not be one that cannot work.
+
+    This is the same failure mode as a confessing FAIL, one column over: a row
+    that reads as actionable and sends the reader somewhere useless. An operator
+    who grants the action, re-runs, and sees the identical row has spent a policy
+    change to learn nothing, and has good reason to stop trusting the report.
+    """
+    wording = check._remediation_for(
+        error_result(code="AccessDeniedException", message=message, operation=operation)[
+            "Error"
+        ]
+    )
+
+    assert "Grant the member role" not in wording, (
+        f"{operation} was refused for being the wrong account, but the "
+        f"remediation still asks for an IAM grant: {wording!r}"
+    )
+    assert "delegated administrator" in wording, (
+        f"the remediation should name the actual obstacle: {wording!r}"
+    )
+    assert operation in wording, f"the operation should be named: {wording!r}"
+
+
+def test_a_genuine_iam_denial_still_advises_granting_the_permission(
+    check: SecurityCheck,
+) -> None:
+    """The narrow needles must not swallow the case they were carved out of.
+
+    A plain IAM denial names the principal and the action and matches neither
+    needle, so it keeps the grant-the-permission advice -- which for it is
+    correct, and was correct for exactly 1 of the 501 ERROR rows in the observed
+    report.
+    """
+    wording = check._remediation_for(
+        error_result(
+            code="AccessDenied", message=_IAM_DENIAL, operation="ListUsers"
+        )["Error"]
+    )
+
+    assert "Grant the member role" in wording, (
+        f"a real permission gap must still say so: {wording!r}"
+    )
+    assert "delegated administrator" not in wording
+
+
+def test_the_two_access_denied_buckets_are_split_on_message_not_code(
+    check: SecurityCheck,
+) -> None:
+    """One code, two remediations. That is the whole point of the split.
+
+    If this ever collapses to one bucket, the report goes back to giving 500 rows
+    advice that cannot work.
+    """
+    same_code = "AccessDeniedException"
+    refused = check._remediation_for(
+        error_result(
+            code=same_code, message=_SECURITYLAKE_REFUSAL, operation="ListLogSources"
+        )["Error"]
+    )
+    denied = check._remediation_for(
+        error_result(
+            code=same_code, message=_IAM_DENIAL, operation="ListLogSources"
+        )["Error"]
+    )
+
+    assert refused != denied, (
+        "the same code with two different messages produced the same remediation; "
+        "the message needles are not being consulted"
+    )
+    assert refused.strip() and denied.strip()
+
+
+def test_an_access_denied_that_states_no_cause_names_both(check: SecurityCheck) -> None:
+    """``UnauthorizedException: Unauthorized`` -- observed, and it says nothing.
+
+    ``securitylake:GetDataLakeSources`` answers a non-delegated-administrator
+    account with exactly that: no principal, no action, no mention of the
+    organization. Reproduced with ``AdministratorAccess``, so it is provably not
+    an IAM gap in that account -- but the response does not say so, and 52 rows in
+    the observed report landed here.
+
+    Guessing either way would be asserting something the evidence does not
+    support, which is the FAIL-versus-ERROR discipline applied one column over. So
+    the wording names both causes.
+    """
+    wording = check._remediation_for(
+        error_result(
+            code="UnauthorizedException",
+            message="Unauthorized",
+            operation="GetDataLakeSources",
+        )["Error"]
+    )
+
+    assert "GetDataLakeSources" in wording
+    assert "1-sraverify-member-roles.yaml" in wording, (
+        f"the IAM cause should still be offered: {wording!r}"
+    )
+    assert "delegated administrator" in wording, (
+        f"the wrong-account cause should also be offered: {wording!r}"
+    )
+    assert "not for want of an IAM permission" not in wording, (
+        f"this bucket must not claim to know which cause it is: {wording!r}"
+    )
+
+
+def test_the_three_access_denied_buckets_are_mutually_distinct(
+    check: SecurityCheck,
+) -> None:
+    """Three messages, three different remediations, one shared code family."""
+    wordings = {
+        label: check._remediation_for(
+            error_result(code=code, message=msg, operation="ListLogSources")["Error"]
+        )
+        for label, code, msg in (
+            ("wrong_account", "AccessDeniedException", _SECURITYLAKE_REFUSAL),
+            ("iam_gap", "AccessDeniedException", _IAM_DENIAL),
+            ("unstated", "UnauthorizedException", "Unauthorized"),
+        )
+    }
+    assert len(set(wordings.values())) == 3, (
+        f"two buckets collapsed to the same wording: {wordings}"
+    )
+    for label, w in wordings.items():
+        assert w.strip(), f"{label} produced a blank remediation"

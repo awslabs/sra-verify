@@ -113,6 +113,70 @@ _HELPER_NAMES: Final = {
 #: this scanner consults. AWS spells the same condition four ways depending on
 #: the service, so ``_remediation_for`` matches against the set rather than one
 #: literal.
+#: Message substrings, matched case-insensitively, that mark an access-denied as a
+#: **service-level refusal of the calling account** rather than a missing IAM
+#: action. Read only by :meth:`_remediation_for`, to pick the remediation.
+#:
+#: The distinction is not academic and getting it wrong is expensive. Several AWS
+#: services refuse an organization-scoped read from any account that is not the
+#: delegated administrator, no matter what IAM allows, and they report it as
+#: ``AccessDeniedException`` — the same code a genuine permission gap produces.
+#: Told to "grant the member role permission to call ListLogSources", an operator
+#: grants an action the role already holds, re-runs, sees the identical row, and
+#: concludes the scanner is broken.
+#:
+#: Both needles were observed on a 13-account organization scan on 2026-09-16,
+#: from an account holding the action in question and reproduced with
+#: ``AdministratorAccess``, which is what establishes that IAM is not the
+#: constraint:
+#:
+#: * ``securitylake:ListLogSources`` / ``ListSubscribers`` / ``GetDataLakeSources``
+#:   — "The request failed because you don't have sufficient permissions to
+#:   perform this operation **for your organization**. Contact your administrator
+#:   for assistance."
+#: * ``macie2:DescribeOrganizationConfiguration`` — "The request failed because
+#:   you **must be the Macie administrator** for an organization to perform this
+#:   operation"
+#:
+#: Deliberately narrow. A plain IAM denial names the principal and the action
+#: — "User: arn:aws:sts::…:assumed-role/SRAMemberRole/… is not authorized to
+#: perform: iam:ListUsers" — and matches neither needle, so it keeps the
+#: grant-the-permission advice, which for it is correct.
+_NOT_THE_ADMINISTRATOR_NEEDLES: Final = (
+    "for your organization",
+    "must be the",
+)
+
+#: Message substrings that mark an access-denied as a genuine **IAM** denial, for
+#: which granting the action is the fix. IAM says so in as many words, naming the
+#: principal and the action it refused:
+#:
+#:     User: arn:aws:sts::…:assumed-role/SRAMemberRole/sraverify-session is not
+#:     authorized to perform: iam:ListUsers on resource: …
+#:
+#: Needed as its own bucket because a third case exists that neither this nor
+#: :data:`_NOT_THE_ADMINISTRATOR_NEEDLES` matches. ``securitylake`` answers
+#: ``GetDataLakeSources`` from a non-delegated-administrator account with
+#: ``UnauthorizedException: Unauthorized`` — no principal, no action, no mention
+#: of the organization. Reproduced with ``AdministratorAccess`` on 2026-09-16, so
+#: it is provably not an IAM gap in *that* account, but nothing in the response
+#: says which of the two it is.
+#:
+#: So the fallback names both causes rather than picking one. That is the same
+#: discipline as the FAIL-versus-ERROR rule one tier up: where the evidence does
+#: not distinguish two explanations, say so instead of choosing the one that reads
+#: better. Advice covering two causes costs a reader a few seconds; advice
+#: confidently naming the wrong one costs them a policy change and a re-run.
+_IAM_DENIAL_NEEDLES: Final = (
+    "is not authorized to perform",
+    "no identity-based policy allows",
+    "with an explicit deny",
+)
+
+#: The error codes that mean "the caller is not permitted", across the services
+#: this scanner consults. AWS spells the same condition four ways depending on
+#: the service, so ``_remediation_for`` matches against the set rather than one
+#: literal.
 _ACCESS_DENIED_CODES: Final = frozenset(
     {
         "AccessDeniedException",
@@ -777,9 +841,10 @@ class SecurityCheck(ABC):
         construction, and emitting "Enable GuardDuty in every enabled Region"
         against an ``AccessDeniedException`` would be confidently wrong.
 
-        Wording is chosen by ``Code`` class, in four buckets: transport,
-        ``NoClient``, access-denied, and everything else. The first two name the
-        **service**; the last two name the **operation**. That split is not
+        Wording is chosen by ``Code`` class, in six buckets: transport,
+        ``NoClient``, then three for access-denied -- wrong account, IAM gap, and
+        cause-not-stated -- and everything else. The first two name the
+        **service**; the rest name the **operation**. That split is not
         cosmetic -- it follows from which errors carry an operation at all. A
         transport failure and a missing client both mean nothing was sent, so
         ``AWSClient.aws_error`` records :data:`UNKNOWN_OPERATION` and there is no
@@ -788,6 +853,16 @@ class SecurityCheck(ABC):
         access-denied or otherwise-unclassified code came from AWS answering, so
         botocore attached the real operation and naming it is the most actionable
         thing available.
+
+        The three access-denied buckets are split on the **message**, not the
+        code, because AWS reports "you lack an IAM action" and "you are the wrong
+        account for an organization-scoped read" with the same
+        ``AccessDeniedException``, and sometimes reports the second with no detail
+        at all. See :data:`_NOT_THE_ADMINISTRATOR_NEEDLES` for why conflating the
+        first two is worse than being vague -- it produces advice that cannot work,
+        which costs an operator a policy change, a re-run, and their trust in the
+        report -- and :data:`_IAM_DENIAL_NEEDLES` for why the third bucket names
+        both causes instead of guessing between them.
 
         This deliberately does **not** compose an IAM action string. Requirement
         4.8 forbids it, because ``meta.service`` is a display name and not an IAM
@@ -818,10 +893,27 @@ class SecurityCheck(ABC):
                 f"supplied to --regions, so a {self.service} client exists for it"
             )
         if code in _ACCESS_DENIED_CODES:
+            message = error.get("Message", "").lower()
+            if any(n in message for n in _NOT_THE_ADMINISTRATOR_NEEDLES):
+                return (
+                    f"{operation} was refused because the scanned account is not "
+                    f"the {self.service} delegated administrator, not for want of "
+                    f"an IAM permission -- granting one will not change this. "
+                    f"Confirm which account holds that role and that this check's "
+                    f"account type is scanned against it"
+                )
+            if any(n in message for n in _IAM_DENIAL_NEEDLES):
+                return (
+                    f"Grant the member role permission to call {operation} for this "
+                    f"service (see the SRAVerifyCheckPermissions policy in "
+                    f"1-sraverify-member-roles.yaml), then re-run the scan"
+                )
             return (
-                f"Grant the member role permission to call {operation} for this "
-                f"service (see the SRAVerifyCheckPermissions policy in "
-                f"1-sraverify-member-roles.yaml), then re-run the scan"
+                f"{operation} was refused without saying why. Check both causes: "
+                f"whether the member role is granted the action (see "
+                f"1-sraverify-member-roles.yaml), and whether the scanned account "
+                f"is the {self.service} delegated administrator, which several "
+                f"services require for an organization-wide read"
             )
         return (
             f"Investigate {code} from {operation} in the scan log "

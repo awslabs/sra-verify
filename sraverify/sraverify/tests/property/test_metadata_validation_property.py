@@ -546,7 +546,7 @@ def test_no_check_meta_escapes_when_a_rule_is_violated(
 
     ``CheckMeta`` is frozen *and* slotted, so it carries no ``__weakref__``
     slot and a weakref-based liveness assertion is not available. The unbound
-    sentinel is the direct statement of the same thing.
+    error result is the direct statement of the same thing.
 
     The message must also name the rule and the declaring module file, so the
     traceback alone identifies both what is wrong and where.

@@ -1,80 +1,47 @@
 """
-IAM client for interacting with AWS IAM service.
+IAM client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+IAM is a global service, so the boto3 client is requested with ``region=None`` and
+the context caches it under the ``"__global__"`` sentinel key.
 """
-from typing import Any, Dict
+from typing import Any, Mapping
 
-from botocore.exceptions import (
-    ClientError,
-    ConnectTimeoutError,
-    EndpointConnectionError,
-    ReadTimeoutError,
-)
-
-from sraverify.core.logging import logger
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class IAM_Client:
-    """Client for interacting with AWS IAM service.
-
-    IAM is a global AWS service, so the underlying boto3 client is requested
-    from the :class:`ScanContext` without a region. The context's per-scan
-    client cache stores it under the ``"__global__"`` cache-key sentinel so it
-    is shared across every caller in the scan.
-    """
+class IAM_Client(AWSClient):
+    """Client for interacting with AWS IAM."""
 
     def __init__(self, ctx: ScanContext):
         """
-        Initialize IAM client.
+        Initialize the IAM client.
 
         Args:
-            ctx: Per-scan :class:`ScanContext` that owns the boto3 session,
-                bounded ``Client_Config``, and the per-scan client cache.
+            ctx: ScanContext for the current scan.
         """
-        self.ctx = ctx
+        super().__init__("us-east-1", ctx)
         # IAM is a global service; request the client without a region so the
         # context caches it under the "__global__" sentinel.
         self.client = ctx.get_client('iam', region=None)
 
-    def list_users(self) -> Dict[str, Any]:
+    def list_users(self) -> Mapping[str, Any]:
         """
-        List all IAM users in the account with pagination support.
+        List the IAM users in the account.
 
         Returns:
-            Dictionary with ``Users`` key containing the list of IAM users
-            accumulated across every response page, or an ``Error`` key with
-            ``Code``/``Message`` fields if the API call failed. Exceptions are
-            never re-raised; failures are always returned as a structured dict.
+            ``{"Users": [...]}`` with every page merged, on success, or the error
+            result.
         """
         try:
             users = []
-            paginator = self.client.get_paginator('list_users')
-            for page in paginator.paginate():
+            for page in self.client.get_paginator('list_users').paginate():
                 users.extend(page.get('Users', []))
             return {"Users": users}
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.warning(f"Error listing IAM users: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
-        except (EndpointConnectionError, ReadTimeoutError, ConnectTimeoutError) as e:
-            logger.warning(f"Network error listing IAM users: {e}")
-            return {
-                "Error": {
-                    "Code": e.__class__.__name__,
-                    "Message": str(e)
-                }
-            }
-        except Exception as e:
-            logger.warning(f"Unexpected error listing IAM users: {e}")
-            return {
-                "Error": {
-                    "Code": "UnknownError",
-                    "Message": str(e)
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

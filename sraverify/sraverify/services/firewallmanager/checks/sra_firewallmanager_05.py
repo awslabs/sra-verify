@@ -52,12 +52,25 @@ class SRA_FIREWALLMANAGER_05(FirewallManagerCheck):
             policies_response = self.list_policies(region)
 
             if "Error" in policies_response:
-                yield self.error(
-                    region=region,
-                    resource_id=None,
-                    actual_value=policies_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Firewall Manager API access"
-                )
+                error = policies_response["Error"]
+                # Inside the per-Region loop, so one undetermined Region costs one
+                # row rather than the whole check's output.
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=None,
+                        actual_value="No Network ACL policies configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=None,
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
 
             policies = policies_response.get("PolicyList", [])

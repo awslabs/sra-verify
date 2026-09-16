@@ -52,7 +52,29 @@ class SRA_CLOUDTRAIL_10(CloudTrailCheck):
             One Finding per organization trail, or one Finding when none exist.
         """
         # Get organization trails
-        org_trails = self.get_organization_trails()
+        org_response = self.get_organization_trails()
+
+        if "Error" in org_response:
+            error = org_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value="No CloudTrail trail exists for this account, so no organization trail is configured",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        org_trails = org_response.get('trailList', [])
 
         if not org_trails:
             yield self.failed(
@@ -91,7 +113,33 @@ class SRA_CLOUDTRAIL_10(CloudTrailCheck):
                 continue
 
             # Get trail status to check digest delivery
-            trail_status = self.get_trail_status(home_region, trail_arn)
+            status_response = self.get_trail_status(home_region, trail_arn)
+
+            # Inside the per-trail loop, so one undetermined trail costs one row
+            # rather than the whole check's output.
+            if "Error" in status_response:
+                error = status_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=home_region,
+                        resource_id=trail_arn,
+                        actual_value=(
+                            f"Trail {trail_arn} does not exist"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=home_region,
+                        resource_id=trail_arn,
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            trail_status = status_response
             latest_digest_delivery_time_str = trail_status.get('LatestDigestDeliveryTime', None)
             latest_digest_delivery_error = trail_status.get('LatestDigestDeliveryError', None)
 
@@ -100,45 +148,41 @@ class SRA_CLOUDTRAIL_10(CloudTrailCheck):
 
             # Check if digest delivery time exists and is within the last 24 hours
             if latest_digest_delivery_time_str:
-                try:
-                    # Convert string to datetime object
-                    if isinstance(latest_digest_delivery_time_str, str):
-                        latest_delivery_time = datetime.fromisoformat(latest_digest_delivery_time_str.replace('Z', '+00:00'))
-                    else:
-                        # Assume it's already a datetime object
-                        latest_delivery_time = latest_digest_delivery_time_str
-
-                    # Get current time in UTC
-                    now = datetime.now(timezone.utc)
-
-                    # Check if delivery was within the last 24 hours
-                    if now - latest_delivery_time < timedelta(hours=24):
-                        # Trail is delivering digest files within the last 24 hours
-                        yield self.passed(
-                            region="global",
-                            resource_id=resource_id,
-                            checked_value="LatestDigestDeliveryTime: within last 24 hours",
-                            actual_value=f"Organization trail '{trail_name}' is delivering log file validation digest files to S3 bucket '{s3_bucket_name}', latest delivery time: {latest_digest_delivery_time_str}",
-                        )
-                    else:
-                        # Trail has not delivered digest files within the last 24 hours
-                        yield self.failed(
-                            region="global",
-                            resource_id=resource_id,
-                            checked_value="LatestDigestDeliveryTime: within last 24 hours",
-                            actual_value=f"Organization trail '{trail_name}' has not delivered log file validation digest files to S3 bucket '{s3_bucket_name}' within the last 24 hours, latest delivery time: {latest_digest_delivery_time_str}",
-                            remediation=(
-                                f"Check the CloudTrail configuration and S3 bucket permissions. Ensure the trail is active using: "
-                                f"aws cloudtrail start-logging --name {trail_name} --region {home_region}"
-                            ),
-                        )
-                except (ValueError, TypeError) as e:
-                    # Error parsing delivery time
+                latest_digest_delivery_time = self.parse_delivery_time(latest_digest_delivery_time_str)
+                now = datetime.now(timezone.utc)
+                if latest_digest_delivery_time is None:
+                    # AWS returned a timestamp this scanner cannot parse.
+                    # A shape problem in the response, reported as the
+                    # finding it is rather than caught as an exception --
+                    # no `except` may appear inside execute().
                     yield self.failed(
                         region="global",
                         resource_id=trail_arn,
                         checked_value="LatestDigestDeliveryTime: within last 24 hours",
-                        actual_value=f"Organization trail '{trail_name}' has an invalid digest delivery time format: {latest_digest_delivery_time_str}, error: {str(e)}",
+                        actual_value=f"Organization trail '{trail_name}' has an invalid digest delivery time format: {latest_digest_delivery_time_str}",
+                        remediation=(
+                            f"Check the CloudTrail configuration and S3 bucket permissions. Ensure the trail is active using: "
+                            f"aws cloudtrail start-logging --name {trail_name} --region {home_region}"
+                        ),
+                    )
+                    continue
+
+                # Check if delivery was within the last 24 hours
+                if now - latest_digest_delivery_time < timedelta(hours=24):
+                    # Trail is delivering digest files within the last 24 hours
+                    yield self.passed(
+                        region="global",
+                        resource_id=resource_id,
+                        checked_value="LatestDigestDeliveryTime: within last 24 hours",
+                        actual_value=f"Organization trail '{trail_name}' is delivering log file validation digest files to S3 bucket '{s3_bucket_name}', latest delivery time: {latest_digest_delivery_time_str}",
+                    )
+                else:
+                    # Trail has not delivered digest files within the last 24 hours
+                    yield self.failed(
+                        region="global",
+                        resource_id=resource_id,
+                        checked_value="LatestDigestDeliveryTime: within last 24 hours",
+                        actual_value=f"Organization trail '{trail_name}' has not delivered log file validation digest files to S3 bucket '{s3_bucket_name}' within the last 24 hours, latest delivery time: {latest_digest_delivery_time_str}",
                         remediation=(
                             f"Check the CloudTrail configuration and S3 bucket permissions. Ensure the trail is active using: "
                             f"aws cloudtrail start-logging --name {trail_name} --region {home_region}"

@@ -74,29 +74,24 @@ class SRA_AUDITMANAGER_02(AuditManagerCheck):
             admin_response = self.get_organization_admin_account(region)
 
             if "Error" in admin_response:
-                error_code = admin_response["Error"].get("Code", "")
-                error_message = admin_response["Error"].get("Message", "")
+                error = admin_response["Error"]
 
-                if error_code == "ResourceNotFoundException":
+                if self.is_not_configured(error):
                     yield self.failed(
                         region=region,
                         resource_id=None,
                         actual_value="No delegated administrator configured",
                         remediation=f"Configure a delegated administrator for Audit Manager in {region} using RegisterOrganizationAdminAccount API"
                     )
-                elif "Please complete AWS Audit Manager setup" in error_message:
-                    yield self.failed(
-                        region=region,
-                        resource_id=None,
-                        actual_value="Audit Manager setup not completed in this account",
-                        remediation=f"Complete AWS Audit Manager setup from the home page in {region} before configuring delegated administrator"
-                    )
                 else:
                     yield self.error(
                         region=region,
                         resource_id=None,
-                        actual_value=error_message or "Unknown error",
-                        remediation="Check IAM permissions for Audit Manager API access"
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
                     )
             else:
                 admin_account_id = admin_response.get("adminAccountId")

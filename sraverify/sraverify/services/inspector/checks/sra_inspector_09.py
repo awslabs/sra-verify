@@ -56,6 +56,28 @@ class SRA_INSPECTOR_09(InspectorCheck):
             # Get organization configuration for this region
             org_config = self.get_organization_configuration(region)
 
+            if "Error" in org_config:
+                error = org_config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization-configuration/ecr",
+                        checked_value="Inspector ECR auto-enable is configured",
+                        actual_value=f"No Inspector organization configuration exists in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization-configuration/ecr",
+                        checked_value="Inspector ECR auto-enable is configured",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
             # Check if ECR auto-enable is configured
             ecr_enabled = org_config.get('autoEnable', {}).get('ecr', False)
 

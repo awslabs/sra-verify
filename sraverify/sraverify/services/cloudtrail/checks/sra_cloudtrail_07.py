@@ -47,7 +47,29 @@ class SRA_CLOUDTRAIL_07(CloudTrailCheck):
             One Finding per organization trail, or one Finding when none exist.
         """
         # Get organization trails
-        org_trails = self.get_organization_trails()
+        org_response = self.get_organization_trails()
+
+        if "Error" in org_response:
+            error = org_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value="No CloudTrail trail exists for this account, so no organization trail is configured",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        org_trails = org_response.get('trailList', [])
 
         if not org_trails:
             yield self.failed(
@@ -71,7 +93,33 @@ class SRA_CLOUDTRAIL_07(CloudTrailCheck):
             home_region = trail.get('HomeRegion', 'Unknown')
 
             # Get trail status to check if logging is enabled
-            trail_status = self.get_trail_status(home_region, trail_arn)
+            status_response = self.get_trail_status(home_region, trail_arn)
+
+            # Inside the per-trail loop, so one undetermined trail costs one row
+            # rather than the whole check's output.
+            if "Error" in status_response:
+                error = status_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=home_region,
+                        resource_id=trail_arn,
+                        actual_value=(
+                            f"Trail {trail_arn} does not exist"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=home_region,
+                        resource_id=trail_arn,
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            trail_status = status_response
             is_logging = trail_status.get('IsLogging', False)
 
             if is_logging:

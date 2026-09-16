@@ -1,14 +1,27 @@
 """
-AWS Config client for interacting with AWS Config service.
+Config client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+Reaches four services -- ``config``, ``organizations``, ``s3`` and ``sts`` -- all
+acquired in ``__init__``.
+
+``get_bucket_location`` returns the raw response. The ``None``
+``LocationConstraint`` -> ``us-east-1`` mapping the API implies lives in
+``ConfigCheck.bucket_region_of`` instead, so a failed call cannot be mistaken for
+a bucket that really is in us-east-1.
 """
-from typing import Dict, List, Optional, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+from typing import Any, Mapping
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class ConfigClient:
-    """Client for interacting with AWS Config service."""
+class ConfigClient(AWSClient):
+    """Client for interacting with AWS Config."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
@@ -16,249 +29,184 @@ class ConfigClient:
 
         Args:
             region: AWS region name
-            ctx: Per-scan ScanContext used to obtain bounded, cached boto3 clients
+            ctx: ScanContext for the current scan; the underlying boto3 clients
+                are obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('config', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
         self.s3_client = ctx.get_client('s3', region=region)
+        # Moved out of get_account_id, which acquired it per call.
+        self.sts_client = ctx.get_client('sts')
 
-    def get_account_id(self) -> Optional[str]:
+    def get_account_id(self) -> Mapping[str, Any]:
         """
         Get the current account ID.
 
         Returns:
-            Current account ID or None if not available
+            The ``GetCallerIdentity`` response on success, or the error result.
         """
         try:
-            logger.debug(f"Getting current account ID in {self.region}")
-            sts_client = self.ctx.get_client("sts")
-            response = sts_client.get_caller_identity()
-            account_id = response["Account"]
-            logger.debug(f"Current account ID: {account_id}")
-            return account_id
-        except ClientError as e:
-            logger.error(f"Error getting current account ID: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting current account ID: {e}")
-            return None
+            return self.sts_client.get_caller_identity()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_management_account_id(self) -> Optional[str]:
+    def get_management_account_id(self) -> Mapping[str, Any]:
         """
-        Get the management account ID for the organization.
+        Get the organization's management account.
 
         Returns:
-            Management account ID or None if not available
+            The ``DescribeOrganization`` response on success, i.e.
+            ``{"Organization": {...}}``, or the error result.
+
+            ``AWSOrganizationsNotInUseException`` means no organization exists,
+            which is a real answer and is declared in
+            ``ConfigCheck.NOT_CONFIGURED_ERRORS``.
         """
         try:
-            logger.debug(f"Getting management account ID in {self.region}")
-            response = self.org_client.describe_organization()
-            management_account_id = response["Organization"]["MasterAccountId"]
-            logger.debug(f"Management account ID: {management_account_id}")
-            return management_account_id
-        except ClientError as e:
-            logger.error(f"Error getting management account ID: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting management account ID: {e}")
-            return None
+            return self.org_client.describe_organization()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_configuration_recorders(self) -> List[Dict[str, Any]]:
+    def describe_configuration_recorders(self) -> Mapping[str, Any]:
         """
-        Describe configuration recorders in the current region.
+        Describe the configuration recorders in this Region.
 
         Returns:
-            List of configuration recorders
+            ``{"ConfigurationRecorders": [...]}`` on success, or the error result.
         """
         try:
-            logger.debug(f"Describing configuration recorders in {self.region}")
-            response = self.client.describe_configuration_recorders()
-            recorders = response.get('ConfigurationRecorders', [])
-            logger.debug(f"Found {len(recorders)} configuration recorders in {self.region}")
-            return recorders
-        except ClientError as e:
-            logger.error(f"Error describing configuration recorders in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing configuration recorders in {self.region}: {e}")
-            return []
+            return self.client.describe_configuration_recorders()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_configuration_recorder_status(self) -> List[Dict[str, Any]]:
+    def describe_configuration_recorder_status(self) -> Mapping[str, Any]:
         """
-        Describe configuration recorder status in the current region.
+        Describe the configuration recorder status in this Region.
 
         Returns:
-            List of configuration recorder statuses
+            ``{"ConfigurationRecordersStatus": [...]}`` on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Describing configuration recorder status in {self.region}")
-            response = self.client.describe_configuration_recorder_status()
-            statuses = response.get('ConfigurationRecordersStatus', [])
-            logger.debug(f"Found {len(statuses)} configuration recorder statuses in {self.region}")
-            return statuses
-        except ClientError as e:
-            logger.error(f"Error describing configuration recorder status in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing configuration recorder status in {self.region}: {e}")
-            return []
+            return self.client.describe_configuration_recorder_status()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_delivery_channels(self) -> List[Dict[str, Any]]:
+    def describe_delivery_channels(self) -> Mapping[str, Any]:
         """
-        Describe delivery channels in the current region.
+        Describe the delivery channels in this Region.
 
         Returns:
-            List of delivery channels
+            ``{"DeliveryChannels": [...]}`` on success, or the error result.
         """
         try:
-            logger.debug(f"Describing delivery channels in {self.region}")
-            response = self.client.describe_delivery_channels()
-            channels = response.get('DeliveryChannels', [])
-            logger.debug(f"Found {len(channels)} delivery channels in {self.region}")
-            return channels
-        except ClientError as e:
-            logger.error(f"Error describing delivery channels in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing delivery channels in {self.region}: {e}")
-            return []
+            return self.client.describe_delivery_channels()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_delivery_channel_status(self) -> List[Dict[str, Any]]:
+    def describe_delivery_channel_status(self) -> Mapping[str, Any]:
         """
-        Describe delivery channel status in the current region.
+        Describe the delivery channel status in this Region.
 
         Returns:
-            List of delivery channel statuses
+            ``{"DeliveryChannelsStatus": [...]}`` on success, or the error result.
         """
         try:
-            logger.debug(f"Describing delivery channel status in {self.region}")
-            response = self.client.describe_delivery_channel_status()
-            statuses = response.get('DeliveryChannelsStatus', [])
-            logger.debug(f"Found {len(statuses)} delivery channel statuses in {self.region}")
-            return statuses
-        except ClientError as e:
-            logger.error(f"Error describing delivery channel status in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing delivery channel status in {self.region}: {e}")
-            return []
+            return self.client.describe_delivery_channel_status()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_configuration_aggregators(self) -> List[Dict[str, Any]]:
+    def describe_configuration_aggregators(self) -> Mapping[str, Any]:
         """
-        Describe configuration aggregators in the current region.
+        Describe the configuration aggregators in this Region.
 
         Returns:
-            List of configuration aggregators
+            ``{"ConfigurationAggregators": [...]}`` on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Describing configuration aggregators in {self.region}")
-            response = self.client.describe_configuration_aggregators()
-            aggregators = response.get('ConfigurationAggregators', [])
-            logger.debug(f"Found {len(aggregators)} configuration aggregators in {self.region}")
-            return aggregators
-        except ClientError as e:
-            logger.error(f"Error describing configuration aggregators in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing configuration aggregators in {self.region}: {e}")
-            return []
+            return self.client.describe_configuration_aggregators()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_configuration_aggregator_sources_status(self, aggregator_name: str) -> List[Dict[str, Any]]:
+    def describe_configuration_aggregator_sources_status(
+        self, aggregator_name: str
+    ) -> Mapping[str, Any]:
         """
-        Describe configuration aggregator sources status in the current region.
+        Describe an aggregator's source statuses.
 
         Args:
-            aggregator_name: Name of the configuration aggregator
+            aggregator_name: The aggregator name.
 
         Returns:
-            List of configuration aggregator sources statuses
+            ``{"AggregatedSourceStatusList": [...]}`` on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Describing configuration aggregator sources status for {aggregator_name} in {self.region}")
-            response = self.client.describe_configuration_aggregator_sources_status(
+            return self.client.describe_configuration_aggregator_sources_status(
                 ConfigurationAggregatorName=aggregator_name
             )
-            source_statuses = response.get('AggregatedSourceStatusList', [])
-            logger.debug(f"Found {len(source_statuses)} source statuses for aggregator {aggregator_name} in {self.region}")
-            return source_statuses
-        except ClientError as e:
-            logger.error(f"Error describing configuration aggregator sources status in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing configuration aggregator sources status in {self.region}: {e}")
-            return []
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_bucket_location(self, bucket_name: str) -> Optional[str]:
+    def get_bucket_location(self, bucket_name: str) -> Mapping[str, Any]:
         """
-        Get the location of an S3 bucket.
+        Get an S3 bucket's Region.
 
         Args:
-            bucket_name: Name of the S3 bucket
+            bucket_name: The bucket name.
 
         Returns:
-            Region of the S3 bucket or None if not available
+            The ``GetBucketLocation`` response on success, i.e.
+            ``{"LocationConstraint": ...}``, or the error result.
+
+            The response, not the mapped Region: ``LocationConstraint`` is
+            ``None`` for us-east-1, so a caller writing ``location or
+            'us-east-1'`` could not tell that from a failure.
+            ``ConfigCheck.bucket_region_of`` does the mapping after the error test.
         """
         try:
-            logger.debug(f"Getting location for bucket {bucket_name}")
-            response = self.s3_client.get_bucket_location(Bucket=bucket_name)
-            location = response.get('LocationConstraint')
-            # If location is None, the bucket is in us-east-1
-            bucket_region = location if location else 'us-east-1'
-            logger.debug(f"Bucket {bucket_name} is in region {bucket_region}")
-            return bucket_region
-        except ClientError as e:
-            logger.error(f"Error getting bucket location for {bucket_name}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting bucket location for {bucket_name}: {e}")
-            return None
+            return self.s3_client.get_bucket_location(Bucket=bucket_name)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_bucket_policy(self, bucket_name: str) -> Optional[Dict[str, Any]]:
+    def get_bucket_policy(self, bucket_name: str) -> Mapping[str, Any]:
         """
-        Get the policy of an S3 bucket.
+        Get an S3 bucket's policy.
 
         Args:
-            bucket_name: Name of the S3 bucket
+            bucket_name: The bucket name.
 
         Returns:
-            Policy of the S3 bucket or None if not available
+            The ``GetBucketPolicy`` response on success, i.e. ``{"Policy": ...}``,
+            or the error result.
+
+            ``NoSuchBucketPolicy`` means the bucket has no policy, which is a real
+            answer and is declared in ``ConfigCheck.NOT_CONFIGURED_ERRORS``.
         """
         try:
-            logger.debug(f"Getting policy for bucket {bucket_name}")
-            response = self.s3_client.get_bucket_policy(Bucket=bucket_name)
-            policy = response.get('Policy')
-            logger.debug(f"Got policy for bucket {bucket_name}")
-            return policy
-        except ClientError as e:
-            logger.error(f"Error getting bucket policy for {bucket_name}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting bucket policy for {bucket_name}: {e}")
-            return None
+            return self.s3_client.get_bucket_policy(Bucket=bucket_name)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_delegated_administrators(self, service_principal: str = "config.amazonaws.com") -> List[Dict[str, Any]]:
+    def list_delegated_administrators(
+        self, service_principal: str = "config.amazonaws.com"
+    ) -> Mapping[str, Any]:
         """
-        List delegated administrators for a specific service principal.
+        List Organizations delegated administrators for a service principal.
 
         Args:
-            service_principal: Service principal to check for delegated administrators
+            service_principal: Service principal to check.
 
         Returns:
-            List of delegated administrators
+            ``{"DelegatedAdministrators": [...]}`` on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Listing delegated administrators for {service_principal} in {self.region}")
-            response = self.org_client.list_delegated_administrators(ServicePrincipal=service_principal)
-            delegated_admins = response.get('DelegatedAdministrators', [])
-            logger.debug(f"Found {len(delegated_admins)} delegated administrators for {service_principal}")
-            for admin in delegated_admins:
-                logger.debug(f"Delegated admin: {admin.get('Id')} - {admin.get('Name')}")
-            return delegated_admins
-        except ClientError as e:
-            logger.error(f"Error listing delegated administrators for {service_principal}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing delegated administrators: {e}")
-            return []
+            return self.org_client.list_delegated_administrators(
+                ServicePrincipal=service_principal
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

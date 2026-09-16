@@ -56,8 +56,9 @@ class SRA_ACCOUNT_03(AccountCheck):
         contact_info = self.get_alternate_contact(region, "OPERATIONS")
 
         if "Error" in contact_info:
+            error = contact_info["Error"]
             error_code = contact_info["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=f"account-{account_id}",
@@ -68,7 +69,10 @@ class SRA_ACCOUNT_03(AccountCheck):
                 yield self.error(
                     region=region,
                     resource_id=f"account-{account_id}",
-                    actual_value=contact_info["Error"].get("Message", "Unknown error"),
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
                     remediation="Check IAM permissions for Account Management API access",
                 )
         else:

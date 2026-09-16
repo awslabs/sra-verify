@@ -54,10 +54,14 @@ class SRA_AUDITMANAGER_01(AuditManagerCheck):
             status_response = self.get_account_status(region)
 
             if "Error" in status_response:
+                error = status_response["Error"]
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=status_response["Error"].get("Message", "Unknown error"),
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
                     remediation="Check IAM permissions for Audit Manager API access"
                 )
             else:

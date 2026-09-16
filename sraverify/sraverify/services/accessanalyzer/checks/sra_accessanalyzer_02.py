@@ -56,41 +56,55 @@ class SRA_ACCESSANALYZER_02(AccessAnalyzerCheck):
         """
         logger.debug(f"Executing {self.check_id} check for account {self.account_id}")
 
-        # Check for delegated administrator
-        try:
-            logger.debug("Checking for IAM Access Analyzer delegated administrator")
-            org_client = self.session.client('organizations')
-            response = org_client.list_delegated_administrators(
-                ServicePrincipal='access-analyzer.amazonaws.com'
-            )
+        # Reaches the shared accessor rather than session.client('organizations')
+        # directly. Before this the whole body sat in `except Exception:` whose
+        # handler yielded a **FAIL** naming the exception -- so a denied
+        # ListDelegatedAdministrators, an Organizations outage, and a genuinely
+        # absent delegated administrator all produced the same finding.
+        delegated_response = self.get_delegated_admin()
 
-            # Store in class-level cache
-            if response['DelegatedAdministrators']:
-                delegated_admin = response['DelegatedAdministrators'][0]
-                logger.debug(f"Found delegated administrator: {delegated_admin['Id']}")
-
-                yield self.passed(
-                    region="global",
-                    resource_id=delegated_admin['Id'],
-                    actual_value=f"IAM Access Analyzer delegated administrator configured: "
-                               f"Account {delegated_admin['Id']}",
-                )
-            else:
-                logger.debug("No delegated administrator found for IAM Access Analyzer")
+        if "Error" in delegated_response:
+            error = delegated_response['Error']
+            if self.is_not_configured(error):
                 yield self.failed(
                     region="global",
                     resource_id=f"organization/{self.account_id}",
-                    actual_value="No delegated administrator configured for IAM Access Analyzer",
-                    remediation="Configure a delegated administrator for IAM Access Analyzer using "
-                              "AWS Organizations",
+                    actual_value=(
+                        "No AWS Organization exists, so IAM Access Analyzer can "
+                        "have no delegated administrator"
+                    ),
                 )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
 
-        except Exception as e:
-            logger.error(f"Error checking delegated administrator: {e}")
+        delegated_admins = delegated_response.get('DelegatedAdministrators', [])
+
+        if delegated_admins:
+            delegated_admin = delegated_admins[0]
+            yield self.passed(
+                region="global",
+                resource_id=delegated_admin['Id'],
+                actual_value=(
+                    f"IAM Access Analyzer delegated administrator configured: "
+                    f"Account {delegated_admin['Id']}"
+                ),
+            )
+        else:
             yield self.failed(
                 region="global",
                 resource_id=f"organization/{self.account_id}",
-                actual_value=f"Error checking delegated administrator: {str(e)}",
-                remediation="Ensure proper permissions to check delegated administrators "
-                          "and that Organizations is enabled",
+                actual_value="No delegated administrator configured for IAM Access Analyzer",
+                remediation=(
+                    "Configure a delegated administrator for IAM Access Analyzer "
+                    "using AWS Organizations"
+                ),
             )

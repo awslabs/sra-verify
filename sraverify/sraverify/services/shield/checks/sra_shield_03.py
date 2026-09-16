@@ -56,8 +56,8 @@ class SRA_SHIELD_03(ShieldCheck):
         protections = self.list_protections(region)
 
         if "Error" in protections:
-            error_code = protections["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            error = protections["Error"]
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -68,8 +68,11 @@ class SRA_SHIELD_03(ShieldCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=protections["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Shield API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
         elif protections.get("Protections"):
             # Filter for CloudFront distributions by checking ResourceArn

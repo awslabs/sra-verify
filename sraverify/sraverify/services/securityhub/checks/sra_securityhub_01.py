@@ -65,22 +65,38 @@ class SRA_SECURITYHUB_01(SecurityHubCheck):
         # Check each region where Security Hub is available
         for region in self.regions:
             # Get enabled standards for the current account in this region
-            enabled_standards = self.get_enabled_standards(region)
+            standards_response = self.get_enabled_standards(region)
 
-            # If None is returned, Security Hub is not enabled
-            if enabled_standards is None:
-                yield self.failed(
-                    region=region,
-                    resource_id=f"securityhub:service/{self.account_id}",
-                    checked_value="Security Hub is enabled",
-                    actual_value=f"Security Hub is not enabled in region {region}",
-                    remediation=(
-                        "Enable Security Hub in this region. In the AWS console, navigate to Security Hub and enable the service. "
-                        "Alternatively, use the AWS CLI command: "
-                        f"aws securityhub enable-security-hub --region {region}"
-                    ),
-                )
+            # "Security Hub is not subscribed here" is an InvalidAccessException
+            # the discriminator recognizes; every other failure is an ERROR.
+            if "Error" in standards_response:
+                error = standards_response["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"securityhub:service/{self.account_id}",
+                        checked_value="Security Hub is enabled",
+                        actual_value=f"Security Hub is not enabled in region {region}",
+                        remediation=(
+                            "Enable Security Hub in this region. In the AWS console, navigate to Security Hub and enable the service. "
+                            "Alternatively, use the AWS CLI command: "
+                            f"aws securityhub enable-security-hub --region {region}"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"securityhub:service/{self.account_id}",
+                        checked_value="Security Hub is enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
+
+            enabled_standards = standards_response.get('StandardsSubscriptions', [])
 
             # Extract standard names for better reporting
             standard_names = []

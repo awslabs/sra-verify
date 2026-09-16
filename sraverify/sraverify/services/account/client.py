@@ -1,14 +1,23 @@
 """
-Account client for interacting with AWS Account Management service.
+Account client, for the alternate-contact settings.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+``ResourceNotFoundException`` means the alternate contact of that type is not
+set, which is what the three Account checks test for, and is declared in
+``AccountCheck.NOT_CONFIGURED_ERRORS``.
 """
-from typing import Dict, Optional, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+from typing import Any, Mapping, Optional
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class AccountClient:
-    """Client for interacting with AWS Account Management service."""
+class AccountClient(AWSClient):
+    """Client for interacting with the AWS Account service."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
@@ -16,40 +25,28 @@ class AccountClient:
 
         Args:
             region: AWS region name
-            ctx: The per-scan ``ScanContext`` used to obtain the underlying
-                boto3 client. The client is fetched via
-                ``ctx.get_client('account', region=region)`` so it picks up
-                the scan's bounded ``Client_Config`` and is shared across
-                checks in the same scan.
+            ctx: ScanContext for the current scan.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('account', region=region)
 
-    def get_alternate_contact(self, contact_type: str, account_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_alternate_contact(
+        self, contact_type: str, account_id: Optional[str] = None
+    ) -> Mapping[str, Any]:
         """
-        Get alternate contact information for the specified type.
+        Get an alternate contact.
 
         Args:
-            contact_type: Type of contact (BILLING, OPERATIONS, or SECURITY)
-            account_id: Optional account ID (defaults to current account)
+            contact_type: ``"SECURITY"``, ``"BILLING"`` or ``"OPERATIONS"``.
+            account_id: The account to read, for a management-account caller.
 
         Returns:
-            Dictionary containing contact details or error information
+            The ``GetAlternateContact`` response on success, or the error result.
         """
         try:
-            params = {"AlternateContactType": contact_type}
+            params: dict[str, Any] = {"AlternateContactType": contact_type}
             if account_id:
                 params["AccountId"] = account_id
-
             return self.client.get_alternate_contact(**params)
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = str(e)
-            logger.debug(f"Error getting {contact_type} alternate contact in {self.region}: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

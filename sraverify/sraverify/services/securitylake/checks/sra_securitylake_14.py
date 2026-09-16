@@ -58,7 +58,31 @@ class SRA_SECURITYLAKE_14(SecurityLakeCheck):
         resource_id = f"arn:aws:organizations::global:delegatedadministrator/securitylake"
 
         # Get delegated administrators using the base class method
-        delegated_admin = self.get_delegated_administrators(region)
+        delegated_response = self.get_delegated_administrators(region)
+
+        if "Error" in delegated_response:
+            error = delegated_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=resource_id,
+                    checked_value="Delegated administrator configured",
+                    actual_value="No AWS Organization exists, so Security Lake can have no delegated administrator",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=resource_id,
+                    checked_value="Delegated administrator configured",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        delegated_admin = delegated_response.get('DelegatedAdministrators', [])
 
         if not delegated_admin:
             yield self.failed(

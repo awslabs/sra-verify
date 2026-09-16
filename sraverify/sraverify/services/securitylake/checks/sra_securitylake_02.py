@@ -61,7 +61,31 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
             logger.debug(f"Checking if Security Lake SQS queues are encrypted with CMK in {region}")
 
             # Get subscribers for the region using the base class method
-            subscribers = self.get_subscribers(region)
+            subscribers_response = self.get_subscribers(region)
+
+            if "Error" in subscribers_response:
+                error = subscribers_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default",
+                        checked_value="All SQS queues encrypted with CMK",
+                        actual_value=f"No Security Lake data lake exists in {region}, so the control is not configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default",
+                        checked_value="All SQS queues encrypted with CMK",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            subscribers = subscribers_response.get('subscribers', [])
 
             # Find SQS queues
             sqs_queues = []
@@ -101,14 +125,48 @@ class SRA_SECURITYLAKE_02(SecurityLakeCheck):
 
             # Check encryption for each queue
             unencrypted_queues = []
+            # Queues whose encryption could not be read. Kept separate
+            # from the unencrypted list because 'we could not look' is
+            # not 'it is not encrypted'.
+            undetermined_queues = []
             for queue_name, queue_url in sqs_queues:
                 resource_id = f"arn:aws:sqs:{region}:{self.account_id}:{queue_name}"
 
                 # Check encryption using base class method
-                kms_key = self.get_sqs_queue_encryption(region, queue_url)
+                encryption_response = self.get_sqs_queue_encryption(
+                    region, queue_url
+                )
+                if "Error" in encryption_response:
+                    # A queue whose encryption could not be read is not evidence
+                    # that it is unencrypted, so it is not added to the
+                    # unencrypted list. The ERROR row below reports it.
+                    undetermined_queues.append(
+                        (queue_name, encryption_response["Error"])
+                    )
+                    continue
+
+                kms_key = encryption_response.get("Attributes", {}).get(
+                    "KmsMasterKeyId"
+                )
 
                 if not kms_key or kms_key.startswith("alias/aws/"):
                     unencrypted_queues.append((queue_name, queue_url))
+
+            if undetermined_queues:
+                first_error = undetermined_queues[0][1]
+                yield self.error(
+                    region=region,
+                    resource_id=(
+                        f"arn:aws:sqs:{region}:{self.account_id}:"
+                        f"{undetermined_queues[0][0]}"
+                    ),
+                    checked_value="All SQS queues encrypted with CMK",
+                    actual_value=(
+                        f"{first_error['Operation']} failed: "
+                        f"{first_error['Code']}: {first_error['Message']}"
+                    ),
+                    remediation=self._remediation_for(first_error),
+                )
 
             if unencrypted_queues:
                 # Use the first unencrypted queue for the resource ID

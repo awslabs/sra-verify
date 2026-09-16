@@ -62,14 +62,31 @@ class SRA_ORGANIZATIONS_05(OrganizationsCheck):
 
         # Check for errors
         if "Error" in response:
-            error_message = response["Error"].get("Message", "Unknown error")
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=f"Error: {error_message}",
-                remediation="Check IAM permissions for Organizations API access",
-                checked_value="Organization FeatureSet",
-            )
+            error = response["Error"]
+            if self.is_not_configured(error):
+                # A declared semantic pair: AWS answered and the control is
+                # absent. For Organizations that means either no organization
+                # exists, or the policy type is not enabled.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"AWS Organizations reports the control absent: "
+                        f"{error['Code']}"
+                    ),
+                    checked_value="Organization FeatureSet",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                    checked_value="Organization FeatureSet",
+                )
             return
 
         # Extract organization details

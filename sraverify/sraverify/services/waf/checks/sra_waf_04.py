@@ -3,8 +3,10 @@ Check if AppSync GraphQL APIs are associated with AWS WAF.
 """
 from collections.abc import Iterable
 
+from sraverify.core.availability import service_available_in_region
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
+from sraverify.core.logging import logger
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.waf.base import WAFCheck
 
@@ -54,14 +56,32 @@ class SRA_WAF_04(WAFCheck):
             One Finding per AppSync GraphQL API.
         """
         for region in self.regions:
+            # AppSync has an endpoint in 31 of the 34 commercial Regions. Where it has none
+            # there can be no GraphQL API left unprotected, so there is nothing to
+            # report: emit no row at all. A FAIL would assert a
+            # misconfiguration that cannot exist, and an ERROR would claim we
+            # were unable to look when in fact there was nothing to look at.
+            # This fact cannot be changed by an AWS call, so the guard precedes
+            # the call.
+            if not service_available_in_region("appsync", region):
+                logger.debug(
+                    f"WAF: AppSync has no endpoint in {region}; "
+                    f"{self.check_id} reports nothing for this Region"
+                )
+                continue
+
             graphql_apis_response = self.get_graphql_apis(region)
 
             if "Error" in graphql_apis_response:
+                error = graphql_apis_response["Error"]
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=graphql_apis_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for AppSync and WAF API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
                 continue
 
@@ -91,19 +111,30 @@ class SRA_WAF_04(WAFCheck):
                     )
                 else:
                     # Double-check using WAF API
-                    client = self.get_client(region)
-                    if not client:
-                        continue
-
-                    web_acl_response = client.get_web_acl_for_resource(api_arn)
+                    web_acl_response = self.get_web_acl_for_resource(region, api_arn)
 
                     if "Error" in web_acl_response:
-                        yield self.failed(
-                            region=region,
-                            resource_id=api_name or api_id,
-                            actual_value="No WAF Web ACL associated",
-                            remediation="Associate a WAF Web ACL with this AppSync GraphQL API using the AWS Console, CLI, or API"
-                        )
+                        error = web_acl_response["Error"]
+                        # WAFNonexistentItemException is the declared "this resource
+                        # has no associated Web ACL" answer, and the only code that
+                        # is; every other code is an inability to determine.
+                        if self.is_not_configured(error):
+                            yield self.failed(
+                                region=region,
+                                resource_id=api_name or api_id,
+                                actual_value="No WAF Web ACL associated",
+                                remediation="Associate a WAF Web ACL with this AppSync GraphQL API using the AWS Console, CLI, or API"
+                            )
+                        else:
+                            yield self.error(
+                                region=region,
+                                resource_id=api_name or api_id,
+                                actual_value=(
+                                    f"{error['Operation']} failed: {error['Code']}: "
+                                    f"{error['Message']}"
+                                ),
+                                remediation=self._remediation_for(error),
+                            )
                         continue
 
                     web_acl = web_acl_response.get("WebACL")

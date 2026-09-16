@@ -62,7 +62,31 @@ class SRA_SECURITYLAKE_01(SecurityLakeCheck):
             logger.debug(f"Checking if Security Lake is enabled for all organization accounts in {region}")
 
             # Get all organization accounts
-            org_accounts = self.get_organization_accounts(region)
+            accounts_response = self.get_organization_accounts(region)
+
+            if "Error" in accounts_response:
+                error = accounts_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default",
+                        checked_value="Security Lake enabled",
+                        actual_value="No AWS Organization exists, so it has no accounts to enrol in Security Lake",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default",
+                        checked_value="Security Lake enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            org_accounts = accounts_response.get('Accounts', [])
             if not org_accounts:
                 logger.debug("No organization accounts found, checking current account only")
                 org_accounts = [{'Id': self.account_id, 'Status': 'ACTIVE'}]
@@ -75,7 +99,43 @@ class SRA_SECURITYLAKE_01(SecurityLakeCheck):
 
             # Get accounts with Security Lake enabled
             enabled_accounts = set()
-            sources_data = self.get_data_lake_sources(region)  # No account_id = get all accounts
+            sources_response = self.get_data_lake_sources(region)
+
+            # This check emits one row per active organization account, so the
+            # failure has to fan out the same way. A single Region-level row would
+            # be an honest verdict at the wrong granularity: it collapses 13 rows
+            # into 1, and ResourceId is part of the row key a consumer diffs.
+            if "Error" in sources_response:
+                error = sources_response['Error']
+                semantic = self.is_not_configured(error)
+                for account_id in sorted(active_org_account_ids):
+                    resource_id = (
+                        f"arn:aws:securitylake:{region}:{account_id}:datalake/default"
+                    )
+                    if semantic:
+                        yield self.failed(
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="Security Lake enabled",
+                            actual_value=(
+                                f"No Security Lake data lake exists in {region}, "
+                                f"so it is not enabled for account {account_id}"
+                            ),
+                        )
+                    else:
+                        yield self.error(
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="Security Lake enabled",
+                            actual_value=(
+                                f"{error['Operation']} failed: {error['Code']}: "
+                                f"{error['Message']}"
+                            ),
+                            remediation=self._remediation_for(error),
+                        )
+                continue
+
+            sources_data = sources_response.get('dataLakeSources', [])
             for source in sources_data:
                 account_id = source.get('account')
                 if account_id:

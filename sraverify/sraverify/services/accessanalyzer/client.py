@@ -1,129 +1,76 @@
 """
-IAM Access Analyzer client for interacting with AWS IAM Access Analyzer service.
+IAM Access Analyzer client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
 """
-from typing import Dict, List, Any
+from typing import Any, Mapping
 
-from botocore.exceptions import ClientError, EndpointConnectionError
-
-from sraverify.core.logging import logger
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class AccessAnalyzerClient:
-    """Client for interacting with AWS IAM Access Analyzer service."""
+class AccessAnalyzerClient(AWSClient):
+    """Client for interacting with AWS IAM Access Analyzer."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
-        Initialize IAM Access Analyzer client for a specific region.
+        Initialize Access Analyzer client for a specific region.
 
         Args:
             region: AWS region name
-            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
-                ``Client_Config``, and per-scan boto3 client cache. Underlying
-                boto3 clients are obtained via ``ctx.get_client(...)`` so the
-                bounded timeouts and retry policy are applied and the same
-                client instance is reused across all wrappers in this scan.
+            ctx: ScanContext for the current scan; the underlying boto3 clients
+                are obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('accessanalyzer', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
-        logger.debug(f"Initialized AccessAnalyzerClient for region {region}")
 
-    def is_access_analyzer_available(self) -> bool:
-        """Check if Access Analyzer is available in the region."""
-        try:
-            logger.debug(f"Checking if Access Analyzer is available in {self.region}")
-            self.client.list_analyzers(maxResults=1)
-            logger.debug(f"Access Analyzer is available in {self.region}")
-            return True
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code == 'AccessDeniedException':
-                # If we get an access denied, the service exists but we don't have permissions
-                logger.debug(f"Access Analyzer exists in {self.region} but access is denied")
-                return True
-            logger.debug(f"Access Analyzer not available in {self.region}: {error_code}")
-            return False
-        except EndpointConnectionError:
-            # Service not available in this region
-            logger.debug(f"Access Analyzer endpoint not available in {self.region}")
-            return False
-        except Exception as e:
-            # Any other error, assume service is not available
-            logger.debug(f"Error checking Access Analyzer availability in {self.region}: {str(e)}")
-            return False
-
-    def list_analyzers(self) -> List[Dict[str, Any]]:
+    def list_analyzers(self) -> Mapping[str, Any]:
         """
-        List all analyzers in the region.
+        List the analyzers in this Region, with pagination.
 
         Returns:
-            List of analyzer details
+            ``{"analyzers": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
-            analyzers = []
-            paginator = self.client.get_paginator('list_analyzers')
-
-            logger.debug(f"Listing analyzers in {self.region}")
-            for page in paginator.paginate():
+            analyzers: list[Any] = []
+            for page in self.client.get_paginator('list_analyzers').paginate():
                 analyzers.extend(page.get('analyzers', []))
+            return {"analyzers": analyzers}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(analyzers)} analyzers in {self.region}")
-            return analyzers
-        except ClientError as e:
-            logger.warning(f"Error listing analyzers in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.warning(f"Unexpected error listing analyzers in {self.region}: {e}")
-            return []
-
-    def get_analyzer_details(self, analyzer_arn: str) -> Dict[str, Any]:
+    def get_analyzer_details(self, analyzer_arn: str) -> Mapping[str, Any]:
         """
-        Get details for a specific analyzer.
+        Get details for one analyzer.
 
         Args:
-            analyzer_arn: ARN of the analyzer
+            analyzer_arn: The analyzer ARN.
 
         Returns:
-            Analyzer details
+            The ``GetAnalyzer`` response on success, or the error result.
         """
         try:
-            logger.debug(f"Getting details for analyzer {analyzer_arn}")
-            response = self.client.get_analyzer(analyzerArn=analyzer_arn)
-            return response
-        except ClientError as e:
-            logger.warning(f"Error getting analyzer details for {analyzer_arn}: {e}")
-            return {}
-        except Exception as e:
-            logger.warning(f"Unexpected error getting analyzer details for {analyzer_arn}: {e}")
-            return {}
+            return self.client.get_analyzer(analyzerArn=analyzer_arn)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_delegated_admin(self) -> Dict[str, Any]:
+    def get_delegated_admin(self) -> Mapping[str, Any]:
         """
-        Get the delegated administrator for IAM Access Analyzer.
+        Get the Organizations delegated administrator for Access Analyzer.
 
         Returns:
-            Dictionary containing delegated administrator details or empty dict if none
+            ``{"DelegatedAdministrators": [...]}`` on success, or the error
+            result. The caller reads element ``[0]`` after the error test.
         """
         try:
-            logger.debug("Getting delegated administrator for IAM Access Analyzer")
-            response = self.org_client.list_delegated_administrators(ServicePrincipal='access-analyzer.amazonaws.com')
-            delegated_admins = response.get('DelegatedAdministrators', [])
-
-            if delegated_admins:
-                logger.debug(f"Found delegated administrator for IAM Access Analyzer: {delegated_admins[0].get('Id')}")
-                return delegated_admins[0]
-            else:
-                logger.debug("No delegated administrator found for IAM Access Analyzer")
-                return {}
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code == 'AWSOrganizationsNotInUseException':
-                logger.debug("AWS Organizations not in use")
-            else:
-                logger.warning(f"Error getting delegated administrator: {e}")
-            return {}
-        except Exception as e:
-            logger.warning(f"Unexpected error getting delegated administrator: {e}")
-            return {}
+            return self.org_client.list_delegated_administrators(
+                ServicePrincipal="access-analyzer.amazonaws.com"
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

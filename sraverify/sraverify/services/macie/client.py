@@ -1,242 +1,192 @@
 """
-Macie client for interacting with AWS Macie service.
+Macie client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+``macie2`` overloads ``AccessDeniedException``: it is returned both when Macie is
+**disabled** in a Region -- the control is genuinely absent -- and when the caller
+lacks the API permission, where the control simply could not be evaluated. Only
+the message separates them, and that judgement lives in
+``MacieCheck.NOT_CONFIGURED_ERRORS``, keyed by ``(operation, code)`` with a
+message needle. It is never made here: this tier does not have the operation
+context the decision needs.
 """
-from typing import Dict, List, Optional, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+from typing import Any, Mapping
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class MacieClient:
+class MacieClient(AWSClient):
     """Client for interacting with AWS Macie service."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize Macie client for a specific region.
 
+        Every boto3 client is acquired here rather than inside a method.
+        ``ctx.get_client`` is offline and deterministic, so it cannot fail in a
+        way that belongs in an error result; acquiring inside a method would put
+        a construction defect inside the ``try`` and convert it into a plausible
+        AWS failure.
+
         Args:
             region: AWS region name
-            ctx: ScanContext that owns the per-scan boto3 session, the
-                bounded ``Client_Config``, and the ``(service, region)``
-                client cache. Underlying boto3 clients are obtained via
-                ``ctx.get_client(...)`` so they are de-duplicated and share
-                the bounded timeout/retry settings (see Requirement 2.12).
+            ctx: ScanContext that owns the per-scan boto3 session, the bounded
+                ``Client_Config``, and the ``(service, region)`` client cache.
+                Underlying boto3 clients are obtained via ``ctx.get_client(...)``
+                so they are de-duplicated and share the bounded timeout/retry
+                settings (see Requirement 2.12).
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('macie2', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
+        # Global service; the wrapper's Region does not apply.
+        self.sts_client = ctx.get_client('sts')
 
-    def get_findings_publication_configuration(self) -> Dict[str, Any]:
+    def get_findings_publication_configuration(self) -> Mapping[str, Any]:
         """
         Get the findings publication configuration for Macie.
 
         Returns:
-            Dictionary containing findings publication configuration
+            The ``GetFindingsPublicationConfiguration`` response on success, or
+            the error result.
         """
         try:
-            logger.debug(f"Getting Macie findings publication configuration in {self.region}")
-            response = self.client.get_findings_publication_configuration()
-            logger.debug(f"Macie findings publication configuration in {self.region}: {response}")
-            return response
-        except ClientError as e:
-            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
-            error_message = str(e)
-            if error_code == 'AccessDeniedException' or 'Macie is not enabled' in error_message:
-                # If we get an access denied exception, it might be because Macie is not enabled
-                # in this region for this account
-                logger.debug(f"Access denied when getting Macie findings publication configuration in {self.region}. Macie might not be enabled in this region.")
-            else:
-                logger.debug(f"Error getting Macie findings publication configuration in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.debug(f"Unexpected error getting Macie findings publication configuration in {self.region}: {e}")
-            return {}
+            return self.client.get_findings_publication_configuration()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_classification_export_configuration(self) -> Dict[str, Any]:
+    def get_classification_export_configuration(self) -> Mapping[str, Any]:
         """
         Get the classification export configuration for Macie.
 
-        Returns either the raw API response on success or the standard client
-        error sentinel ``{"Error": {"Code": ..., "Message": ...}}`` on failure.
-
-        The sentinel is required rather than a bare ``{}``: Macie returns
-        ``AccessDeniedException`` both when Macie is disabled in the Region
-        (the control is genuinely absent -> FAIL) and when the member role
-        lacks ``macie2:GetClassificationExportConfiguration`` (the control
-        could not be evaluated -> ERROR). Collapsing both to ``{}`` makes the
-        two indistinguishable to the caller, which forced an undetermined
-        state to be reported as a definite FAIL. The code and message are
-        preserved verbatim so the check can make that judgement; see
-        ``MacieCheck.is_macie_disabled_error``.
-
         Returns:
-            Dictionary containing the classification export configuration, or
-            the error sentinel.
+            The ``GetClassificationExportConfiguration`` response on success, or
+            the error result.
+
+            One of the two reference implementations from ``bdad609``. It already
+            preserved the code and message; what it lacked was ``Operation``,
+            without which ``is_error`` rejects the value and
+            ``is_not_configured`` has nothing to key on.
         """
         try:
-            logger.debug(f"Getting Macie classification export configuration in {self.region}")
-            response = self.client.get_classification_export_configuration()
-            logger.debug(f"Macie classification export configuration in {self.region}: {response}")
-            return response
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(
-                f"Error getting Macie classification export configuration in "
-                f"{self.region}: {error_code}: {error_message}"
-            )
-            return {"Error": {"Code": error_code, "Message": error_message}}
-        except Exception as e:
-            logger.error(
-                f"Unexpected error getting Macie classification export configuration in "
-                f"{self.region}: {type(e).__name__}: {e}"
-            )
-            return {"Error": {"Code": type(e).__name__, "Message": str(e)}}
+            return self.client.get_classification_export_configuration()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_delegated_administrators(self, service_principal: str = "macie.amazonaws.com") -> List[Dict[str, Any]]:
+    def list_delegated_administrators(
+        self, service_principal: str = "macie.amazonaws.com"
+    ) -> Mapping[str, Any]:
         """
-        List delegated administrators for Macie.
+        List Organizations delegated administrators for a service principal.
 
         Args:
-            service_principal: Service principal to check for delegated administrators
+            service_principal: Service principal to check for delegated
+                administrators.
 
         Returns:
-            List of delegated administrators
+            ``{"DelegatedAdministrators": [...]}`` on success, or the error
+            result.
+
+            Note this reaches ``organizations``, not ``macie2``, so its errors are
+            Organizations errors -- ``AWSOrganizationsNotInUseException`` here
+            means no organization exists, which is a different fact from Macie
+            being disabled.
         """
         try:
-            logger.debug(f"Listing delegated administrators for {service_principal} in {self.region}")
-            response = self.org_client.list_delegated_administrators(ServicePrincipal=service_principal)
-            delegated_admins = response.get('DelegatedAdministrators', [])
-            logger.debug(f"Found {len(delegated_admins)} delegated administrators for {service_principal}")
-            for admin in delegated_admins:
-                logger.debug(f"Delegated admin: {admin.get('Id')} - {admin.get('Name')}")
-            return delegated_admins
-        except ClientError as e:
-            logger.error(f"Error listing delegated administrators for {service_principal}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing delegated administrators: {e}")
-            return []
+            return self.org_client.list_delegated_administrators(
+                ServicePrincipal=service_principal
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_members(self) -> List[Dict[str, Any]]:
+    def list_members(self) -> Mapping[str, Any]:
         """
         List Macie members.
 
         Returns:
-            List of Macie members
+            ``{"members": [...]}`` with every page merged, on success, or the
+            error result.
+
+            Lowercase ``members`` is the ``macie2`` response member name; the
+            key is the AWS one and is not normalized.
         """
         try:
-            logger.debug(f"Listing Macie members in {self.region}")
-            members = []
-            paginator = self.client.get_paginator('list_members')
-
-            for page in paginator.paginate():
+            members: list[Any] = []
+            for page in self.client.get_paginator('list_members').paginate():
                 members.extend(page.get('members', []))
+            return {"members": members}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(members)} Macie members in {self.region}")
-            return members
-        except ClientError as e:
-            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
-            error_message = str(e)
-            if error_code == 'AccessDeniedException' or 'Macie is not enabled' in error_message:
-                logger.debug(f"Access denied when listing Macie members in {self.region}. This is expected if the account is not a Macie admin account or Macie is not enabled.")
-            else:
-                logger.debug(f"Error listing Macie members in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.debug(f"Unexpected error listing Macie members in {self.region}: {e}")
-            return []
-
-    def list_organization_accounts(self) -> List[Dict[str, Any]]:
+    def list_organization_accounts(self) -> Mapping[str, Any]:
         """
         List all accounts in the AWS Organization.
 
         Returns:
-            List of accounts in the AWS Organization
+            ``{"Accounts": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
-            logger.debug(f"Listing AWS Organization accounts in {self.region}")
-            accounts = []
-            paginator = self.org_client.get_paginator('list_accounts')
-
-            for page in paginator.paginate():
+            accounts: list[Any] = []
+            for page in self.org_client.get_paginator('list_accounts').paginate():
                 accounts.extend(page.get('Accounts', []))
+            return {"Accounts": accounts}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(accounts)} AWS Organization accounts")
-            return accounts
-        except ClientError as e:
-            logger.error(f"Error listing AWS Organization accounts: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing AWS Organization accounts: {e}")
-            return []
-
-    def describe_organization_configuration(self) -> Dict[str, Any]:
+    def describe_organization_configuration(self) -> Mapping[str, Any]:
         """
         Describe the Macie organization configuration.
 
         Returns:
-            Dictionary containing Macie organization configuration
+            The ``DescribeOrganizationConfiguration`` response on success, or the
+            error result.
+
+            An ``AccessDeniedException`` whose message says "must be the Macie
+            administrator" is deliberately **not** declared in the discriminator
+            table: it means the scan was pointed at an account that is not the
+            Macie administrator, which is an ERROR about the scan rather than a
+            finding about Macie.
         """
         try:
-            logger.debug(f"Describing Macie organization configuration in {self.region}")
-            response = self.client.describe_organization_configuration()
-            logger.debug(f"Macie organization configuration in {self.region}: {response}")
-            return response
-        except ClientError as e:
-            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
-            error_message = str(e)
-            if error_code == 'AccessDeniedException' or 'Macie is not enabled' in error_message or 'must be the Macie administrator' in error_message:
-                logger.debug(f"Access denied when describing Macie organization configuration in {self.region}. This is expected if the account is not a Macie admin account or Macie is not enabled.")
-            else:
-                logger.debug(f"Error describing Macie organization configuration in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.debug(f"Unexpected error describing Macie organization configuration in {self.region}: {e}")
-            return {}
+            return self.client.describe_organization_configuration()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_account_id(self) -> Optional[str]:
+    def get_account_id(self) -> Mapping[str, Any]:
         """
         Get the current account ID.
 
         Returns:
-            Current account ID or None if not available
+            The ``GetCallerIdentity`` response on success, i.e.
+            ``{"Account": ..., "Arn": ..., "UserId": ...}``, or the error result.
+            The caller reads ``["Account"]`` after the error test.
         """
         try:
-            logger.debug(f"Getting current account ID in {self.region}")
-            sts_client = self.ctx.get_client("sts")
-            response = sts_client.get_caller_identity()
-            account_id = response["Account"]
-            logger.debug(f"Current account ID: {account_id}")
-            return account_id
-        except ClientError as e:
-            logger.error(f"Error getting current account ID: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting current account ID: {e}")
-            return None
+            return self.sts_client.get_caller_identity()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_administrator_account(self) -> Dict[str, Any]:
+    def get_administrator_account(self) -> Mapping[str, Any]:
         """
         Get the Macie administrator account.
 
         Returns:
-            Dictionary containing Macie administrator account information
+            The ``GetAdministratorAccount`` response on success, or the error
+            result.
+
+            ``ResourceNotFoundException`` and ``AccessDeniedException`` with a
+            "Macie is not enabled" message both mean the control is absent and
+            are declared in ``MacieCheck.NOT_CONFIGURED_ERRORS``. A bare
+            ``AccessDeniedException`` with any other message is a permission
+            failure and stays an ERROR.
         """
         try:
-            logger.debug(f"Getting Macie administrator account in {self.region}")
-            response = self.client.get_administrator_account()
-            logger.debug(f"Macie administrator account in {self.region}: {response}")
-            return response
-        except ClientError as e:
-            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
-            error_message = str(e)
-            if error_code == 'AccessDeniedException' or 'Macie is not enabled' in error_message:
-                logger.debug(f"Access denied when getting Macie administrator account in {self.region}. Macie might not be enabled in this region.")
-            else:
-                logger.debug(f"Error getting Macie administrator account in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.debug(f"Unexpected error getting Macie administrator account in {self.region}: {e}")
-            return {}
+            return self.client.get_administrator_account()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

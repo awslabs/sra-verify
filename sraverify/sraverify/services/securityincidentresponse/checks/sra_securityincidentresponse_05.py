@@ -59,8 +59,8 @@ class SRA_SECURITYINCIDENTRESPONSE_05(SecurityIncidentResponseCheck):
         response = self.get_role(role_name)
 
         if "Error" in response:
-            error_code = response["Error"].get("Code")
-            if error_code == "NoSuchEntity":
+            error = response["Error"]
+            if self.is_not_configured(error):
                 if is_management_account:
                     remediation = "Security Incident Response cannot automatically create the triage service linked role in the management account. Create it manually using: aws iam create-service-linked-role --aws-service-name triage.security-ir.amazonaws.com"
                 else:
@@ -76,7 +76,10 @@ class SRA_SECURITYINCIDENTRESPONSE_05(SecurityIncidentResponseCheck):
                 yield self.error(
                     region=region,
                     resource_id=f"arn:aws:iam::{self.account_id}:role/{role_name}",
-                    actual_value=response["Error"].get("Message", "Unknown error"),
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
                     remediation="Check IAM permissions for GetRole API access"
                 )
         else:

@@ -1,308 +1,243 @@
-"""Security Lake client for interacting with AWS Security Lake service."""
+"""
+Security Lake client.
 
-from typing import Dict, List, Any
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    ConnectTimeoutError,
-    EndpointConnectionError,
-    ReadTimeoutError,
-)
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+``get_delegated_admin`` and ``is_security_lake_enabled`` return whole responses
+rather than an extracted value or a ``bool``. A ``bool`` in particular has nowhere
+to carry an error, so the base class answers the predicate *after* the error test.
+
+No method here catches a typed ``self.client.exceptions.*`` code. Classifying a
+code is the check's decision, against ``SecurityLakeCheck.NOT_CONFIGURED_ERRORS``.
+"""
+from typing import Any, Mapping, Optional
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.logging import logger
 from sraverify.core.scan_context import ScanContext
 
 
-class SecurityLakeClient:
+class SecurityLakeClient(AWSClient):
     """Client for interacting with AWS Security Lake service."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
-        Initialize Security Lake client.
+        Initialize Security Lake client for a specific region.
 
         Args:
             region: AWS region name
-            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
-                ``Client_Config``, and per-scan boto3 client cache. Underlying
-                boto3 clients are obtained via ``ctx.get_client(...)`` so the
-                bounded timeouts and retry policy are applied and the same
-                client instance is reused across all wrappers in this scan.
+            ctx: ScanContext for the current scan; the underlying boto3 clients
+                are obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('securitylake', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
+        # Moved out of get_sqs_queue_encryption, which acquired it per call
+        # (Requirement 1.11).
+        self.sqs_client = ctx.get_client('sqs', region=region)
 
-    def _log_aws_failure(self, operation: str, e: Exception) -> None:
-        """Classify a botocore exception and log it at the right severity.
-
-        Centralizes the "is this an opt-in / unreachable region (debug),
-        a missing IAM permission (warning), or a real service issue (error)"
-        decision so every Security Lake API call site uses the same
-        contract:
-
-        * ``EndpointConnectionError`` / ``ConnectTimeoutError`` /
-          ``ReadTimeoutError`` / other ``BotoCoreError`` — the Security
-          Lake endpoint isn't reachable in this region (commonly an
-          opt-in region where Security Lake is unavailable, or a
-          transient network issue). Logged at debug.
-        * ``ClientError`` with ``UnauthorizedException`` — Security Lake
-          isn't enabled in this region/account. Routine for a
-          multi-region sweep, logged at debug.
-        * ``ClientError`` with ``AccessDeniedException`` — the calling
-          IAM principal is genuinely missing a Security Lake permission.
-          A security verification tool silently returning empty here
-          would produce false negatives, so this is logged at warning
-          to surface the misconfiguration to the operator.
-        * Any other ``ClientError`` — throttling, validation errors,
-          service issues. Logged at error.
-        * Any other ``Exception`` (defensive fallback) — logged at
-          error.
-
-        The caller is responsible for returning whatever empty value
-        (``[]``, ``{}``, ``None``, ``False``) is appropriate for the
-        method.
+    def is_security_lake_enabled(self) -> Mapping[str, Any]:
         """
-        if isinstance(e, (EndpointConnectionError, ConnectTimeoutError, ReadTimeoutError)):
-            logger.debug(
-                f"Security Lake endpoint unreachable in {self.region} during {operation}: {e}"
-            )
-        elif isinstance(e, ClientError):
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code == 'UnauthorizedException':
-                logger.debug(
-                    f"Security Lake not enabled in {self.region} ({operation}): {e}"
-                )
-            elif error_code == 'AccessDeniedException':
-                logger.warning(
-                    f"Access denied during {operation} in {self.region} "
-                    f"(scan results for SecurityLake checks in this region "
-                    f"will be incomplete): {e}"
-                )
-            else:
-                logger.error(f"Error during {operation} in {self.region}: {e}")
-        elif isinstance(e, BotoCoreError):
-            logger.debug(
-                f"Botocore error during {operation} in {self.region}: {e}"
-            )
-        else:
-            logger.error(f"Unexpected error during {operation} in {self.region}: {e}")
-
-    def is_security_lake_enabled(self):
-        """
-        Check if Security Lake is enabled in the region.
+        Return the ``ListDataLakes`` response, from which enablement is read.
 
         Returns:
-            True if enabled, False otherwise
+            ``{"dataLakes": [...]}`` on success, or the error result. The name is
+            historical -- eleven checks and four base helpers reach it -- but it
+            answers a response, not a ``bool``, because a ``bool`` has nowhere to
+            carry an error. ``SecurityLakeCheck`` answers the bool after testing
+            for ``"Error"``.
         """
         try:
-            response = self.client.list_data_lakes(regions=[self.region])
-            data_lakes = response.get('dataLakes', [])
-            return len(data_lakes) > 0
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure("checking Security Lake status", e)
-            return False
+            return self.client.list_data_lakes()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_organization_configuration(self):
+    def get_organization_configuration(self) -> Mapping[str, Any]:
         """
-        Get Security Lake organization configuration.
+        Get the Security Lake organization configuration.
 
         Returns:
-            Organization configuration or empty dict if error
+            The ``GetDataLakeOrganizationConfiguration`` response on success, or
+            the error result.
         """
         try:
-            response = self.client.get_data_lake_organization_configuration()
-            return response
-        except self.client.exceptions.ResourceNotFoundException:
-            logger.debug(f"No organization configuration found in region {self.region}")
-            return {}
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure("getting organization configuration", e)
-            return {}
+            return self.client.get_data_lake_organization_configuration()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_data_lakes(self):
+    def list_data_lakes(self) -> Mapping[str, Any]:
         """
-        List Security Lake data lakes.
+        List the Security Lake data lakes.
 
         Returns:
-            List of data lakes or empty list if error
+            ``{"dataLakes": [...]}`` on success, or the error result. The whole
+            response, not the extracted list.
         """
         try:
-            response = self.client.list_data_lakes(regions=[self.region])
-            return response.get("dataLakes", [])
-        except self.client.exceptions.ResourceNotFoundException:
-            logger.debug(f"No data lakes found in region {self.region}")
-            return []
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure("listing data lakes", e)
-            return []
+            return self.client.list_data_lakes()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_log_sources(self, regions=None, accounts=None):
+    def list_log_sources(
+        self, regions: Optional[list] = None, accounts: Optional[list] = None
+    ) -> Mapping[str, Any]:
         """
-        List enabled log sources with pagination support.
+        List enabled log sources, with pagination.
 
         Args:
-            regions: List of regions to filter (optional)
-            accounts: List of account IDs to filter (optional)
+            regions: Regions to filter by.
+            accounts: Account IDs to filter by.
 
         Returns:
-            List of log sources or empty list if error
+            ``{"sources": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
-            params = {}
+            params: dict[str, Any] = {}
             if regions:
                 params['regions'] = regions
             if accounts:
                 params['accounts'] = accounts
 
             response = self.client.list_log_sources(**params)
-            log_sources = response.get("sources", [])
-
-            # Handle pagination
+            sources = list(response.get("sources", []))
             while response.get('nextToken'):
                 params['nextToken'] = response['nextToken']
                 response = self.client.list_log_sources(**params)
-                log_sources.extend(response.get("sources", []))
+                sources.extend(response.get("sources", []))
+            return {"sources": sources}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            return log_sources
-        except self.client.exceptions.ResourceNotFoundException:
-            logger.debug(f"No log sources found in region {self.region}")
-            return []
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure("listing log sources", e)
-            return []
-
-    def list_subscribers(self):
+    def list_subscribers(self) -> Mapping[str, Any]:
         """
-        List Security Lake subscribers with pagination support.
+        List Security Lake subscribers, with pagination.
 
         Returns:
-            List of subscribers or empty list if error
+            ``{"subscribers": [...]}`` with every page merged, on success, or the
+            error result. An empty ``subscribers`` list is a real answer and stays
+            distinguishable from a denied ``ListSubscribers``, which is what
+            ``SRA-SECURITYLAKE-16``/``-17`` depend on.
         """
         try:
             response = self.client.list_subscribers()
-            subscribers = response.get("subscribers", [])
-
-            # Handle pagination
+            subscribers = list(response.get("subscribers", []))
             while response.get('nextToken'):
-                response = self.client.list_subscribers(nextToken=response['nextToken'])
+                response = self.client.list_subscribers(
+                    nextToken=response['nextToken']
+                )
                 subscribers.extend(response.get("subscribers", []))
+            return {"subscribers": subscribers}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            return subscribers
-        except self.client.exceptions.ResourceNotFoundException:
-            logger.debug(f"No subscribers found in region {self.region}")
-            return []
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure("listing subscribers", e)
-            return []
-
-    def get_delegated_admin(self):
+    def get_delegated_admin(self) -> Mapping[str, Any]:
         """
-        Get Security Lake delegated admin account.
+        Get the Organizations delegated administrator for Security Lake.
 
         Returns:
-            Delegated admin info or None if error
+            ``{"DelegatedAdministrators": [...]}`` on success, or the error
+            result. The caller reads element ``[0]`` after the error test.
         """
         try:
-            response = self.org_client.list_delegated_administrators(ServicePrincipal="securitylake.amazonaws.com")
-            admins = response.get("DelegatedAdministrators", [])
-            return admins[0] if admins else None
-        except ClientError as e:
-            logger.error(f"Error getting delegated admin: {e}")
-            return None
-
-    def list_delegated_administrators(self, service_principal: str = "securitylake.amazonaws.com") -> List[Dict[str, Any]]:
-        """
-        List delegated administrators for SecurityLake.
-
-        Args:
-            service_principal: Service principal to check for delegated administrators
-
-        Returns:
-            List of delegated administrators or empty list if error
-        """
-        try:
-            response = self.org_client.list_delegated_administrators(ServicePrincipal=service_principal)
-            delegated_admins = response.get("DelegatedAdministrators", [])
-
-            logger.debug(f"Found {len(delegated_admins)} delegated administrators for {service_principal}")
-            for admin in delegated_admins:
-                logger.debug(f"Delegated admin: {admin.get('Id')} - {admin.get('Name')}")
-            return delegated_admins
-        except ClientError as e:
-            logger.error(f"Error listing delegated administrators for {service_principal}: {e}")
-            return []
-
-    def get_sqs_queue_encryption(self, queue_url):
-        """
-        Get SQS queue encryption settings.
-
-        Args:
-            queue_url: SQS queue URL
-
-        Returns:
-            KMS key ID or None if error
-        """
-        try:
-            sqs = self.ctx.get_client('sqs', region=self.region)
-            response = sqs.get_queue_attributes(
-                QueueUrl=queue_url,
-                AttributeNames=["KmsMasterKeyId"]
+            return self.org_client.list_delegated_administrators(
+                ServicePrincipal="securitylake.amazonaws.com"
             )
-            return response.get("Attributes", {}).get("KmsMasterKeyId")
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure(f"getting SQS queue encryption for {queue_url}", e)
-            return None
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_organization_accounts(self) -> List[Dict[str, Any]]:
+    def list_delegated_administrators(
+        self, service_principal: str = "securitylake.amazonaws.com"
+    ) -> Mapping[str, Any]:
         """
-        List all accounts in the organization.
+        List Organizations delegated administrators for a service principal.
+
+        Args:
+            service_principal: Service principal to check.
 
         Returns:
-            List of organization accounts or empty list if error
+            ``{"DelegatedAdministrators": [...]}`` on success, or the error
+            result.
+        """
+        try:
+            return self.org_client.list_delegated_administrators(
+                ServicePrincipal=service_principal
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def get_sqs_queue_encryption(self, queue_url: str) -> Mapping[str, Any]:
+        """
+        Get the SQS queue attributes that carry its encryption setting.
+
+        Args:
+            queue_url: The queue URL.
+
+        Returns:
+            The ``GetQueueAttributes`` response on success, i.e.
+            ``{"Attributes": {...}}``, or the error result. The caller reads
+            ``Attributes.KmsMasterKeyId`` after the error test.
+        """
+        try:
+            return self.sqs_client.get_queue_attributes(
+                QueueUrl=queue_url, AttributeNames=["KmsMasterKeyId"]
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_organization_accounts(self) -> Mapping[str, Any]:
+        """
+        List all accounts in the AWS Organization, with pagination.
+
+        Returns:
+            ``{"Accounts": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
             response = self.org_client.list_accounts()
-            accounts = response.get('Accounts', [])
-
-            # Handle pagination
+            accounts = list(response.get('Accounts', []))
             while response.get('NextToken'):
-                response = self.org_client.list_accounts(NextToken=response['NextToken'])
+                response = self.org_client.list_accounts(
+                    NextToken=response['NextToken']
+                )
                 accounts.extend(response.get('Accounts', []))
+            return {"Accounts": accounts}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(accounts)} organization accounts")
-            return accounts
-        except ClientError as e:
-            logger.error(f"Error listing organization accounts: {e}")
-            return []
-
-    def get_data_lake_sources(self, account_id: str = None):
+    def get_data_lake_sources(
+        self, account_id: Optional[str] = None
+    ) -> Mapping[str, Any]:
         """
-        Get data lake sources for a specific account.
+        Get data lake sources, optionally for one account.
 
         Args:
-            account_id: AWS account ID string to check sources for
+            account_id: An account ID to filter by. A ``dict`` carrying an ``Id``
+                member is also accepted, for the caller that passes an
+                Organizations account record straight through.
 
         Returns:
-            List of data lake sources or empty list if error
+            ``{"dataLakeSources": [...]}`` on success, or the error result.
         """
+        request_body: dict[str, Any] = {}
+        if account_id:
+            if isinstance(account_id, dict):
+                # Left in place: one caller passes an Organizations account record.
+                # Note this branch is *outside* the try, because a dict with no
+                # 'Id' is a programming defect in the caller, not an AWS outcome.
+                if 'Id' not in account_id:
+                    raise KeyError(
+                        f"get_data_lake_sources: account_id dict has no 'Id': "
+                        f"{account_id!r}"
+                    )
+                account_id = account_id['Id']
+            request_body["accounts"] = [account_id]
+
         try:
-            request_body = {}
-            if account_id:
-                # Ensure account_id is a string (extract ID if it's a dict like SecurityHub pattern)
-                if isinstance(account_id, dict):
-                    if 'Id' in account_id:
-                        account_id = account_id['Id']
-                    else:
-                        logger.error(f"Cannot extract account ID from dict: {account_id}")
-                        return []
-
-                request_body["accounts"] = [account_id]
-
-            response = self.client.get_data_lake_sources(**request_body)
-            return response.get("dataLakeSources", [])
-        except self.client.exceptions.ResourceNotFoundException:
-            logger.debug(f"No data lake sources found in region {self.region}")
-            return []
-        except (BotoCoreError, ClientError) as e:
-            self._log_aws_failure("getting data lake sources", e)
-            return []
+            return self.client.get_data_lake_sources(**request_body)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

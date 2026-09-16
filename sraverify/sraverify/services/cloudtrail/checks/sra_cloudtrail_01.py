@@ -55,7 +55,29 @@ class SRA_CLOUDTRAIL_01(CloudTrailCheck):
         """
         # Get all trails using the base class method
         # This will use the cache if available or make API calls if needed
-        all_trails = self.describe_trails()
+        trails_response = self.describe_trails()
+
+        if "Error" in trails_response:
+            error = trails_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value="No CloudTrail trail exists for this account, so no organization trail is configured",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        all_trails = trails_response.get('trailList', [])
 
         # Filter for organization trails
         org_trails = [

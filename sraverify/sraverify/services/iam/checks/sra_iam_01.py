@@ -75,16 +75,15 @@ class SRA_IAM_01(IAMCheck):
 
         # Error path: a single ERROR finding, no PASS or FAIL findings.
         if "Error" in response:
-            message = response["Error"].get("Message") or ""
-            actual_value = message[:1000] if message else "Unknown error"
+            error = response["Error"]
             yield self.error(
                 region=region,
                 resource_id=self.account_id,
-                actual_value=actual_value,
-                remediation=(
-                    "Verify the execution role has the iam:ListUsers "
-                    "permission attached."
+                actual_value=(
+                    f"{error['Operation']} failed: {error['Code']}: "
+                    f"{error['Message']}"
                 ),
+                remediation=self._remediation_for(error),
             )
             return
 

@@ -73,11 +73,12 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
 
         # Check for errors
         if "Error" in response:
+            error = response["Error"]
             error_code = response["Error"].get("Code", "")
             error_message = response["Error"].get("Message", "Unknown error")
 
             # PolicyTypeNotEnabledException means RCPs are not enabled
-            if error_code == "PolicyTypeNotEnabledException":
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=org_id,
@@ -93,7 +94,10 @@ class SRA_ORGANIZATIONS_07(OrganizationsCheck):
                 yield self.error(
                     region=region,
                     resource_id=org_id,
-                    actual_value=f"Error: {error_message}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
                     remediation="Check IAM permissions for Organizations API access",
                     checked_value="RCPs configured",
                 )

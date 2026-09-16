@@ -50,12 +50,25 @@ class SRA_SECURITYINCIDENTRESPONSE_02(SecurityIncidentResponseCheck):
         response = self.list_memberships()
 
         if "Error" in response:
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=response["Error"].get("Message", "Unknown error"),
-                remediation="Check IAM permissions for Security Incident Response API access"
-            )
+            error = response["Error"]
+            if self.is_not_configured(error):
+                # AWS reported the membership absent, which is the same finding as
+                # the empty items list below.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value="No Security Incident Response membership exists",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation="Check IAM permissions for Security Incident Response API access"
+                )
             return
 
         memberships = response.get("items", [])

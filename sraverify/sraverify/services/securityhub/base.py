@@ -1,61 +1,130 @@
 """
-Base class for SecurityHub security checks.
+Base class for Security Hub security checks.
 
-Migrated to the per-scan ``ScanContext`` (task 8.5 of scan-context-refactor):
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"securityhub"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
 
-* The seven class-level cache dicts (``_enabled_standards_cache``,
-  ``_admin_account_cache``, ``_organization_configuration_cache``,
-  ``_product_integrations_cache``, ``_delegated_admin_cache``,
-  ``_organization_accounts_cache``, ``_securityhub_members_cache``) are
-  removed. Cached AWS responses live on ``self._ctx`` under the
-  ``"securityhub"`` namespace via the namespaced primitives
-  ``_has`` / ``_get`` / ``_set`` (Requirement 5.5, 5.18).
-* ``_setup_clients`` constructs ``SecurityHubClient(region, ctx=self._ctx)``
-  per region; the underlying boto3 clients are obtained from
-  ``ctx.get_client(...)`` so the bounded ``Client_Config`` is applied and
-  the same ``(service, region)`` boto3 instance is reused across the scan.
-* Cache keys are scoped to the typed method that wrote them (e.g.
-  ``"enabled_standards:{region}"``) so the two methods that historically
-  shared ``_admin_account_cache`` (``get_administrator_account`` and
-  ``get_organization_admin_accounts``) no longer collide.
-* Today's session-region prefix on the cache key (e.g.
-  ``f"{self.session.region_name}:..."``) is dropped per the design's
-  "Cache key conventions": the per-scan ctx already scopes the cache to a
-  single session.
+Cache keys are scoped to the typed method that wrote them (e.g.
+``"enabled_standards:{region}"``), so :meth:`get_administrator_account` and
+:meth:`get_organization_admin_accounts` cannot collide. The eight accessors share
+one implementation, :meth:`_cached_call`.
 
-Cross-service cache sharing (task 9.1 of scan-context-refactor):
-
-* :meth:`SecurityHubCheck.get_organization` reads from and writes to the
-  ``"organizations"`` namespace under the cache key ``"organization"`` —
-  the same key shape ``OrganizationsCheck.get_organization`` uses — so a
-  later ``OrganizationsCheck`` call in the same scan picks up the value
-  without re-issuing ``organizations:DescribeOrganization``, and
-  vice-versa (Requirements 6.1, 6.2). Individual SecurityHub check classes
-  call this typed method rather than touching the namespaced primitives
-  directly (Requirement 6.3).
-
-Requirements: 5.5, 5.18, 6.1, 6.2, 6.3.
+:meth:`get_organization` deliberately reads and writes the **shared**
+``"organizations"`` namespace under the key ``"organization"``, the same shape
+``OrganizationsCheck.get_organization`` uses, so either service populates it for
+the other and one scan issues ``DescribeOrganization`` once.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, Mapping, Optional
 
-from botocore.exceptions import ClientError
-
+from sraverify.core.aws_client import AWS_EXCEPTIONS
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    error_result,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
 from sraverify.services.securityhub.client import SecurityHubClient
 
+#: Evidence for the overloaded ``InvalidAccessException``.
+_NOT_SUBSCRIBED_EVIDENCE = (
+    "securityhub returns InvalidAccessException both when the account is not "
+    "subscribed to Security Hub in the Region -- the control is genuinely absent "
+    "-- and for other access problems, so the code alone cannot classify it. The "
+    "message 'not subscribed to AWS Security Hub' separates them and is declared "
+    "here as a needle. Observed in the 2026-09-12 CodeBuild log; the pair was "
+    "already special-cased by hand in SecurityHubClient.get_enabled_standards "
+    "and list_enabled_products_for_import before this migration, which is where "
+    "the message string comes from. "
+    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/CommonErrors.html"
+)
+
 
 class SecurityHubCheck(SecurityCheck):
-    """Base class for all SecurityHub security checks.
-
-    Per-scan cached AWS responses live on the attached :class:`ScanContext`
-    under the ``"securityhub"`` namespace. Individual SecurityHub check
-    classes never see the namespaced primitives directly: they call the
-    typed methods on this base class, which is the only thing that touches
-    ``self._ctx._has`` / ``_get`` / ``_set`` (Requirement 6.3).
-    """
+    """Base class for all SecurityHub security checks."""
 
     NAMESPACE = "securityhub"
+
+    #: The ``(operation, code)`` pairs that mean "the control is not configured"
+    #: for Security Hub.
+    #:
+    #: One code, six operations, and a message needle on every entry, because
+    #: ``InvalidAccessException`` is overloaded. Without the needle this table
+    #: would turn every Security Hub permission denial into a fabricated FAIL.
+    #:
+    #: The two Organizations operations this service also calls --
+    #: ``ListDelegatedAdministrators`` and ``ListAccounts`` -- are deliberately
+    #: absent. Their errors are Organizations errors: an
+    #: ``AWSOrganizationsNotInUseException`` there means no organization exists,
+    #: which is a different fact from Security Hub not being subscribed, and a
+    #: table keyed only by code could not have told them apart.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetEnabledStandards": {
+            "InvalidAccessException": NotConfigured(
+                evidence=_NOT_SUBSCRIBED_EVIDENCE,
+                message="not subscribed to aws security hub",
+            ),
+        },
+        "ListEnabledProductsForImport": {
+            "InvalidAccessException": NotConfigured(
+                evidence=_NOT_SUBSCRIBED_EVIDENCE,
+                message="not subscribed to aws security hub",
+            ),
+        },
+        "GetAdministratorAccount": {
+            "InvalidAccessException": NotConfigured(
+                evidence=_NOT_SUBSCRIBED_EVIDENCE,
+                message="not subscribed to aws security hub",
+            ),
+        },
+        "DescribeOrganizationConfiguration": {
+            "InvalidAccessException": NotConfigured(
+                evidence=_NOT_SUBSCRIBED_EVIDENCE,
+                message="not subscribed to aws security hub",
+            ),
+        },
+        "ListMembers": {
+            "InvalidAccessException": NotConfigured(
+                evidence=_NOT_SUBSCRIBED_EVIDENCE,
+                message="not subscribed to aws security hub",
+            ),
+            # This entry is why SRA-SECURITYHUB-09 FAILs rather than PASSes in
+            # a Region where Security Hub is not enabled: "no member accounts
+            # found" is only a pass when the question could be asked.
+            "BadRequestException": NotConfigured(
+                evidence=(
+                    "securityhub:ListMembers answers BadRequestException 'The "
+                    "request is rejected since no such resource found.' when no "
+                    "hub exists in the Region -- the missing resource is the hub "
+                    "itself, so the control is absent rather than undetermined. "
+                    "Verified directly on 2026-09-15 in a controlled account: "
+                    "DescribeHub returns InvalidAccessException in us-east-2 and "
+                    "us-west-1 and succeeds in us-east-1 and us-west-2, and "
+                    "ListMembers returns exactly this BadRequestException in the "
+                    "same two Regions and succeeds in the other two. The needle is "
+                    "required because securityhub also returns BadRequestException "
+                    "for an invalid or out-of-range input parameter, which is a "
+                    "defect in the caller and must stay an ERROR. "
+                    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "CommonErrors.html"
+                ),
+                message="no such resource found",
+            ),
+        },
+        "ListOrganizationAdminAccounts": {
+            "InvalidAccessException": NotConfigured(
+                evidence=_NOT_SUBSCRIBED_EVIDENCE,
+                message="not subscribed to aws security hub",
+            ),
+        },
+    }
+
+    # The shared cross-service cache slot for organizations:DescribeOrganization.
+    _ORGANIZATIONS_NAMESPACE = "organizations"
+    _ORGANIZATION_CACHE_KEY = "organization"
 
     def _setup_clients(self):
         """Set up SecurityHub clients for each region.
@@ -63,12 +132,10 @@ class SecurityHubCheck(SecurityCheck):
         Constructs one ``SecurityHubClient`` wrapper per region in
         ``self.regions``. Each wrapper obtains its underlying boto3
         ``securityhub`` and ``organizations`` clients from
-        ``self._ctx.get_client(...)``, so the per-scan ``Client_Config``
-        and per-scan boto3 client cache are applied.
+        ``self._ctx.get_client(...)``, so the per-scan ``Client_Config`` and
+        per-scan boto3 client cache are applied.
         """
-        # Clear existing clients
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = SecurityHubClient(region, ctx=self._ctx)
@@ -85,359 +152,193 @@ class SecurityHubCheck(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def get_enabled_standards(self, region: str) -> Optional[List[Dict[str, Any]]]:
+    def _cached_call(
+        self, region: str, cache_key: str, method: str, *args: Any
+    ) -> Mapping[str, Any]:
         """
-        Get enabled Security Hub standards for a region with caching.
+        Run one client method for a Region through the accessor shape.
+
+        The eight public accessors below differ only in cache key and client
+        method, so the shape is written once.
+
+        Args:
+            region: AWS region name.
+            cache_key: Key within the ``"securityhub"`` namespace.
+            method: Name of the :class:`SecurityHubClient` method to call.
+            *args: Positional arguments for that method.
+
+        Returns:
+            The cached or freshly fetched response dict, or an error result.
+        """
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug(f"SecurityHub: Using cached {cache_key}")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(
+                f"SecurityHub: No client available for region {region}"
+            )
+            return no_client_result(service="SecurityHub", region=region)
+
+        logger.debug(f"SecurityHub: Fetching {cache_key}")
+        result = getattr(client, method)(*args)
+
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
+
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
+
+    def get_enabled_standards(self, region: str) -> Mapping[str, Any]:
+        """
+        Get enabled Security Hub standards for a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of enabled standards, or ``None`` when Security Hub is not
-            enabled in the given region (preserves the pre-refactor
-            behavior used by callers to detect the disabled state).
+            ``{"StandardsSubscriptions": [...]}`` on success, or an error result.
+            "Security Hub is not subscribed here" arrives as an
+            ``InvalidAccessException`` that ``self.is_not_configured(error)``
+            recognizes, which distinguishes it from a denied permission.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        return self._cached_call(
+            region, f"enabled_standards:{region}", "get_enabled_standards"
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"enabled_standards:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached enabled standards for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return []
-
-        try:
-            # Get enabled standards from client
-            standards = client.get_enabled_standards()
-
-            # If standards is None (Security Hub not enabled), don't cache
-            # the negative — preserves today's behavior of letting callers
-            # observe the not-enabled state on every call.
-            if standards is None:
-                logger.debug(f"Security Hub is not enabled in region {region}")
-                return None
-
-            # Cache the results under the securityhub namespace.
-            self._ctx._set(self.NAMESPACE, cache_key, standards)
-            logger.debug(f"Cached {len(standards)} enabled standards for {cache_key}")
-
-            return standards
-        except Exception as e:
-            # Check if this is the "not subscribed to AWS Security Hub" error
-            if hasattr(e, 'response') and isinstance(e.response, dict):
-                error = e.response.get('Error', {})
-                if error.get('Code') == 'InvalidAccessException' and 'not subscribed to AWS Security Hub' in error.get('Message', ''):
-                    # Return None specifically for this error to indicate Security Hub is not enabled
-                    # Don't log this as an error since it's an expected condition we want to check for
-                    logger.debug(f"Security Hub is not enabled in region {region}")
-                    return None
-
-            # For other errors, log a warning instead of an error to avoid cluttering the build logs
-            logger.warning(f"Error getting enabled standards in {region}: {e}")
-            return []
-
-    def get_administrator_account(self, region: str) -> Dict[str, Any]:
+    def get_administrator_account(self, region: str) -> Mapping[str, Any]:
         """
-        Get Security Hub administrator account with caching.
+        Get the Security Hub administrator account, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Administrator account information
+            The ``GetAdministratorAccount`` response, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return {}
+        return self._cached_call(
+            region, f"administrator_account:{region}", "get_administrator_account"
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"administrator_account:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached administrator account for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return {}
-
-        # Get administrator account from client
-        admin_account = client.get_administrator_account()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, admin_account)
-        logger.debug(f"Cached administrator account for {cache_key}")
-
-        return admin_account
-
-    def get_organization_configuration(self, region: str) -> Dict[str, Any]:
+    def get_organization_configuration(self, region: str) -> Mapping[str, Any]:
         """
-        Get Security Hub organization configuration with caching.
+        Get the Security Hub organization configuration, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Organization configuration
+            The ``DescribeOrganizationConfiguration`` response, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return {}
+        return self._cached_call(
+            region,
+            f"organization_configuration:{region}",
+            "describe_organization_configuration",
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"organization_configuration:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached organization configuration for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return {}
-
-        # Get organization configuration from client
-        org_config = client.describe_organization_configuration()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, org_config)
-        logger.debug(f"Cached organization configuration for {cache_key}")
-
-        return org_config
-
-    def get_enabled_products_for_import(self, region: str) -> Optional[List[str]]:
+    def get_enabled_products_for_import(self, region: str) -> Mapping[str, Any]:
         """
-        Get enabled products for import with caching.
+        Get enabled product integrations for a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of enabled product ARNs, or ``None`` if Security Hub is
-            not enabled in the given region.
+            ``{"ProductSubscriptions": [...]}`` on success, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        return self._cached_call(
+            region,
+            f"product_integrations:{region}",
+            "list_enabled_products_for_import",
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"product_integrations:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached product integrations for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return []
-
-        # Get enabled products from client
-        products = client.list_enabled_products_for_import()
-
-        # Only cache if we got a valid response (not None) — preserves
-        # today's behavior of not caching the not-enabled signal.
-        if products is not None:
-            self._ctx._set(self.NAMESPACE, cache_key, products)
-            logger.debug(f"Cached {len(products)} product integrations for {cache_key}")
-
-        return products
-
-    def get_delegated_administrators(self, region: str) -> List[Dict[str, Any]]:
+    def get_delegated_administrators(self, region: str) -> Mapping[str, Any]:
         """
-        Get SecurityHub delegated administrators with caching.
+        Get the Organizations delegated administrators for Security Hub, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of delegated administrators
+            ``{"DelegatedAdministrators": [...]}`` on success, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        return self._cached_call(
+            region, f"delegated_admin:{region}", "list_delegated_administrators"
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"delegated_admin:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached delegated administrators for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return []
-
-        # Get delegated administrators from client
-        delegated_admins = client.list_delegated_administrators()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, delegated_admins)
-        logger.debug(f"Cached {len(delegated_admins)} delegated administrators for {cache_key}")
-
-        return delegated_admins
-
-    def get_organization_admin_accounts(self, region: str) -> List[Dict[str, Any]]:
+    def get_organization_admin_accounts(self, region: str) -> Mapping[str, Any]:
         """
-        Get Security Hub organization admin accounts with caching.
+        Get the Security Hub organization admin accounts, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of organization admin accounts
+            ``{"AdminAccounts": [...]}`` on success, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        return self._cached_call(
+            region,
+            f"organization_admin_accounts:{region}",
+            "list_organization_admin_accounts",
+        )
 
-        # Check ctx-backed cache first (securityhub namespace). This used to
-        # share ``_admin_account_cache`` with ``get_administrator_account``,
-        # which was a latent collision; the migration uses a distinct cache
-        # key to avoid that.
-        cache_key = f"organization_admin_accounts:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached organization admin accounts for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return []
-
-        # Get organization admin accounts from client
-        admin_accounts = client.list_organization_admin_accounts()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, admin_accounts)
-        logger.debug(f"Cached {len(admin_accounts)} organization admin accounts for {cache_key}")
-
-        return admin_accounts
-
-    def get_organization_accounts(self, region: str) -> List[Dict[str, Any]]:
+    def get_organization_accounts(self, region: str) -> Mapping[str, Any]:
         """
-        Get all organization accounts with caching.
+        Get every account in the AWS Organization, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of organization accounts
+            ``{"Accounts": [...]}`` on success, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        return self._cached_call(
+            region, f"organization_accounts:{region}", "list_organization_accounts"
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"organization_accounts:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached organization accounts for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return []
-
-        # Get organization accounts from client
-        accounts = client.list_organization_accounts()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, accounts)
-        logger.debug(f"Cached {len(accounts)} organization accounts for {cache_key}")
-
-        return accounts
-
-    def get_security_hub_members(self, region: str) -> List[Dict[str, Any]]:
+    def get_security_hub_members(self, region: str) -> Mapping[str, Any]:
         """
-        Get Security Hub member accounts with caching.
+        Get Security Hub member accounts, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of Security Hub member accounts
+            ``{"Members": [...]}`` on success, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        return self._cached_call(
+            region, f"securityhub_members:{region}", "list_members"
+        )
 
-        # Check ctx-backed cache first (securityhub namespace).
-        cache_key = f"securityhub_members:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Security Hub members for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No SecurityHub client available for region {region}")
-            return []
-
-        # Get Security Hub members from client
-        members = client.list_members()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, members)
-        logger.debug(f"Cached {len(members)} Security Hub members for {cache_key}")
-
-        return members
-
-    # ------------------------------------------------------------------ #
-    # Cross-service cache sharing.
-    #
-    # The Organizations ``DescribeOrganization`` response is useful to
-    # several SecurityHub checks (e.g., to determine whether the current
-    # account is the organization management account). Rather than
-    # re-fetching it independently, SecurityHub reads from and writes to
-    # the same cache slot that ``OrganizationsCheck.get_organization``
-    # uses: namespace ``"organizations"``, cache key ``"organization"``.
-    # Whichever service base class runs first populates the cache, and
-    # the other reads the value back without issuing a second AWS call.
-    # ------------------------------------------------------------------ #
-
-    # Namespace and cache key shape used by ``OrganizationsCheck`` for
-    # ``DescribeOrganization``. Kept as constants here so the cross-service
-    # contract is explicit and grep-able.
-    _ORGANIZATIONS_NAMESPACE = "organizations"
-    _ORGANIZATION_CACHE_KEY = "organization"
-
-    def get_organization(self) -> Dict[str, Any]:
+    def get_organization(self) -> Mapping[str, Any]:
         """Return the AWS Organizations ``DescribeOrganization`` response.
 
-        Reads from and writes to the ``"organizations"`` namespace under
-        the cache key ``"organization"`` — the same key shape
+        Reads from and writes to the ``"organizations"`` namespace under the key
+        ``"organization"`` -- the same shape
         :meth:`sraverify.services.organizations.base.OrganizationsCheck.get_organization`
-        uses — so a later ``OrganizationsCheck`` call in the same scan
-        picks up the value without re-issuing
-        ``organizations:DescribeOrganization``, and vice-versa
-        (Requirements 6.1, 6.2).
+        uses -- so a later ``OrganizationsCheck`` call in the same scan picks up
+        the value without re-issuing ``organizations:DescribeOrganization``, and
+        vice-versa.
 
-        On a cache miss, the underlying boto3 ``organizations`` client is
-        obtained from ``self._ctx.get_client('organizations', region='us-east-1')``
-        — Organizations is a global service and ``OrganizationsClient``
-        also pins to ``us-east-1``, so both code paths populate the cache
-        with a value produced by the same boto3 client instance. The
-        return shape mirrors ``OrganizationsClient.describe_organization``:
-        the raw ``describe_organization`` response on success, or a dict
-        with an ``Error`` key (``Code``, ``Message``) on failure.
+        This is the one accessor here that issues its own boto3 call rather than
+        going through :class:`SecurityHubClient`, because the response belongs to
+        another service and ``SecurityHubClient`` has no method for it. A failure
+        is emphatically **not** cached: the namespace is shared, so a cached error
+        would be replayed to every later Organizations check as well as every
+        later Security Hub one.
+
+        Organizations is a global service, so the client is pinned to
+        ``us-east-1`` to match ``OrganizationsClient`` and populate the shared
+        slot with a value from the same boto3 instance.
 
         Returns:
-            Dictionary containing organization details, or a dict with an
-            ``Error`` key if the AWS call failed.
+            The ``DescribeOrganization`` response, or an error result.
         """
-        if self._ctx._has(self._ORGANIZATIONS_NAMESPACE, self._ORGANIZATION_CACHE_KEY):
+        if self._ctx._has(
+            self._ORGANIZATIONS_NAMESPACE, self._ORGANIZATION_CACHE_KEY
+        ):
             logger.debug(
                 "SecurityHub: Using cached organization details from "
                 "'organizations' namespace"
@@ -450,25 +351,26 @@ class SecurityHubCheck(SecurityCheck):
             "SecurityHub: Fetching organization details and writing to "
             "shared 'organizations' namespace"
         )
-
-        # Organizations is a global service; pin to us-east-1 to match
-        # ``OrganizationsClient`` so both paths populate the same cache
-        # with a value produced by the same underlying boto3 client.
         org_client = self._ctx.get_client('organizations', region='us-east-1')
         try:
             response = org_client.describe_organization()
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
+        except AWS_EXCEPTIONS as e:
+            code = getattr(e, "response", {}).get("Error", {}).get(
+                "Code"
+            ) or type(e).__name__
+            message = getattr(e, "response", {}).get("Error", {}).get(
+                "Message"
+            ) or str(e)
             logger.error(
-                f"SecurityHub: Error describing organization: {error_message}"
+                f"aws_call_failed operation=DescribeOrganization "
+                f"region={self.regions[0] if self.regions else 'global'} "
+                f"code={code} message={message!r}"
             )
-            response = {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message,
-                }
-            }
+            # Not cached: the shared namespace makes a cached failure reachable
+            # from two services.
+            return error_result(
+                code=code, message=message, operation="DescribeOrganization"
+            )
 
         self._ctx._set(
             self._ORGANIZATIONS_NAMESPACE, self._ORGANIZATION_CACHE_KEY, response

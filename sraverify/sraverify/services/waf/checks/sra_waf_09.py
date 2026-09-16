@@ -61,11 +61,15 @@ class SRA_WAF_09(WAFCheck):
                 web_acls_response = self.get_web_acls(region, scope)
 
                 if "Error" in web_acls_response:
+                    error = web_acls_response["Error"]
                     yield self.error(
                         region=region,
                         resource_id=None,
-                        actual_value=web_acls_response["Error"].get("Message", "Unknown error"),
-                        remediation="Check IAM permissions for WAF API access"
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
                     )
                     continue
 
@@ -84,19 +88,30 @@ class SRA_WAF_09(WAFCheck):
                     web_acl_name = web_acl.get("Name")
                     web_acl_id = web_acl.get("Id")
 
-                    client = self.get_client(region)
-                    if not client:
-                        continue
-
-                    logging_response = client.get_logging_configuration(web_acl_arn)
+                    logging_response = self.get_logging_configuration(region, web_acl_arn)
 
                     if "Error" in logging_response:
-                        yield self.error(
-                            region=region,
-                            resource_id=web_acl_name or web_acl_id,
-                            actual_value=logging_response["Error"].get("Message", "Unknown error"),
-                            remediation="Check IAM permissions for WAF logging configuration access"
-                        )
+                        error = logging_response["Error"]
+                        # WAFNonexistentItemException is the declared "no logging
+                        # configuration exists" answer, and the only code that is;
+                        # every other code is an inability to determine.
+                        if self.is_not_configured(error):
+                            yield self.failed(
+                                region=region,
+                                resource_id=web_acl_name or web_acl_id,
+                                actual_value="No logging configuration found",
+                                remediation="Enable logging for this WAF Web ACL using CloudWatch Logs, S3, or Kinesis Data Firehose"
+                            )
+                        else:
+                            yield self.error(
+                                region=region,
+                                resource_id=web_acl_name or web_acl_id,
+                                actual_value=(
+                                    f"{error['Operation']} failed: {error['Code']}: "
+                                    f"{error['Message']}"
+                                ),
+                                remediation=self._remediation_for(error),
+                            )
                         continue
 
                     logging_config = logging_response.get("LoggingConfiguration")

@@ -56,6 +56,28 @@ class SRA_SECURITYHUB_04(SecurityHubCheck):
         for region in self.regions:
             org_config = self.get_organization_configuration(region)
 
+            if "Error" in org_config:
+                error = org_config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"securityhub:hub/{self.account_id}",
+                        checked_value="OrganizationConfiguration Configuration Type is Central and Status Enabled",
+                        actual_value=f"Security Hub is not enabled in region {region}, so it has no organization configuration",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"securityhub:hub/{self.account_id}",
+                        checked_value="OrganizationConfiguration Configuration Type is Central and Status Enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
             org_configuration = org_config.get('OrganizationConfiguration', {})
             config_type = org_configuration.get('ConfigurationType')
             status = org_configuration.get('Status')

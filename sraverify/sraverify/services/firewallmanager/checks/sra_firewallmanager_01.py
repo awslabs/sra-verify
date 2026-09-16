@@ -53,12 +53,27 @@ class SRA_FIREWALLMANAGER_01(FirewallManagerCheck):
         admin_response = self.get_admin_account()
 
         if "Error" in admin_response:
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=admin_response["Error"].get("Message", "Unknown error"),
-                remediation="Configure Firewall Manager delegated administrator: https://docs.aws.amazon.com/waf/latest/developerguide/fms-prereq.html"
-            )
+            error = admin_response["Error"]
+            # ResourceNotFoundException from GetAdminAccount is declared semantic
+            # on the base class: AWS is reporting that no administrator account has
+            # been set, which is the same finding as the empty AdminAccount below.
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value="No Firewall Manager administrator configured",
+                    remediation="Set up Firewall Manager administrator account: https://docs.aws.amazon.com/waf/latest/developerguide/fms-prereq.html"
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
             return
 
         admin_account = admin_response.get("AdminAccount")

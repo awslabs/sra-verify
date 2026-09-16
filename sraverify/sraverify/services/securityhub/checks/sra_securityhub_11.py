@@ -58,6 +58,28 @@ class SRA_SECURITYHUB_11(SecurityHubCheck):
 
             resource_id = f"securityhub:member-quota/{self.account_id}"
 
+            if "Error" in org_config:
+                error = org_config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub has not hit member account limit",
+                        actual_value=f"Security Hub is not enabled in region {region}, so no member account limit applies",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub has not hit member account limit",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
             # Check if MemberAccountLimitReached is false
             limit_reached = org_config.get('MemberAccountLimitReached', True)
 

@@ -70,8 +70,31 @@ class SRA_MACIE_06(MacieCheck):
             # Get Macie administrator account using the base class method with caching
             admin_account = self.get_macie_administrator_account(region)
 
-            # Check if the API call was successful and returned an administrator
-            if not admin_account or 'administrator' not in admin_account:
+            if "Error" in admin_account:
+                error = admin_account['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="Administrator account is Audit account",
+                        actual_value=f"Macie is not enabled in {region}, so it has no administrator account to compare against the Audit account",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="Administrator account is Audit account",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            # A successful response with no 'administrator' member is a real
+            # answer: AWS was asked, and there is no administrator.
+            if 'administrator' not in admin_account:
                 yield self.failed(
                     region=region,
                     resource_id=f"macie2/{self.account_id}/{region}",

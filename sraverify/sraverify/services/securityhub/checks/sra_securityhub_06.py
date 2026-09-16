@@ -58,10 +58,59 @@ class SRA_SECURITYHUB_06(SecurityHubCheck):
         region = self.regions[0] if self.regions else "us-east-1"
 
         # Get organization admin accounts
-        admin_accounts = self.get_organization_admin_accounts(region)
+        admin_response = self.get_organization_admin_accounts(region)
 
         # Get delegated administrators
-        delegated_admins = self.get_delegated_administrators(region)
+        delegated_response = self.get_delegated_administrators(region)
+
+        resource_id = f"delegated-admin/{self.account_id}"
+
+        if "Error" in admin_response:
+            error = admin_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="Security Hub admin account matches Organizations delegated admin",
+                    actual_value=f"Security Hub is not enabled in region {region}, so it has no administrator account",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="Security Hub admin account matches Organizations delegated admin",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        if "Error" in delegated_response:
+            error = delegated_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="Security Hub admin account matches Organizations delegated admin",
+                    actual_value="No AWS Organization exists, so Security Hub can have no delegated administrator",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=resource_id,
+                    checked_value="Security Hub admin account matches Organizations delegated admin",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        admin_accounts = admin_response.get('AdminAccounts', [])
+        delegated_admins = delegated_response.get('DelegatedAdministrators', [])
 
         # Check if there's a match between Security Hub admin and Organizations delegated admin
         sh_admin_id = None
@@ -74,8 +123,6 @@ class SRA_SECURITYHUB_06(SecurityHubCheck):
         for admin in delegated_admins:
             org_admin_id = admin.get('Id')
             break
-
-        resource_id = f"delegated-admin/{self.account_id}"
 
         if not sh_admin_id or not org_admin_id:
             yield self.failed(

@@ -1,62 +1,59 @@
 """
 Base class for IAM Access Analyzer security checks.
 
-As of the scan-context-refactor (task 8.3), Access Analyzer's two previously
-class-level caches (``_delegated_admin_cache``, ``_analyzer_cache``) have
-been replaced with calls to the per-scan :class:`ScanContext` namespaced
-primitives under the ``"accessanalyzer"`` namespace. The session-region-name
-prefix that used to be baked into the per-region cache key
-(e.g., ``f"{self.session.region_name}:{region}"``) is dropped here because
-the per-scan context already scopes the cache to a single session.
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"accessanalyzer"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+``_setup_clients`` registers a wrapper for every Region unconditionally.
+``accessanalyzer`` has an endpoint in all 34 commercial Regions, so there is
+nothing to gate on; where a genuine availability question arises,
+``core/availability.py`` answers it offline and without an API call.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, List, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.accessanalyzer.client import AccessAnalyzerClient
 from sraverify.core.logging import logger
+from sraverify.services.accessanalyzer.client import AccessAnalyzerClient
 
 
 class AccessAnalyzerCheck(SecurityCheck):
     """Base class for all IAM Access Analyzer security checks."""
 
-    # All cached AWS-API responses for Access Analyzer are stored under this
-    # namespace on the per-scan ``ScanContext``. Cache keys are simple
-    # service-internal strings (e.g., ``"analyzers:us-east-1"``) since the
-    # ``ScanContext`` itself is per-scan and per-session, so there is no
-    # need to disambiguate by session region anymore.
     NAMESPACE = "accessanalyzer"
 
+    #: The ``(operation, code)`` pairs that mean "the control is not configured"
+    #: for Access Analyzer.
+    #:
+    #: Empty, and deliberately so. An account with no analyzer is a *successful*
+    #: ``ListAnalyzers`` returning an empty list, not an error -- so every error
+    #: from these operations is an inability to determine, and declaring one would
+    #: turn a permission failure into a fabricated finding.
+    #:
+    #: ``ValidationException`` from ``GetAnalyzer`` is not declared either: it
+    #: means the ARN was malformed, which is a defect in the caller.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
+
     def _setup_clients(self):
-        """Set up AccessAnalyzer clients for enabled regions.
+        """Set up Access Analyzer clients for each region.
 
-        The underlying boto3 clients held by :class:`AccessAnalyzerClient`
-        are obtained from ``self._ctx.get_client(...)`` so they share the
-        per-scan bounded ``Client_Config`` and the ``(service, region)``
-        client cache.
+        One wrapper per Region, unconditionally. Access Analyzer has an endpoint in
+        every commercial Region, so there is nothing to gate on.
         """
-        # Clear existing clients
         self._clients.clear()
-
-        if self._ctx is None:
-            logger.debug("No ScanContext available, skipping Access Analyzer client setup")
-            return
-
-        # For organization checks, we need to check all specified regions
-        for region in self.regions:
-            try:
-                client = AccessAnalyzerClient(region, ctx=self._ctx)
-                if client.is_access_analyzer_available():
-                    self._clients[region] = client
-                    logger.debug(f"Access Analyzer client set up for region {region}")
-                else:
-                    logger.debug(f"Access Analyzer not available in region {region}")
-            except Exception as e:
-                # Skip regions where client creation fails
-                logger.warning(f"Failed to create Access Analyzer client for region {region}: {e}")
-                continue
+        if hasattr(self, 'regions') and self.regions:
+            for region in self.regions:
+                self._clients[region] = AccessAnalyzerClient(region, ctx=self._ctx)
 
     def get_client(self, region: str) -> Optional[AccessAnalyzerClient]:
         """
-        Get Access Analyzer client for a region.
+        Get Access Analyzer client for a specific region.
 
         Args:
             region: AWS region name
@@ -66,70 +63,71 @@ class AccessAnalyzerCheck(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def get_analyzers(self, region: str) -> List[Dict[str, Any]]:
+    def get_analyzers(self, region: str) -> Mapping[str, Any]:
         """
-        Get analyzers for a specific region with caching.
+        Get the analyzers in a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of analyzers in the region
+            ``{"analyzers": [...]}`` on success, or an error result.
+
+            An empty ``analyzers`` list is a real answer: there is no analyzer
+            in this Region.
         """
-        # Cache key is keyed only on the region; the session-region prefix
-        # that the pre-refactor implementation used is dropped because the
-        # per-scan ctx already scopes the cache to a single session.
         cache_key = f"analyzers:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached analyzers for {region}")
+            logger.debug(f"AccessAnalyzer: Using cached analyzers for {region}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Get client
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Access Analyzer client available for region {region}")
-            return []
+        if client is None:
+            logger.warning(
+                f"AccessAnalyzer: No client available for region {region}"
+            )
+            return no_client_result(service="IAM Access Analyzer", region=region)
 
-        # Get analyzers
-        logger.debug(f"Fetching analyzers for {region}")
-        analyzers = client.list_analyzers()
+        logger.debug(f"AccessAnalyzer: Fetching analyzers for {region}")
+        result = client.list_analyzers()
 
-        # Cache the analyzers under the per-scan namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, analyzers)
-        logger.debug(f"Cached {len(analyzers)} analyzers for {region}")
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
 
-        return analyzers
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-    def get_delegated_admin(self) -> Dict[str, Any]:
+    def get_delegated_admin(self) -> Mapping[str, Any]:
         """
-        Get the delegated administrator for IAM Access Analyzer with caching.
+        Get the Organizations delegated administrator, with caching.
+
+        Organization-wide, so the first registered client is used to reach
+        ``organizations`` and the cache key is the account ID alone.
 
         Returns:
-            Dictionary containing delegated administrator details or empty dict if none
+            ``{"DelegatedAdministrators": [...]}`` on success, or an error
+            result. Read element ``[0]`` after the error test.
         """
         account_id = self.account_id
-
-        # Cache key is keyed only on the account ID; the per-scan ctx already
-        # scopes the cache to a single session.
         cache_key = f"delegated_admin:{account_id}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached delegated admin for account {account_id}")
+            logger.debug(
+                f"AccessAnalyzer: Using cached delegated admin for {account_id}"
+            )
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # If not in cache, get it from the client
-        # Use the first available region to make the API call
         if not self._clients:
-            logger.warning("No Access Analyzer clients available")
-            return {}
+            logger.warning("AccessAnalyzer: No clients available")
+            return no_client_result(
+                service="IAM Access Analyzer", region="global"
+            )
 
-        # Use the first available region's client
         region = next(iter(self._clients))
-        client = self._clients[region]
+        result = self._clients[region].get_delegated_admin()
 
-        # Get delegated admin from client
-        delegated_admin = client.get_delegated_admin()
+        if is_error(result):
+            return result
 
-        # Cache the result under the per-scan namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, delegated_admin)
-
-        return delegated_admin
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result

@@ -52,26 +52,66 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
         # Discover the region where Security Incident Response is configured
         region = self.discover_sir_region()
 
-        # Get all organization accounts
-        org_accounts = self.get_organization_accounts()
+        # Get all organization accounts.
+        accounts_response = self.get_organization_accounts()
+        if "Error" in accounts_response:
+            error = accounts_response["Error"]
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        "This account is not a member of an AWS Organization, so no "
+                        "organization accounts can be covered by Security Incident Response"
+                    ),
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation="Check IAM permissions for Organizations API access"
+                )
+            return
+
+        org_accounts = accounts_response.get("Accounts", [])
         if not org_accounts:
+            # A successful ListAccounts that names no accounts. The calling
+            # account is always a member of its own organization, so this is not
+            # a reachable configuration -- it is a response the check cannot
+            # evaluate, which is an ERROR rather than a FAIL.
             yield self.error(
                 region=region,
                 resource_id=None,
-                actual_value="Unable to retrieve organization accounts",
-                remediation="Check IAM permissions for Organizations API access"
+                actual_value="ListAccounts succeeded but returned no organization accounts",
+                remediation="Confirm the scan is running against an account that belongs to an AWS Organization"
             )
             return
 
         # Get active memberships
         memberships_response = self.list_memberships()
         if "Error" in memberships_response:
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=memberships_response["Error"].get("Message", "Unknown error"),
-                remediation="Check IAM permissions for Security Incident Response API access"
-            )
+            error = memberships_response["Error"]
+            if self.is_not_configured(error):
+                # Same finding as the no-active-membership branch below.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value="No Security Incident Response membership exists",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation="Check IAM permissions for Security Incident Response API access"
+                )
             return
 
         memberships = memberships_response.get("items", [])
@@ -105,11 +145,32 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
             response = self.batch_get_member_account_details(membership_id, batch_account_ids)
 
             if "Error" in response:
+                error = response["Error"]
+                # One row per account in the batch, deliberately: the batch is an
+                # implementation detail of the 100-account API limit, and coverage
+                # is asserted per account. Collapsing the batch into one row would
+                # drop up to 100 accounts out of the report.
+                if self.is_not_configured(error):
+                    for account_id in batch_account_ids:
+                        yield self.failed(
+                            region=region,
+                            resource_id=account_id,
+                            actual_value=(
+                                f"Membership {membership_id} no longer exists, so "
+                                f"account {account_id} is not covered"
+                            ),
+                        )
+                    continue
+
+                actual_value = (
+                    f"{error['Operation']} failed: {error['Code']}: "
+                    f"{error['Message']}"
+                )
                 for account_id in batch_account_ids:
                     yield self.error(
                         region=region,
                         resource_id=account_id,
-                        actual_value=response["Error"].get("Message", "Unknown error"),
+                        actual_value=actual_value,
                         remediation="Check IAM permissions for Security Incident Response BatchGetMemberAccountDetails API access or ensure you specified the region where Security Incident Response is enabled with the --regions flag"
                     )
                 continue
@@ -118,13 +179,15 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
             items = response.get("items", [])
             errors = response.get("errors", [])
 
-            # Handle errors
-            for error in errors:
-                account_id = error.get("accountId")
+            # Per-account errors carried inside a *successful* batch response.
+            # These are not error results -- they have no Code or Operation, only
+            # the batch API's own accountId and message.
+            for batch_error in errors:
+                account_id = batch_error.get("accountId")
                 yield self.error(
                     region=region,
                     resource_id=account_id,
-                    actual_value=error.get("message", "Unknown error"),
+                    actual_value=f"BatchGetMemberAccountDetails reported: {batch_error.get('message', 'no message')}",
                     remediation="Check account status and Security Incident Response configuration"
                 )
 

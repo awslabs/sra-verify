@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 import botocore.config
 
+from sraverify.core.aws_errors import is_error
 from sraverify.core.logging import logger
 
 
@@ -237,7 +238,34 @@ class ScanContext:
         Intended for use by service base classes only. Lazily creates the inner
         namespace dict on the first write to a previously unseen namespace.
         Acquires ``self._lock`` for the dict access.
+
+        **Refuses an error result.** A failure written here is replayed to every
+        later check in that Region for the rest of the scan -- one denied call
+        becomes a whole Region's worth of wrong rows. The accessor discipline is
+        the primary control and the contract tests hold it per accessor; this is
+        the backstop for the accessor written next year by someone who has not
+        read that contract.
+
+        It **skips and warns rather than raising**: by the time it fires, the
+        accessor has already returned the error result to its caller correctly and
+        the only defect is the attempted write, so raising would abort the
+        calling check and lose its rows to a synthetic ERROR row for what is a
+        harmless redundancy. A ``warning`` in the log is proportionate.
+
+        It is a backstop and not a substitute, because it only sees
+        error result-*shaped* dicts. An accessor that still encodes failure as
+        ``[]``, ``{}``, ``None``, or ``False`` walks straight past it.
         """
+        # Ahead of the lock: nothing is being mutated, and a refused write
+        # should not contend for it.
+        if is_error(value):
+            logger.warning(
+                f"ScanContext: refusing to cache an error result under "
+                f"{namespace}:{key} ({value['Error'].get('Code')}); "
+                f"the accessor should have returned it without caching it"
+            )
+            return
+
         with self._lock:
             namespace_cache = self._cache.get(namespace)
             if namespace_cache is None:
@@ -270,7 +298,7 @@ class ScanContext:
         ``ScanContext``. Once a client has been built for a given
         ``(service_name, region)`` pair, the same instance is returned on every
         subsequent call within the same scan (Requirement 2.10). When
-        ``region`` is ``None`` the cache key uses the literal sentinel
+        ``region`` is ``None`` the cache key uses the literal error result
         ``"__global__"`` so global services like IAM and Organizations stay
         distinct from any specific region.
 

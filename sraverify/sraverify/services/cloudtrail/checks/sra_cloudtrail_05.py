@@ -54,7 +54,29 @@ class SRA_CLOUDTRAIL_05(CloudTrailCheck):
             One Finding per trail, or one Finding when no trail exists.
         """
         # Get all trails
-        all_trails = self.describe_trails()
+        trails_response = self.describe_trails()
+
+        if "Error" in trails_response:
+            error = trails_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id="cloudtrail:global",
+                    actual_value="No CloudTrail trail exists for this account, so no organization trail is configured",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id="cloudtrail:global",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        all_trails = trails_response.get('trailList', [])
 
         if not all_trails:
             yield self.failed(

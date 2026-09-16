@@ -53,9 +53,36 @@ class SRA_GUARDDUTY_09(GuardDutyCheck):
         """
         # Check all regions
         for region in self.regions:
-            detector_id = self.get_detector_id(region)
+            detectors = self.get_detector_id(region)
 
-            # Handle regions where we can't access GuardDuty
+            # Test for the error result before reading any success-path key: this
+            # is where "GuardDuty is not enabled here" and "the call failed" part
+            # company.
+            if "Error" in detectors:
+                error = detectors["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            detector_id = self.detector_id_of(detectors)
+
             if not detector_id:
                 yield self.error(
                     region=region,
@@ -67,6 +94,29 @@ class SRA_GUARDDUTY_09(GuardDutyCheck):
 
             # Get detector details
             detector_details = self.get_detector_details(region)
+
+            if "Error" in detector_details:
+                error = detector_details["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
 
             if detector_details:
                 # Check if malware protection for EBS is enabled in the Features array
@@ -92,9 +142,20 @@ class SRA_GUARDDUTY_09(GuardDutyCheck):
                         remediation=f"Enable malware protection for EBS in GuardDuty in {region} to scan EC2 instances and container workloads for malware",
                     )
             else:
-                yield self.failed(
+                # Not reachable in practice: the detector ID was resolved above,
+                # so an empty GetDetector response would mean the detector
+                # vanished between two calls. An ERROR rather than a FAIL,
+                # because that is an undetermined state and not evidence the
+                # control is absent.
+                yield self.error(
                     region=region,
                     resource_id=f"guardduty:{region}:{detector_id}",
-                    actual_value="Unable to retrieve detector details",
-                    remediation="Check GuardDuty permissions and configuration",
+                    actual_value=(
+                        "GetDetector returned no detector configuration for "
+                        f"{detector_id}"
+                    ),
+                    remediation=(
+                        "Re-run the scan; if it persists, confirm the detector "
+                        f"still exists in {region}"
+                    ),
                 )

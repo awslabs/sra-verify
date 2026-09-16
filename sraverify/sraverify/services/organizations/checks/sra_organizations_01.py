@@ -56,11 +56,12 @@ class SRA_ORGANIZATIONS_01(OrganizationsCheck):
 
         # Check for errors
         if "Error" in response:
+            error = response["Error"]
             error_code = response["Error"].get("Code", "")
             error_message = response["Error"].get("Message", "Unknown error")
 
             # AWSOrganizationsNotInUseException means no organization exists
-            if error_code == "AWSOrganizationsNotInUseException":
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -77,7 +78,10 @@ class SRA_ORGANIZATIONS_01(OrganizationsCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=f"Error: {error_message}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
                     remediation="Check IAM permissions for Organizations API access",
                     checked_value="AWS Organizations enabled",
                 )

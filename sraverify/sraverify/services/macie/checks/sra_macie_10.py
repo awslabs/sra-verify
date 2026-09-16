@@ -54,15 +54,26 @@ class SRA_MACIE_10(MacieCheck):
             # Get organization configuration using the base class method with caching
             org_config = self.get_organization_configuration(region)
 
-            # Check if the API call was successful
-            if not org_config:
-                yield self.failed(
-                    region=region,
-                    resource_id=f"macie2/{self.account_id}/{region}",
-                    checked_value="maxAccountLimitReached: false",
-                    actual_value="Failed to retrieve Macie organization configuration",
-                    remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie DescribeOrganizationConfiguration API"
-                )
+            if "Error" in org_config:
+                error = org_config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="maxAccountLimitReached: false",
+                        actual_value=f"Macie is not enabled in {region}, so no member account limit applies",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="maxAccountLimitReached: false",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
 
             # Check if max account limit is reached

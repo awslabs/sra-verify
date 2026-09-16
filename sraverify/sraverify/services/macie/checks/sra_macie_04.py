@@ -60,17 +60,6 @@ class SRA_MACIE_04(MacieCheck):
             # Get classification export configuration using the base class method with caching
             export_config = self.get_classification_export_configuration(region)
 
-            # No client wrapper for this Region: the control was not evaluated.
-            if not export_config:
-                yield self.error(
-                    region=region,
-                    resource_id=f"macie2/{self.account_id}/{region}",
-                    checked_value="KMS encryption for S3 bucket",
-                    actual_value=f"No Macie client available for region {region}",
-                    remediation=f"Confirm that Macie is available in {region} and that the Region is reachable from the scanning environment"
-                )
-                continue
-
             # The API call failed. Macie disabled in the Region is a FAIL, since
             # AWS answered and the control is absent. Anything else is an ERROR:
             # the control could not be evaluated.
@@ -78,7 +67,7 @@ class SRA_MACIE_04(MacieCheck):
                 error = export_config["Error"]
                 error_code = error.get("Code", "Unknown")
                 error_message = error.get("Message", "Unknown error")
-                if self.is_macie_disabled_error(error):
+                if self.is_not_configured(error):
                     yield self.failed(
                         region=region,
                         resource_id=f"macie2/{self.account_id}/{region}",
@@ -94,8 +83,11 @@ class SRA_MACIE_04(MacieCheck):
                         region=region,
                         resource_id=f"macie2/{self.account_id}/{region}",
                         checked_value="KMS encryption for S3 bucket",
-                        actual_value=f"Could not determine the Macie findings export encryption in {region}: {error_code}: {error_message}",
-                        remediation="Grant the member role macie2:GetClassificationExportConfiguration so the findings export encryption can be read"
+                        actual_value=(
+                            f"{error['Operation']} failed: {error_code}: "
+                            f"{error_message}"
+                        ),
+                        remediation=self._remediation_for(error)
                     )
                 continue
 

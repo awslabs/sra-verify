@@ -63,9 +63,36 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
         """
         # Check all regions
         for region in self.regions:
-            detector_id = self.get_detector_id(region)
+            detectors = self.get_detector_id(region)
 
-            # Handle regions where we can't access GuardDuty
+            # Test for the error result before reading any success-path key: this
+            # is where "GuardDuty is not enabled here" and "the call failed" part
+            # company.
+            if "Error" in detectors:
+                error = detectors["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            detector_id = self.detector_id_of(detectors)
+
             if not detector_id:
                 yield self.error(
                     region=region,
@@ -80,26 +107,28 @@ class SRA_GUARDDUTY_23(GuardDutyCheck):
 
             # Check if there was an error in the response
             if "Error" in org_config:
-                error_code = org_config["Error"].get("Code", "Unknown")
-                error_message = org_config["Error"].get("Message", "Unknown error")
-
-                # Handle BadRequestException specifically for non-management accounts
-                if error_code == "BadRequestException":
+                error = org_config["Error"]
+                if self.is_not_configured(error):
                     yield self.failed(
                         region=region,
                         resource_id=f"guardduty:{region}:{detector_id}",
-                        actual_value=f"{error_code} {error_message}",
+                        actual_value=(
+                            "No GuardDuty delegated administrator is enabled "
+                            "for this Region"
+                        ),
                         remediation="Verify that GuardDuty is the delegated admin in this Region and run the check again.",
                     )
                 else:
                     yield self.error(
                         region=region,
                         resource_id=f"guardduty:{region}:{detector_id}",
-                        actual_value=f"Error accessing GuardDuty organization configuration: {error_code}",
-                        remediation="Check permissions and AWS Organizations configuration",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
                     )
                 continue
-
             # Check if Runtime Monitoring is configured for auto-enablement
             # Look for RUNTIME_MONITORING in Features
             runtime_monitoring_found = False

@@ -3,8 +3,10 @@ Check if Amplify applications are associated with AWS WAF.
 """
 from collections.abc import Iterable
 
+from sraverify.core.availability import service_available_in_region
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
+from sraverify.core.logging import logger
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.waf.base import WAFCheck
 
@@ -54,14 +56,32 @@ class SRA_WAF_08(WAFCheck):
             One Finding per Amplify application.
         """
         for region in self.regions:
+            # Amplify has an endpoint in 20 of the 34 commercial Regions. Where it has none
+            # there can be no Amplify application left unprotected, so there is nothing to
+            # report: emit no row at all. A FAIL would assert a
+            # misconfiguration that cannot exist, and an ERROR would claim we
+            # were unable to look when in fact there was nothing to look at.
+            # This fact cannot be changed by an AWS call, so the guard precedes
+            # the call.
+            if not service_available_in_region("amplify", region):
+                logger.debug(
+                    f"WAF: Amplify has no endpoint in {region}; "
+                    f"{self.check_id} reports nothing for this Region"
+                )
+                continue
+
             apps_response = self.get_amplify_apps(region)
 
             if "Error" in apps_response:
+                error = apps_response["Error"]
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=apps_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Amplify and WAF API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
                 continue
 

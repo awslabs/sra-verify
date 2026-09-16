@@ -64,8 +64,8 @@ class SRA_SHIELD_13(ShieldCheck):
         protections = self.list_protections(region)
 
         if "Error" in protections:
-            error_code = protections["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            error = protections["Error"]
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -76,8 +76,11 @@ class SRA_SHIELD_13(ShieldCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=protections["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Shield API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
         elif protections.get("Protections"):
             # Filter for CloudFront and Route53 resources
@@ -103,12 +106,21 @@ class SRA_SHIELD_13(ShieldCheck):
                 # Check for DDoSDetected alarm
                 alarms = self.get_cloudwatch_alarms_for_resource(region, resource_arn)
 
+                # Inside the per-resource loop, so one undetermined resource costs
+                # one row rather than the whole check's output. Nothing is declared
+                # for DescribeAlarmsForMetric -- "no alarm" arrives there as a
+                # successful response with an empty MetricAlarms list -- so any
+                # error here is an inability to determine, never a FAIL.
                 if "Error" in alarms:
+                    alarm_error = alarms["Error"]
                     yield self.error(
                         region=region,
                         resource_id=resource_arn,
-                        actual_value=alarms["Error"].get("Message", "Unknown error"),
-                        remediation="Check IAM permissions for CloudWatch API access"
+                        actual_value=(
+                            f"{alarm_error['Operation']} failed: "
+                            f"{alarm_error['Code']}: {alarm_error['Message']}"
+                        ),
+                        remediation=self._remediation_for(alarm_error),
                     )
                 elif alarms.get("DDoSDetectedAlarms"):
                     alarm_names = [alarm["AlarmName"] for alarm in alarms["DDoSDetectedAlarms"]]

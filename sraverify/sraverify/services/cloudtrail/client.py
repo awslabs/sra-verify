@@ -1,14 +1,22 @@
 """
-CloudTrail client for interacting with AWS CloudTrail service.
+CloudTrail client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+Reaches ``cloudtrail``, ``organizations`` and ``sts``. All three boto3 clients are
+acquired in ``__init__``.
 """
-from typing import Dict, List, Optional, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+from typing import Any, List, Mapping, Optional
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class CloudTrailClient:
-    """Client for interacting with AWS CloudTrail service."""
+class CloudTrailClient(AWSClient):
+    """Client for interacting with AWS CloudTrail."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
@@ -16,107 +24,90 @@ class CloudTrailClient:
 
         Args:
             region: AWS region name
-            ctx: ScanContext that owns the per-scan boto3 session, the
-                bounded ``Client_Config``, and the ``(service, region)``
-                client cache. Underlying boto3 clients are obtained via
-                ``ctx.get_client(...)`` so they are de-duplicated and share
-                the bounded timeout/retry settings.
+            ctx: ScanContext for the current scan; the underlying boto3 clients
+                are obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('cloudtrail', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
+        # Moved out of get_account_id, which acquired it per call.
+        self.sts_client = ctx.get_client('sts')
 
-    def describe_trails(self, trail_name_list: Optional[List[str]] = None, include_shadow_trails: bool = True) -> List[Dict[str, Any]]:
+    def describe_trails(
+        self,
+        trail_name_list: Optional[List[str]] = None,
+        include_shadow_trails: bool = True,
+    ) -> Mapping[str, Any]:
         """
-        Describe one or more trails.
+        Describe the trails visible from this Region.
 
         Args:
-            trail_name_list: List of trail names to describe (if None, all trails are described)
-            include_shadow_trails: Include shadow trails in the response
+            trail_name_list: Trail names or ARNs to describe. ``None`` means all.
+            include_shadow_trails: Whether to include shadow trails.
 
         Returns:
-            List of trail descriptions
+            ``{"trailList": [...]}`` on success, or the error result.
+
+            The whole response, not the extracted list. All 13 CloudTrail checks
+            iterate this, so each must test for ``"Error"`` before doing so --
+            handing them an error result unguarded raises rather than
+            mis-reporting, which is loud but still loses every other Region's rows
+            for that check.
         """
         try:
-            params = {}
-            if trail_name_list:
-                params['trailNameList'] = trail_name_list
-            params['includeShadowTrails'] = include_shadow_trails
+            params: dict[str, Any] = {
+                "includeShadowTrails": include_shadow_trails
+            }
+            if trail_name_list is not None:
+                params["trailNameList"] = trail_name_list
+            return self.client.describe_trails(**params)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Describing trails in {self.region} with params: {params}")
-            response = self.client.describe_trails(**params)
-            return response.get('trailList', [])
-        except ClientError as e:
-            logger.error(f"Error describing trails in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error describing trails in {self.region}: {e}")
-            return []
-
-    def get_trail_status(self, trail_arn: str) -> Dict[str, Any]:
+    def get_trail_status(self, trail_arn: str) -> Mapping[str, Any]:
         """
-        Get the status of a trail.
+        Get a trail's status.
 
         Args:
-            trail_arn: ARN of the trail
+            trail_arn: The trail ARN.
 
         Returns:
-            Trail status
+            The ``GetTrailStatus`` response on success, or the error result.
         """
         try:
-            logger.debug(f"Getting status for trail {trail_arn} in {self.region}")
-            response = self.client.get_trail_status(Name=trail_arn)
-            return response
-        except ClientError as e:
-            logger.error(f"Error getting trail status for {trail_arn} in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.error(f"Unexpected error getting trail status for {trail_arn} in {self.region}: {e}")
-            return {}
+            return self.client.get_trail_status(Name=trail_arn)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_delegated_administrators(self, service_principal: str = "cloudtrail.amazonaws.com") -> List[Dict[str, Any]]:
+    def list_delegated_administrators(
+        self, service_principal: str = "cloudtrail.amazonaws.com"
+    ) -> Mapping[str, Any]:
         """
-        List delegated administrators for CloudTrail.
+        List Organizations delegated administrators for a service principal.
 
         Args:
-            service_principal: Service principal to check for delegated administrators
+            service_principal: Service principal to check.
 
         Returns:
-            List of delegated administrators
+            ``{"DelegatedAdministrators": [...]}`` on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Listing delegated administrators for {service_principal} in {self.region}")
-            response = self.org_client.list_delegated_administrators(ServicePrincipal=service_principal)
-            delegated_admins = response.get('DelegatedAdministrators', [])
-            logger.debug(f"Found {len(delegated_admins)} delegated administrators for {service_principal}")
-            for admin in delegated_admins:
-                logger.debug(f"Delegated admin: {admin.get('Id')} - {admin.get('Name')}")
-            return delegated_admins
-        except ClientError as e:
-            logger.error(f"Error listing delegated administrators for {service_principal}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing delegated administrators: {e}")
-            return []
+            return self.org_client.list_delegated_administrators(
+                ServicePrincipal=service_principal
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_account_id(self) -> Optional[str]:
+    def get_account_id(self) -> Mapping[str, Any]:
         """
         Get the current account ID.
 
         Returns:
-            Current account ID or None if not available
+            The ``GetCallerIdentity`` response on success, or the error result.
         """
         try:
-            logger.debug(f"Getting current account ID in {self.region}")
-            sts_client = self.ctx.get_client("sts")
-            response = sts_client.get_caller_identity()
-            account_id = response["Account"]
-            logger.debug(f"Current account ID: {account_id}")
-            return account_id
-        except ClientError as e:
-            logger.error(f"Error getting current account ID: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting current account ID: {e}")
-            return None
+            return self.sts_client.get_caller_identity()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

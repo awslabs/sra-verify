@@ -68,9 +68,48 @@ class SRA_CONFIG_09(ConfigCheck):
         org_aggregator_name = None
         org_aggregator_arn = None
 
+        # Set by the guard below when a Region's Config state could not be
+
+        # read. A global 'not found in any region' FAIL must not fire on the
+
+        # strength of Regions that never answered.
+
+        undetermined = False
+
         for region in self.regions:
             # Get configuration aggregators for the region using the cache
-            aggregators = self.get_configuration_aggregators(region)
+            aggregators_response = self.get_configuration_aggregators(region)
+
+            if "Error" in aggregators_response:
+                error = aggregators_response['Error']
+                if self.is_not_configured(error):
+                    # A declared semantic code: AWS answered and the control is
+                    # absent. config declares AWSOrganizationsNotInUseException
+                    # (DescribeOrganization) and NoSuchBucketPolicy
+                    # (GetBucketPolicy); an empty recorder or channel list is a
+                    # successful response, not an error, so nothing is declared for
+                    # the describe_* operations themselves.
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=f"AWS Config is not configured in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                undetermined = True
+                continue
+
+            aggregators = aggregators_response.get(
+                'ConfigurationAggregators', []
+            )
 
             # Check if any of the aggregators is an organization aggregator
             for aggregator in aggregators:
@@ -84,6 +123,13 @@ class SRA_CONFIG_09(ConfigCheck):
 
             if found_org_aggregator:
                 break
+
+        # No aggregator was found and at least one Region never answered, so the
+        # scan cannot say whether one exists. Each undetermined Region already
+        # yielded its own ERROR row above; falling through from here would reach
+        # the client lookup below with org_aggregator_region still None.
+        if not found_org_aggregator and undetermined:
+            return
 
         # If no organization aggregator found in any region, yield a global failure
         if not found_org_aggregator:
@@ -113,18 +159,25 @@ class SRA_CONFIG_09(ConfigCheck):
             )
             return
 
-        # Get aggregator sources status
-        try:
-            source_statuses = client.describe_configuration_aggregator_sources_status(org_aggregator_name)
-        except Exception as e:
+        status_response = client.describe_configuration_aggregator_sources_status(
+            org_aggregator_name
+        )
+
+        if "Error" in status_response:
+            error = status_response['Error']
             yield self.error(
                 region="global",
                 resource_id=org_aggregator_arn,
                 checked_value="All source statuses are SUCCEEDED",
-                actual_value=f"Error getting source statuses for aggregator '{org_aggregator_name}' in region {org_aggregator_region}: {str(e)}",
-                remediation="Ensure you have proper permissions to check aggregator status",
+                actual_value=(
+                    f"{error['Operation']} failed: {error['Code']}: "
+                    f"{error['Message']}"
+                ),
+                remediation=self._remediation_for(error),
             )
             return
+
+        source_statuses = status_response.get('AggregatedSourceStatusList', [])
 
         if not source_statuses:
             # No source statuses found

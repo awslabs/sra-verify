@@ -1,14 +1,24 @@
 """
-Inspector client for interacting with AWS Inspector service.
+Inspector client (``inspector2``).
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+``list_organization_accounts`` reads only the **first page** of ``ListAccounts``,
+so it caps at 20 accounts. Paginating would change which accounts the callers see
+and therefore move verdicts, so it is a recorded deferred correction rather than
+part of the error contract.
 """
-from typing import Dict, List, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+from typing import Any, List, Mapping
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class InspectorClient:
-    """Client for interacting with AWS Inspector service."""
+class InspectorClient(AWSClient):
+    """Client for interacting with AWS Inspector."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
@@ -16,90 +26,72 @@ class InspectorClient:
 
         Args:
             region: AWS region name
-            ctx: The ``ScanContext`` whose per-scan boto3 client cache and
-                ``Client_Config`` back every underlying boto3 client this
-                wrapper uses. Underlying boto3 clients are obtained via
-                ``ctx.get_client`` so they are cached for the lifetime of the
-                scan and pick up the bounded timeouts/retries from the
-                context's ``Client_Config``.
+            ctx: ScanContext for the current scan; the underlying boto3 clients
+                are obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
-        self.region = region
-        self.ctx = ctx
-        # Inspector v2 uses the boto3 service name ``inspector2``.
+        super().__init__(region, ctx)
         self.client = ctx.get_client('inspector2', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
 
-    def batch_get_account_status(self, account_ids: List[str]) -> Dict[str, Any]:
+    def batch_get_account_status(
+        self, account_ids: List[str]
+    ) -> Mapping[str, Any]:
         """
-        Get the Inspector account status for specified accounts.
+        Get the Inspector status for a batch of accounts.
 
         Args:
-            account_ids: List of AWS account IDs
+            account_ids: Account IDs to query.
 
         Returns:
-            Dictionary containing account status information
+            The ``BatchGetAccountStatus`` response on success, i.e.
+            ``{"accounts": [...]}``, or the error result.
         """
         try:
-            logger.debug(f"Getting Inspector account status for accounts {account_ids} in {self.region}")
-            response = self.client.batch_get_account_status(accountIds=account_ids)
-            return response
-        except ClientError as e:
-            logger.debug(f"Error getting Inspector account status in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.debug(f"Unexpected error getting Inspector account status in {self.region}: {e}")
-            return {}
+            return self.client.batch_get_account_status(accountIds=account_ids)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_delegated_admin_account(self) -> Dict[str, Any]:
+    def get_delegated_admin_account(self) -> Mapping[str, Any]:
         """
-        Get the delegated administrator account for Inspector.
+        Get the Inspector delegated administrator account.
 
         Returns:
-            Dictionary containing delegated admin account information
+            The ``GetDelegatedAdminAccount`` response on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Getting Inspector delegated admin account in {self.region}")
-            response = self.client.get_delegated_admin_account()
-            return response
-        except ClientError as e:
-            logger.debug(f"Error getting Inspector delegated admin account in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.debug(f"Unexpected error getting Inspector delegated admin account in {self.region}: {e}")
-            return {}
+            return self.client.get_delegated_admin_account()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_organization_configuration(self) -> Dict[str, Any]:
+    def describe_organization_configuration(self) -> Mapping[str, Any]:
         """
-        Describe Inspector organization configuration.
+        Describe the Inspector organization configuration.
 
         Returns:
-            Dictionary containing organization configuration
+            The ``DescribeOrganizationConfiguration`` response on success, or the
+            error result.
         """
         try:
-            logger.debug(f"Describing Inspector organization configuration in {self.region}")
-            response = self.client.describe_organization_configuration()
-            return response
-        except ClientError as e:
-            logger.debug(f"Error describing Inspector organization configuration in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.debug(f"Unexpected error describing Inspector organization configuration in {self.region}: {e}")
-            return {}
+            return self.client.describe_organization_configuration()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_organization_accounts(self) -> List[Dict[str, Any]]:
+    def list_organization_accounts(self) -> Mapping[str, Any]:
         """
-        List all accounts in the AWS Organization.
+        List accounts in the AWS Organization.
 
         Returns:
-            List of organization accounts
+            ``{"Accounts": [...]}`` on success, or the error result.
+
+            **First page only.** ``ListAccounts`` returns at most 20 accounts per
+            page and this makes one call, so an organization larger than 20
+            accounts is silently truncated. Left as-is on purpose: pagination
+            would change which accounts the dependent checks see and therefore
+            their verdicts, which is out of scope for an error-contract migration.
         """
         try:
-            logger.debug(f"Listing organization accounts in {self.region}")
-            response = self.org_client.list_accounts()
-            return response.get('Accounts', [])
-        except ClientError as e:
-            logger.debug(f"Error listing organization accounts in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.debug(f"Unexpected error listing organization accounts in {self.region}: {e}")
-            return []
+            return self.org_client.list_accounts()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

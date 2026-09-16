@@ -54,7 +54,29 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
             cannot be completed.
         """
         # Get organization trails
-        org_trails = self.get_organization_trails()
+        org_response = self.get_organization_trails()
+
+        if "Error" in org_response:
+            error = org_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value="No CloudTrail trail exists for this account, so no organization trail is configured",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        org_trails = org_response.get('trailList', [])
 
         if not org_trails:
             yield self.failed(
@@ -125,13 +147,16 @@ class SRA_CLOUDTRAIL_11(CloudTrailCheck):
                 # Generate a recommended bucket name using the first log archive account
                 recommended_bucket_name = f"aws-controltower-logs-{log_archive_accounts[0]}-{home_region}"
 
-                yield self.failed(
+                # The bucket owner could not be resolved, so whether the bucket
+                # lives in a Log Archive account is undetermined -- an ERROR, not a
+                # FAIL asserting it does not.
+                yield self.error(
                     region="global",
                     resource_id=resource_id,
                     checked_value=f"S3 bucket in Log Archive account ({', '.join(log_archive_accounts)})",
                     actual_value=(
-                        f"Organization trail '{trail_name}' is using S3 bucket '{s3_bucket_name}' "
-                        f"but the bucket owner could not be determined"
+                        f"The owning account of S3 bucket '{s3_bucket_name}' used by "
+                        f"organization trail '{trail_name}' was not resolved"
                     ),
                     remediation=(
                         f"Update the organization trail '{trail_name}' to use an S3 bucket in the Log Archive account "

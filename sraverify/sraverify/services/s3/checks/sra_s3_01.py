@@ -54,7 +54,31 @@ class SRA_S3_01(S3Check):
         """
         # Get public access block configuration using the base class method
         # This will use the cache if available or make API calls if needed
-        public_access_config = self.get_public_access()
+        public_access_response = self.get_public_access()
+
+        if "Error" in public_access_response:
+            error = public_access_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=self.account_id,
+                    actual_value="No public access block configuration found",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=self.account_id,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        public_access_config = public_access_response.get(
+            'PublicAccessBlockConfiguration', {}
+        )
 
         # Check if the configuration exists and RestrictPublicBuckets is enabled
         if not public_access_config:

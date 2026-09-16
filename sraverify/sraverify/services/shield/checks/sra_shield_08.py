@@ -54,8 +54,8 @@ class SRA_SHIELD_08(ShieldCheck):
         drt_access = self.describe_drt_access(region)
 
         if "Error" in drt_access:
-            error_code = drt_access["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            error = drt_access["Error"]
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -66,8 +66,11 @@ class SRA_SHIELD_08(ShieldCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=drt_access["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Shield API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
         elif drt_access.get("RoleArn"):
             role_arn = drt_access["RoleArn"]

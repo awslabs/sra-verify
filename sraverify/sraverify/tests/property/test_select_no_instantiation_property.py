@@ -33,7 +33,7 @@ Requirement 9.1 also says selection issues **zero AWS API calls**. That half is
 covered structurally rather than by intercepting botocore: a check reaches AWS
 only through ``self._ctx``, which only ``initialize(ctx)`` sets, and
 ``initialize`` is only ever called on an instance. Zero instances is therefore
-zero opportunity, and the ``SRAVerify`` under test here is built with a sentinel
+zero opportunity, and the ``SRAVerify`` under test here is built with an error result
 in place of a boto3 ``Session`` -- so if any code path on these three functions
 did try to reach AWS, it would raise ``AttributeError`` rather than quietly
 succeed against the developer's real credentials.
@@ -164,7 +164,7 @@ SRAVerify = _load_sra_verify()
 
 
 # ---------------------------------------------------------------------- #
-# A sentinel in place of a boto3 Session.
+# An error result in place of a boto3 Session.
 # ---------------------------------------------------------------------- #
 
 
@@ -173,7 +173,7 @@ class _NoSession:
 
     ``SRAVerify.__init__`` calls ``get_session(...)`` only when no session is
     supplied, and ``get_session`` reads the developer's real credentials. A
-    sentinel avoids that while making the absence load-bearing: it carries no
+    error result avoids that while making the absence load-bearing: it carries no
     ``client`` attribute, so any attempt to reach AWS from a code path under
     test raises ``AttributeError`` instead of succeeding quietly. That is what
     turns the "zero AWS API calls" half of Requirement 9.1 into something this

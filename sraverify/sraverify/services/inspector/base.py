@@ -1,38 +1,75 @@
 """
 Base class for Inspector security checks.
+
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"inspector"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+Reshaping happens **after** the error test, in pure helpers over a success dict:
+:meth:`account_status_of` flattens ``resourceState`` up to the top level and
+:meth:`status_by_account` builds an ``{account_id: status}`` map. Neither is ever
+handed an accessor's raw return, so an accessor's result has exactly two shapes
+and ``"Error" in result`` is the only test that separates them.
+
+:meth:`batch_get_account_status` issues one call per batch of 10 accounts and
+**fails as a whole** if any batch fails. A partial map is indistinguishable from
+a complete one, and an account missing from it would read as "not enrolled".
+
+:meth:`caller_is_delegated_admin` handles a third category of error, neither
+transport nor not-configured; see its docstring.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, Dict, List, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.inspector.client import InspectorClient
 from sraverify.core.logging import logger
+from sraverify.services.inspector.client import InspectorClient
 
 
 class InspectorCheck(SecurityCheck):
-    """Base class for all Inspector security checks.
+    """Base class for all Inspector security checks."""
 
-    Per-scan AWS-API responses (account status, batch account status,
-    delegated admin, organization configuration, organization members) live
-    in the attached :class:`ScanContext`'s namespaced cache under the
-    ``"inspector"`` namespace rather than on class-level dicts. This lets a
-    fresh ``ScanContext`` per :meth:`SRAVerify.run_checks` invocation start
-    with an empty cache (Requirement 7.5) and ensures cached data does not
-    leak between consecutive scans (Requirement 5.7, 5.18).
-    """
-
-    #: Namespace key for this service's entries in ``ctx._cache``.
     NAMESPACE = "inspector"
+
+    #: The ``(operation, code)`` pairs that mean "the control is not configured"
+    #: for Inspector.
+    #:
+    #: ``ResourceNotFoundException`` from ``GetDelegatedAdminAccount`` is the only
+    #: entry: Inspector answers it when no delegated administrator has been
+    #: designated, which is the control being absent. Nothing is declared for
+    #: ``BatchGetAccountStatus`` -- an account with Inspector switched off is a
+    #: *successful* response carrying ``status: DISABLED``, not an error, so a
+    #: failure there is always an inability to determine.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetDelegatedAdminAccount": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/inspector/v2/APIReference/"
+                    "API_GetDelegatedAdminAccount.html -- "
+                    "ResourceNotFoundException is returned when the requested "
+                    "resource does not exist, and the requested resource here is "
+                    "the delegated administrator designation itself. Nothing is "
+                    "declared for BatchGetAccountStatus on purpose: Inspector "
+                    "being disabled for an account is a successful response with "
+                    "state.status == DISABLED, so any error from that call is an "
+                    "inability to determine rather than a finding."
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up Inspector clients for each region.
 
-        Each per-region :class:`InspectorClient` wrapper is constructed with
-        the attached :class:`ScanContext` so its underlying boto3 clients
-        come from ``ctx.get_client(...)`` and pick up the bounded
-        ``Client_Config`` (timeouts, retries, pool size).
+        Each wrapper obtains its underlying boto3 ``inspector2`` and
+        ``organizations`` clients from ``self._ctx.get_client(...)``.
         """
-        # Clear existing clients
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = InspectorClient(region, ctx=self._ctx)
@@ -49,192 +86,254 @@ class InspectorCheck(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def get_account_status(self, region: str) -> Dict[str, Any]:
+    def _cached_call(
+        self, region: str, cache_key: str, method: str, *args: Any
+    ) -> Mapping[str, Any]:
         """
-        Get Inspector account status with caching.
+        Run one client method for a Region through the accessor shape.
 
         Args:
-            region: AWS region name
+            region: AWS region name.
+            cache_key: Key within the ``"inspector"`` namespace.
+            method: Name of the :class:`InspectorClient` method to call.
+            *args: Positional arguments for that method.
 
         Returns:
-            Dictionary containing account status
+            The cached or freshly fetched response dict, or an error result.
         """
-        account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return {}
-
-        # Check the per-scan namespaced cache first.
-        cache_key = f"account_status:{account_id}:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Inspector account status for {cache_key}")
+            logger.debug(f"Inspector: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Inspector client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(f"Inspector: No client available for region {region}")
+            return no_client_result(service="Inspector", region=region)
 
-        # Get account status from client
-        response = client.batch_get_account_status(account_ids=[account_id])
+        logger.debug(f"Inspector: Fetching {cache_key}")
+        result = getattr(client, method)(*args)
 
-        # Extract the account status for the current account
-        account_status: Dict[str, Any] = {}
-        for status in response.get('accounts', []):
-            if status.get('accountId') == account_id:
-                # Restructure the account status to make it easier to access
-                account_status = {
-                    'accountId': status.get('accountId'),
-                    'state': status.get('state', {}),
-                    # Extract resource states to top level for easier access in checks
-                    'ec2': status.get('resourceState', {}).get('ec2', {}),
-                    'ecr': status.get('resourceState', {}).get('ecr', {}),
-                    'lambda': status.get('resourceState', {}).get('lambda', {}),
-                    'lambdaCode': status.get('resourceState', {}).get('lambdaCode', {})
-                }
-                break
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
 
-        # Cache the result in the per-scan namespaced cache.
-        self._ctx._set(self.NAMESPACE, cache_key, account_status)
-        logger.debug(f"Cached Inspector account status for {cache_key}")
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-        return account_status
+    # ----------------------------------------------------------------- #
+    # Pure helpers over a success dict, never over an accessor's raw return
+    # ----------------------------------------------------------------- #
 
-    def get_delegated_admin(self, region: str) -> Dict[str, Any]:
+    @staticmethod
+    def caller_is_delegated_admin(error: Mapping[str, str]) -> bool:
         """
-        Get Inspector delegated admin with caching.
+        Whether this error means "you are the delegated administrator".
+
+        ``inspector2:GetDelegatedAdminAccount`` refuses to answer when the calling
+        account *is* the delegated administrator, with
+        ``ValidationException: Invoking account is the delegated admin.`` That is
+        not a failure and it is not "not configured" -- it is the answer, stated as
+        a refusal. So it belongs in neither the transport path nor
+        :data:`NOT_CONFIGURED_ERRORS`: declaring it as "not configured" would turn
+        a correctly-configured organization into a FAIL, which is the opposite of
+        the truth.
+
+        A check that sees this should read the delegated administrator as its own
+        account and carry on. ``SRA-INSPECTOR-07`` is the one that does.
 
         Args:
-            region: AWS region name
+            error: An error result's ``Error`` sub-dict.
 
         Returns:
-            Dictionary containing delegated admin information
+            ``True`` for exactly that ``(operation, code, message)`` combination.
         """
-        cache_key = f"delegated_admin:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Inspector delegated admin for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Inspector client available for region {region}")
-            return {}
-
-        # Get delegated admin from client
-        response = client.get_delegated_admin_account()
-
-        # Cache the result
-        self._ctx._set(self.NAMESPACE, cache_key, response)
-        logger.debug(f"Cached Inspector delegated admin for {cache_key}")
-
-        return response
-
-    def get_organization_members(self, region: str) -> List[Dict[str, Any]]:
-        """
-        Get all AWS Organization member accounts with caching.
-
-        Args:
-            region: AWS region name (not used for Organizations API call)
-
-        Returns:
-            List of organization member accounts
-        """
-        # Use the current session region for Organizations API call.
-        current_region = self.session.region_name
-
-        # The Organizations call is global per scan; a single namespaced key
-        # is enough now that the cache is already scoped to the session via
-        # the per-scan ScanContext.
-        cache_key = "organization_members"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached organization members for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        # Use the client for the current region
-        client = self.get_client(current_region)
-        if not client:
-            logger.warning(f"No Inspector client available for region {current_region}")
-            return []
-
-        # Get organization members from client
-        accounts = client.list_organization_accounts()
-
-        # Cache the result
-        self._ctx._set(self.NAMESPACE, cache_key, accounts)
-        logger.debug(
-            f"Cached {len(accounts)} organization members for {cache_key} "
-            f"(using current region {current_region})"
+        return (
+            error.get("Operation") == "GetDelegatedAdminAccount"
+            and error.get("Code") == "ValidationException"
+            and "invoking account is the delegated admin"
+            in error.get("Message", "").lower()
         )
 
-        return accounts
-
-    def batch_get_account_status(self, region: str, account_ids: List[str]) -> Dict[str, Dict]:
+    @staticmethod
+    def account_status_of(
+        response: Mapping[str, Any], account_id: str
+    ) -> Dict[str, Any]:
         """
-        Get Inspector account status for multiple accounts with caching.
+        Flatten one account's entry out of a ``BatchGetAccountStatus`` response.
+
+        Call only after ``"Error" in response`` is False.
+
+        Args:
+            response: A successful :meth:`get_account_status` response.
+            account_id: The account whose entry to read.
+
+        Returns:
+            ``{"accountId", "state", "ec2", "ecr", "lambda", "lambdaCode"}``, or
+            ``{}`` when the response carries no entry for that account. Here
+            ``{}`` means exactly one thing -- AWS answered and this account is not
+            in the result -- because a failure could not have reached this far.
+        """
+        for status in response.get('accounts', []):
+            if status.get('accountId') != account_id:
+                continue
+            resource_state = status.get('resourceState', {})
+            return {
+                'accountId': status.get('accountId'),
+                'state': status.get('state', {}),
+                'ec2': resource_state.get('ec2', {}),
+                'ecr': resource_state.get('ecr', {}),
+                'lambda': resource_state.get('lambda', {}),
+                'lambdaCode': resource_state.get('lambdaCode', {}),
+            }
+        return {}
+
+    @staticmethod
+    def status_by_account(response: Mapping[str, Any]) -> Dict[str, Dict]:
+        """
+        Index a ``BatchGetAccountStatus`` response by account ID.
+
+        Call only after ``"Error" in response`` is False.
+
+        Args:
+            response: A successful :meth:`batch_get_account_status` response.
+
+        Returns:
+            ``{account_id: account_entry}``. Complete by construction, because a
+            partial batch is now an error result rather than a short map.
+        """
+        return {
+            account['accountId']: account
+            for account in response.get('accounts', [])
+            if account.get('accountId')
+        }
+
+    # ----------------------------------------------------------------- #
+    # Accessors
+    # ----------------------------------------------------------------- #
+
+    def get_account_status(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Inspector account status for the scanned account, with caching.
 
         Args:
             region: AWS region name
-            account_ids: List of account IDs to check
 
         Returns:
-            Dictionary mapping account IDs to their status
+            The ``BatchGetAccountStatus`` response, or an error result. Use
+            :meth:`account_status_of` to read this account's entry after the
+            error test.
+        """
+        return self._cached_call(
+            region,
+            f"account_status:{self.account_id}:{region}",
+            "batch_get_account_status",
+            [self.account_id],
+        )
+
+    def get_delegated_admin(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Inspector delegated administrator, with caching.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            The ``GetDelegatedAdminAccount`` response, or an error result.
+        """
+        return self._cached_call(
+            region, f"delegated_admin:{region}", "get_delegated_admin_account"
+        )
+
+    def get_organization_members(self, region: str) -> Mapping[str, Any]:
+        """
+        Get accounts in the AWS Organization, with caching.
+
+        The cache key carries no Region because the answer is organization-wide,
+        which is the pre-existing behaviour and is correct.
+
+        Args:
+            region: AWS region name, used only to select a client.
+
+        Returns:
+            ``{"Accounts": [...]}``, or an error result. First page only; see
+            ``InspectorClient.list_organization_accounts``.
+        """
+        return self._cached_call(
+            region, "organization_members", "list_organization_accounts"
+        )
+
+    def batch_get_account_status(
+        self, region: str, account_ids: List[str]
+    ) -> Mapping[str, Any]:
+        """
+        Get the Inspector status for many accounts, with caching.
+
+        ``BatchGetAccountStatus`` accepts at most 10 accounts, so this issues one
+        call per batch of 10 and merges the ``accounts`` members.
+
+        **A failing batch fails the whole call**, rather than being skipped. A
+        partial map is indistinguishable from a complete one, and an account
+        missing from it would read as "not enrolled".
+
+        Args:
+            region: AWS region name
+            account_ids: Account IDs to query.
+
+        Returns:
+            ``{"accounts": [...]}`` merged across batches, or the first batch's
+            error result. Use :meth:`status_by_account` to index it after the
+            error test.
         """
         cache_key = f"batch_status:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Inspector batch account status for {cache_key}")
+            logger.debug(f"Inspector: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Inspector client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(f"Inspector: No client available for region {region}")
+            return no_client_result(service="Inspector", region=region)
 
-        # Process accounts in batches of 10 (API limit)
-        result: Dict[str, Dict] = {}
-        for i in range(0, len(account_ids), 10):
-            batch = account_ids[i:i + 10]
-            try:
-                response = client.batch_get_account_status(batch)
-                for account in response.get('accounts', []):
-                    acc_id = account.get('accountId')
-                    if acc_id:
-                        result[acc_id] = account
-            except Exception as e:
-                logger.debug(f"Error getting batch account status in {region}: {e}")
+        # One batch is the common case, and its response is cached **by identity**:
+        # the accessor contract is that a check receives the client's response
+        # dict unchanged, so a single-batch call must not rebuild it.
+        responses: List[Mapping[str, Any]] = []
+        for start in range(0, len(account_ids), 10):
+            batch = account_ids[start:start + 10]
+            response = client.batch_get_account_status(batch)
+            if is_error(response):
+                # Not cached, and not partially returned: a short map is
+                # indistinguishable from a complete one.
+                return response
+            responses.append(response)
 
-        # Cache the result
+        if len(responses) == 1:
+            result: Mapping[str, Any] = responses[0]
+        else:
+            accounts: List[Dict[str, Any]] = []
+            for response in responses:
+                accounts.extend(response.get('accounts', []))
+            result = {"accounts": accounts}
         self._ctx._set(self.NAMESPACE, cache_key, result)
         logger.debug(
-            f"Cached Inspector batch account status for {len(result)} accounts in {region}"
+            f"Inspector: cached batch status for "
+            f"{len(result.get('accounts', []))} accounts in {region}"
         )
-
         return result
 
-    def get_organization_configuration(self, region: str) -> Dict[str, Any]:
+    def get_organization_configuration(self, region: str) -> Mapping[str, Any]:
         """
-        Get Inspector organization configuration with caching.
+        Get the Inspector organization configuration, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Dictionary containing organization configuration
+            The ``DescribeOrganizationConfiguration`` response, or an error
+            result.
         """
-        cache_key = f"organization_configuration:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Inspector organization configuration for {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Inspector client available for region {region}")
-            return {}
-
-        # Get organization configuration from client
-        response = client.describe_organization_configuration()
-
-        # Cache the result
-        self._ctx._set(self.NAMESPACE, cache_key, response)
-        logger.debug(f"Cached Inspector organization configuration for {cache_key}")
-
-        return response
+        return self._cached_call(
+            region,
+            f"organization_configuration:{region}",
+            "describe_organization_configuration",
+        )

@@ -1,15 +1,21 @@
 """
 Base class for Audit Manager security checks.
 
-As of the scan-context-refactor (task 8.12), per-scan cached AWS responses
-live on the attached :class:`~sraverify.core.scan_context.ScanContext` under
-the ``"auditmanager"`` namespace. The previous class-level
-``_account_status_cache`` dict has been removed; reads and writes go
-through ``self._ctx._has`` / ``self._ctx._get`` / ``self._ctx._set``,
-which keeps the cache scoped to a single ``run_checks`` invocation and
-makes it eligible for garbage collection when the scan ends.
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"auditmanager"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+:data:`AuditManagerCheck.NOT_CONFIGURED_ERRORS` is empty, and the comment on it
+says why: the one candidate code has not been observed against a not-yet-set-up
+account, and an undeclared code resolves to an honest ERROR.
 """
-from typing import Dict, Any
+from typing import ClassVar, Dict, Any
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
 from sraverify.services.auditmanager.client import AuditManagerClient
 
@@ -20,6 +26,16 @@ class AuditManagerCheck(SecurityCheck):
     #: Namespace string used for ``ScanContext`` cache reads/writes
     #: (Requirement 5.12).
     NAMESPACE = "auditmanager"
+
+    #: Empty, and deliberately so, pending confirmation.
+    #:
+    #: ``GetOrganizationAdminAccount`` answers ``AccessDeniedException`` both for a
+    #: genuine permission failure and -- reportedly -- with a "Please complete AWS
+    #: Audit Manager setup" message when the account has not been set up. The
+    #: second has never been observed against such an account, so it is not
+    #: declared: an undeclared code yields an honest ERROR, whereas declaring it
+    #: unconfirmed would risk fabricating a FAIL.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
 
     def _setup_clients(self):
         """Set up Audit Manager clients for each region.
@@ -54,9 +70,13 @@ class AuditManagerCheck(SecurityCheck):
 
         client = self.get_client(region)
         if not client:
-            return {"Error": {"Code": "NoClient", "Message": f"No client available for region {region}"}}
+            return no_client_result(service="Audit Manager", region=region)
 
         status = client.get_account_status()
+        if is_error(status):
+            # Never cached: a retry has to be able to re-issue the call.
+            return status
+
         self._ctx._set(self.NAMESPACE, cache_key, status)
         return status
 
@@ -79,8 +99,12 @@ class AuditManagerCheck(SecurityCheck):
 
         client = self.get_client(region)
         if not client:
-            return {"Error": {"Code": "NoClient", "Message": f"No client available for region {region}"}}
+            return no_client_result(service="Audit Manager", region=region)
 
         admin_info = client.get_organization_admin_account()
+        if is_error(admin_info):
+            # Never cached: a retry has to be able to re-issue the call.
+            return admin_info
+
         self._ctx._set(self.NAMESPACE, cache_key, admin_info)
         return admin_info

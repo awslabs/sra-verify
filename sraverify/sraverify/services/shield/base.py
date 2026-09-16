@@ -1,22 +1,28 @@
 """
 Base class for Shield security checks.
 
-As of the scan-context-refactor (task 8.10), per-scan cached AWS responses
-live on the attached :class:`~sraverify.core.scan_context.ScanContext` under
-the ``"shield"`` namespace. The previous class-level ``_subscription_cache``
-dict has been removed; reads and writes go through ``self._ctx._has`` /
-``self._ctx._get`` / ``self._ctx._set``, which keeps the cache scoped to one
-``run_checks`` invocation and makes the cache eligible for garbage
-collection when the scan ends.
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"shield"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
 
-Shield is a global service: every concrete Shield check passes
-``"us-east-1"`` to the typed methods below. ``_setup_clients`` still
-constructs one ``ShieldClient`` per region from ``self.regions`` so this
-class doesn't need to know which region the checks will pin to; the wrapper
-itself keeps the region passthrough behavior described in
-:class:`~sraverify.services.shield.client.ShieldClient`.
+Shield is a global service and every concrete Shield check passes ``"us-east-1"``
+to the accessors below. ``_setup_clients`` still builds one wrapper per Region in
+``self.regions``, so this class does not need to know which Region the checks will
+pin to.
+
+Three accessors -- :meth:`get_lambda_function`, :meth:`get_web_acl_for_resource`
+and :meth:`get_cloudwatch_alarms_for_resource` -- are **uncached**, because each is
+parameterized on a resource ARN or a function name. They still owe the no-client
+error result and the never-cache-a-failure guarantee.
 """
-from typing import Dict, Any, Optional
+from typing import Any, ClassVar, Dict, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
 from sraverify.services.shield.client import ShieldClient
 from sraverify.core.logging import logger
@@ -28,6 +34,102 @@ class ShieldCheck(SecurityCheck):
     #: Namespace string used for ``ScanContext`` cache reads/writes
     #: (Requirement 5.10).
     NAMESPACE = "shield"
+
+    #: The pairs that mean "the control is not configured".
+    #:
+    #: All fourteen Shield checks already reached this conclusion by hand, with an
+    #: inline ``error_code == "ResourceNotFoundException"`` compare repeated
+    #: fourteen times. Declaring it once is what stops those fourteen copies
+    #: drifting, and what keeps the judgement keyed by *operation* -- the same code
+    #: means "no Shield Advanced subscription" through DescribeSubscription and
+    #: "that Lambda function does not exist" through GetFunction, and both are the
+    #: control being absent, but they are separate facts and are declared
+    #: separately.
+    #:
+    #: ``ListProtections`` and ``DescribeDRTAccess`` are declared for the same code
+    #: on the strength of a live observation, and the first draft of this table
+    #: omitted them on the reasoning that "no protections" arrives as a successful
+    #: response with an empty ``Protections`` list. That reasoning is right about an
+    #: account that *has* a subscription and wrong about one that does not: in an
+    #: unsubscribed account both calls fail outright with
+    #: ``ResourceNotFoundException: The subscription does not exist.`` The
+    #: acceptance gate caught the omission as ten checks moving FAIL to ERROR
+    #: against records it could see were semantic.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "DescribeSubscription": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/waf/latest/DDOSAPIReference/"
+                    "API_DescribeSubscription.html -- ResourceNotFoundException is "
+                    "returned when the account has no Shield Advanced "
+                    "subscription, which is exactly what these checks test for. "
+                    "All fourteen Shield checks already classified it this way "
+                    "with an inline code compare before this table existed."
+                ),
+            ),
+        },
+        "GetSubscriptionState": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/waf/latest/DDOSAPIReference/"
+                    "API_GetSubscriptionState.html -- same absent-subscription "
+                    "condition as DescribeSubscription, reached through the "
+                    "status call the checks use to decide ACTIVE versus INACTIVE."
+                ),
+            ),
+        },
+        "ListProtections": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "Observed 2026-09-16 in a controlled account with no "
+                    "Shield Advanced subscription: "
+                    "aws_call_failed operation=ListProtections region=us-east-1 "
+                    "code=ResourceNotFoundException message=\"The subscription "
+                    "does not exist.\" -- byte-identical to the message "
+                    "DescribeSubscription returns for the same condition, so this "
+                    "is the absent subscription and not an absent protection. Nine "
+                    "checks read this call and all nine reported it as a FAIL by "
+                    "hand before this table existed."
+                ),
+            ),
+        },
+        "DescribeDRTAccess": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "Observed 2026-09-16 in the same unsubscribed account: "
+                    "aws_call_failed operation=DescribeDRTAccess region=us-east-1 "
+                    "code=ResourceNotFoundException message=\"The subscription "
+                    "does not exist.\" -- the same absent-subscription condition. "
+                    "SRA-SHIELD-08 asks whether the Shield Response Team has "
+                    "access, and without a subscription it cannot, so the control "
+                    "is absent rather than undetermined."
+                ),
+            ),
+        },
+        "GetFunction": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/lambda/latest/api/"
+                    "API_GetFunction.html -- ResourceNotFoundException is returned "
+                    "when the named function does not exist. SRA-SHIELD-13 asks "
+                    "whether a Shield response Lambda exists, so its absence is "
+                    "the control being absent rather than an inability to look."
+                ),
+            ),
+        },
+        "GetWebACLForResource": {
+            "WAFNonexistentItemException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/waf/latest/APIReference/"
+                    "API_GetWebACLForResource.html -- WAFNonexistentItemException "
+                    "means the resource has no associated web ACL. The client's "
+                    "CloudFront branch synthesizes the same code for a "
+                    "distribution whose WebACLId is empty, so one declaration "
+                    "covers both paths of SRA-SHIELD-12."
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up Shield clients for each region.
@@ -67,7 +169,7 @@ class ShieldCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing subscription details or empty dict if not available
+            The ``DescribeSubscription`` response on success, or an error result.
         """
         cache_key = f"subscription_state:{region}"
 
@@ -78,10 +180,14 @@ class ShieldCheck(SecurityCheck):
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Fetching subscription state for {region}")
         subscription = client.get_subscription_state()
+
+        if is_error(subscription):
+            # Never cached: a retry has to be able to re-issue the call.
+            return subscription
 
         self._ctx._set(self.NAMESPACE, cache_key, subscription)
         logger.debug(f"Shield: Cached subscription state for {region}")
@@ -99,7 +205,7 @@ class ShieldCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing subscription status or empty dict if not available
+            The ``GetSubscriptionState`` response on success, or an error result.
         """
         cache_key = f"subscription_status:{region}"
 
@@ -110,10 +216,14 @@ class ShieldCheck(SecurityCheck):
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Fetching subscription status for {region}")
         status = client.get_subscription_status()
+
+        if is_error(status):
+            # Never cached: a retry has to be able to re-issue the call.
+            return status
 
         self._ctx._set(self.NAMESPACE, cache_key, status)
         logger.debug(f"Shield: Cached subscription status for {region}")
@@ -132,7 +242,7 @@ class ShieldCheck(SecurityCheck):
             resource_type: Optional resource type filter
 
         Returns:
-            Dictionary containing protections list or empty dict if not available
+            The ``ListProtections`` response on success, or an error result.
         """
         cache_key = f"protections:{region}:{resource_type or 'all'}"
 
@@ -143,10 +253,14 @@ class ShieldCheck(SecurityCheck):
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Listing protections for {region}")
         protections = client.list_protections(resource_type)
+
+        if is_error(protections):
+            # Never cached: a retry has to be able to re-issue the call.
+            return protections
 
         self._ctx._set(self.NAMESPACE, cache_key, protections)
         logger.debug(f"Shield: Cached protections for {region}")
@@ -164,7 +278,7 @@ class ShieldCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing DRT access details or empty dict if not available
+            The ``DescribeDRTAccess`` response on success, or an error result.
         """
         cache_key = f"drt_access:{region}"
 
@@ -175,10 +289,14 @@ class ShieldCheck(SecurityCheck):
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Describing DRT access for {region}")
         drt_access = client.describe_drt_access()
+
+        if is_error(drt_access):
+            # Never cached: a retry has to be able to re-issue the call.
+            return drt_access
 
         self._ctx._set(self.NAMESPACE, cache_key, drt_access)
         logger.debug(f"Shield: Cached DRT access for {region}")
@@ -198,12 +316,12 @@ class ShieldCheck(SecurityCheck):
             function_name: Name of the Lambda function
 
         Returns:
-            Dictionary containing function details or empty dict if not available
+            The ``GetFunction`` response on success, or an error result.
         """
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Getting Lambda function {function_name} for {region}")
         return client.get_lambda_function(function_name)
@@ -221,12 +339,12 @@ class ShieldCheck(SecurityCheck):
             resource_arn: ARN of the resource
 
         Returns:
-            Dictionary containing web ACL details or empty dict if not available
+            The web ACL association on success, or an error result.
         """
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Getting web ACL for resource {resource_arn} in {region}")
         return client.get_web_acl_for_resource(resource_arn)
@@ -244,12 +362,12 @@ class ShieldCheck(SecurityCheck):
             resource_arn: ARN of the resource
 
         Returns:
-            Dictionary containing alarm details or empty dict if not available
+            ``{"DDoSDetectedAlarms": [...]}`` on success, or an error result.
         """
         client = self.get_client(region)
         if not client:
             logger.warning(f"Shield: No Shield client available for region {region}")
-            return {}
+            return no_client_result(service="Shield", region=region)
 
         logger.debug(f"Shield: Getting CloudWatch alarms for resource {resource_arn} in {region}")
         return client.get_cloudwatch_alarms_for_resource(resource_arn)

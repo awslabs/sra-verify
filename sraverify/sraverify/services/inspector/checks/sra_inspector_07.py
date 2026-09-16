@@ -55,7 +55,31 @@ class SRA_INSPECTOR_07(InspectorCheck):
         # Check each region separately
         for region in self.regions:
             # Get organization members
-            org_accounts = self.get_organization_members(region)
+            members_response = self.get_organization_members(region)
+
+            if "Error" in members_response:
+                error = members_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization",
+                        checked_value="All organization accounts have Inspector enabled",
+                        actual_value="No AWS Organization exists, so it has no accounts to enrol in Inspector",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization",
+                        checked_value="All organization accounts have Inspector enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            org_accounts = members_response.get('Accounts', [])
 
             # Create a set of all active organization account IDs
             org_account_ids = set()
@@ -65,6 +89,37 @@ class SRA_INSPECTOR_07(InspectorCheck):
 
             # Get delegated admin account
             delegated_admin_response = self.get_delegated_admin(region)
+
+            if "Error" in delegated_admin_response:
+                error = delegated_admin_response['Error']
+                if self.caller_is_delegated_admin(error):
+                    # AWS refused to answer *because* this account is the
+                    # delegated administrator, which is the answer. Read it as
+                    # such and carry on rather than reporting an ERROR.
+                    delegated_admin_response = {
+                        "delegatedAdmin": {"accountId": self.account_id}
+                    }
+                elif self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization",
+                        checked_value="All organization accounts have Inspector enabled",
+                        actual_value="No Inspector delegated administrator is configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization",
+                        checked_value="All organization accounts have Inspector enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                if "Error" in delegated_admin_response:
+                    continue
+
             delegated_admin = delegated_admin_response.get('delegatedAdmin', {})
             delegated_admin_id = delegated_admin.get('accountId')
 
@@ -85,7 +140,31 @@ class SRA_INSPECTOR_07(InspectorCheck):
             accounts_list = list(accounts_to_check)
 
             # Use BatchGetAccountStatus to check which accounts have Inspector enabled
-            account_statuses = self.batch_get_account_status(region, accounts_list)
+            batch_response = self.batch_get_account_status(region, accounts_list)
+
+            if "Error" in batch_response:
+                error = batch_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization",
+                        checked_value="All organization accounts have Inspector enabled",
+                        actual_value="Inspector account status could not be read for the organization",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{region}/organization",
+                        checked_value="All organization accounts have Inspector enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            account_statuses = self.status_by_account(batch_response)
 
             # Find accounts that should have Inspector enabled but don't
             missing_accounts = set()

@@ -1,19 +1,29 @@
 """
 Base class for GuardDuty security checks.
 
-As of the scan-context-refactor (task 8.1), GuardDuty's four previously
-class-level caches (``_detector_details_cache``, ``_detector_ids_cache``,
-``_org_config_cache``, ``_admin_accounts_cache``) have been replaced with
-calls to the per-scan :class:`ScanContext` namespaced primitives under the
-``"guardduty"`` namespace. The session-region-name prefix that used to be
-baked into every cache key (e.g., ``f"{self.session.region_name}:{region}"``)
-is dropped here because the per-scan context already scopes the cache to a
-single session.
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"guardduty"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+Every accessor follows one shape -- cache hit, no-client result, call, error
+guard, store, return -- and none of them extracts. A check receives the client's
+response dict and reads its keys after testing for ``"Error"``.
+
+:meth:`detector_id_of` is a pure helper over a success dict, which is what keeps
+its ``None`` unambiguous: it can only mean "GuardDuty is not enabled in this
+Region", because a failure could not have reached it.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, List, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.guardduty.client import GuardDutyClient
 from sraverify.core.logging import logger
+from sraverify.services.guardduty.client import GuardDutyClient
 
 
 class GuardDutyCheck(SecurityCheck):
@@ -25,6 +35,39 @@ class GuardDutyCheck(SecurityCheck):
     # ``ScanContext`` itself is per-scan and per-session, so there is no
     # need to disambiguate by session region anymore.
     NAMESPACE = "guardduty"
+
+    #: The (operation, code) pairs that mean "the control is not configured" for
+    #: GuardDuty.
+    #:
+    #: One entry, and it is the pair that motivated keying this table by
+    #: operation in the first place. ``BadRequestException`` is returned by two
+    #: GuardDuty operations with two different meanings:
+    #:
+    #: * from ``DescribeOrganizationConfiguration`` it means no delegated
+    #:   administrator has been enabled -- the control is genuinely absent, so a
+    #:   FAIL is correct;
+    #: * from ``ListOrganizationAdminAccounts`` it means "not the master account"
+    #:   -- the scan is being run from the wrong place, which is an ERROR and is
+    #:   deliberately **not** declared here. ``SRA-GUARDDUTY-14`` keeps its own
+    #:   remediation for that case.
+    #:
+    #: A table keyed by code alone would have to pick one meaning and be wrong
+    #: about the other.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "DescribeOrganizationConfiguration": {
+            "BadRequestException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/guardduty/latest/APIReference/"
+                    "API_DescribeOrganizationConfiguration.html -- BadRequestException "
+                    "is returned when the request is rejected because it is not "
+                    "valid for the account's state; observed in the 2026-09-12 "
+                    "CodeBuild log (build 82c0c298, us-west-1) as 'The request "
+                    "failed because a delegated administrator account has not "
+                    "been enabled.'"
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up GuardDuty clients for each region.
@@ -41,50 +84,63 @@ class GuardDutyCheck(SecurityCheck):
             for region in self.regions:
                 self._clients[region] = GuardDutyClient(region, ctx=self._ctx)
 
-    def get_detector_id(self, region: str) -> Optional[str]:
+    @staticmethod
+    def detector_id_of(response: Mapping[str, Any]) -> Optional[str]:
         """
-        Get detector ID for a specific region with caching.
+        Read the detector ID out of a successful ``ListDetectors`` response.
+
+        A pure helper over a **success dict**, never over an accessor's raw
+        return: handing it an error result would re-introduce a function that has
+        to cope with both shapes. Call it only after ``"Error" in response`` is
+        False.
+
+        Args:
+            response: A successful ``get_detector_id`` response.
+
+        Returns:
+            The first detector ID, or ``None`` when the Region has none. Here
+            ``None`` means exactly one thing -- GuardDuty is not enabled in this
+            Region -- because a failure could not have reached this far.
+        """
+        detector_ids = response.get("DetectorIds", [])
+        return detector_ids[0] if detector_ids else None
+
+    def get_detector_id(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the ``ListDetectors`` response for a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Detector ID if available, None otherwise
+            ``{"DetectorIds": [...]}`` on success, or an error result. Use
+            :meth:`detector_id_of` to read the ID after testing for ``"Error"``.
         """
         cache_key = f"detector_id:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
             logger.debug(f"GuardDuty: Using cached detector ID for {region}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Get client
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"GuardDuty: No GuardDuty client available for region {region}")
-            return None
+        if client is None:
+            logger.warning(
+                f"GuardDuty: No GuardDuty client available for region {region}"
+            )
+            return no_client_result(service="GuardDuty", region=region)
 
-        # Get detector ID
         logger.debug(f"GuardDuty: Fetching detector ID for {region}")
-        detector_id = client.get_detector_id()
+        result = client.get_detector_id()
 
-        # Check if detector_id contains an error
-        if detector_id and isinstance(detector_id, str) and detector_id.startswith("ERROR:"):
-            _, error_code, error_message = detector_id.split(":", 2)
-            logger.warning(f"GuardDuty: Error accessing GuardDuty in {region}: {error_code}")
-            self._ctx._set(self.NAMESPACE, cache_key, None)
-            return None
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call. This is
+            # the line that stops one denied ListDetectors from being replayed to
+            # every later GuardDuty check in the Region.
+            return result
 
-        # Cache the detector ID (preserves pre-refactor behaviour: only cache
-        # truthy detector IDs; an empty/None response is left uncached so a
-        # later call can retry).
-        if detector_id:
-            logger.debug(f"GuardDuty: Found detector ID {detector_id} for {region}")
-            self._ctx._set(self.NAMESPACE, cache_key, detector_id)
-        else:
-            logger.debug(f"GuardDuty: No detector ID found for {region}")
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-        return detector_id
-
-    def get_detector_details(self, region: str) -> Dict[str, Any]:
+    def get_detector_details(self, region: str) -> Mapping[str, Any]:
         """
         Get detector details for a specific region.
 
@@ -92,36 +148,48 @@ class GuardDutyCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing detector details or empty dict if not available
+            The ``GetDetector`` response on success, or an error result.
+
+            When the detector lookup itself fails, **that** error result is
+            returned unchanged rather than one describing ``GetDetector``: the
+            check should report the operation that actually failed.
         """
         cache_key = f"detector_details:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
             logger.debug(f"GuardDuty: Using cached detector details for {region}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Get detector ID
-        detector_id = self.get_detector_id(region)
+        detectors = self.get_detector_id(region)
+        if is_error(detectors):
+            return detectors
+
+        detector_id = self.detector_id_of(detectors)
         if not detector_id:
+            # A real answer: AWS says there is no detector here. Returned as an
+            # empty success dict rather than an error result, because nothing failed --
+            # the caller distinguishes it with `detector_id_of`.
             logger.debug(f"GuardDuty: No detector ID found for region {region}")
             return {}
 
-        # Get client
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"GuardDuty: No GuardDuty client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(
+                f"GuardDuty: No GuardDuty client available for region {region}"
+            )
+            return no_client_result(service="GuardDuty", region=region)
 
-        # Get detector details
-        logger.debug(f"GuardDuty: Getting detector details for {detector_id} in {region}")
-        details = client.get_detector_details(detector_id)
+        logger.debug(
+            f"GuardDuty: Getting detector details for {detector_id} in {region}"
+        )
+        result = client.get_detector_details(detector_id)
 
-        # Cache the details under the per-scan namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, details)
-        logger.debug(f"GuardDuty: Cached detector details for {region}")
+        if is_error(result):
+            return result
 
-        return details
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-    def get_organization_configuration(self, region: str) -> Dict[str, Any]:
+    def get_organization_configuration(self, region: str) -> Mapping[str, Any]:
         """
         Get organization configuration for a specific region.
 
@@ -129,36 +197,46 @@ class GuardDutyCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing organization configuration details or empty dict if not available
+            The ``DescribeOrganizationConfiguration`` response on success, or an
+            error result -- including the detector lookup's own error result when
+            that is what failed.
         """
         cache_key = f"org_config:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"GuardDuty: Using cached organization configuration for {region}")
+            logger.debug(
+                f"GuardDuty: Using cached organization configuration for {region}"
+            )
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Get detector ID
-        detector_id = self.get_detector_id(region)
+        detectors = self.get_detector_id(region)
+        if is_error(detectors):
+            return detectors
+
+        detector_id = self.detector_id_of(detectors)
         if not detector_id:
             logger.debug(f"GuardDuty: No detector ID found for region {region}")
             return {}
 
-        # Get client
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"GuardDuty: No GuardDuty client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(
+                f"GuardDuty: No GuardDuty client available for region {region}"
+            )
+            return no_client_result(service="GuardDuty", region=region)
 
-        # Get organization configuration
-        logger.debug(f"GuardDuty: Getting organization configuration for {detector_id} in {region}")
-        org_config = client.describe_organization_configuration(detector_id)
+        logger.debug(
+            f"GuardDuty: Getting organization configuration for {detector_id} "
+            f"in {region}"
+        )
+        result = client.describe_organization_configuration(detector_id)
 
-        # Cache the org config under the per-scan namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, org_config)
-        logger.debug(f"GuardDuty: Cached organization configuration for {region}")
+        if is_error(result):
+            return result
 
-        return org_config
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-    def list_organization_admin_accounts(self, region: str) -> Dict[str, Any]:
+    def list_organization_admin_accounts(self, region: str) -> Mapping[str, Any]:
         """
         List organization admin accounts for GuardDuty.
 
@@ -166,51 +244,48 @@ class GuardDutyCheck(SecurityCheck):
             region: AWS region name
 
         Returns:
-            Dictionary containing organization admin accounts details or empty dict if not available
+            The ``ListOrganizationAdminAccounts`` response on success, or an error
+            error result.
         """
         cache_key = f"admin_accounts:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"GuardDuty: Using cached organization admin accounts for {region}")
+            logger.debug(
+                f"GuardDuty: Using cached organization admin accounts for {region}"
+            )
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Get client
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"GuardDuty: No GuardDuty client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(
+                f"GuardDuty: No GuardDuty client available for region {region}"
+            )
+            return no_client_result(service="GuardDuty", region=region)
 
-        # List organization admin accounts
         logger.debug(f"GuardDuty: Listing organization admin accounts in {region}")
-        admin_accounts = client.list_organization_admin_accounts()
+        result = client.list_organization_admin_accounts()
 
-        # Cache the admin accounts under the per-scan namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, admin_accounts)
-        logger.debug(f"GuardDuty: Cached organization admin accounts for {region}")
+        if is_error(result):
+            return result
 
-        return admin_accounts
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
     def get_enabled_regions(self) -> List[str]:
         """
         Get list of regions where GuardDuty is enabled.
 
         Returns:
-            List of region names where GuardDuty is enabled
+            List of region names where GuardDuty is enabled. A Region whose
+            detector lookup **failed** is not included -- the scanner does not
+            know whether GuardDuty is enabled there, and guessing either way
+            would be worse than omitting it. The failure is reported by whichever
+            check consumed the error result.
         """
-        # Walk every region in scope and resolve a detector ID for it. Each
-        # ``get_detector_id`` call is cache-aware so subsequent passes don't
-        # re-issue any AWS calls.
+        enabled_regions: List[str] = []
         for region in self.regions:
-            self.get_detector_id(region)
-
-        # Read each region's cached detector ID back out of the per-scan
-        # namespace; only regions whose cached detector ID is truthy count
-        # as "GuardDuty enabled".
-        enabled_regions = []
-        for region in self.regions:
-            cache_key = f"detector_id:{region}"
-            if self._ctx._has(self.NAMESPACE, cache_key):
-                detector_id = self._ctx._get(self.NAMESPACE, cache_key)
-                if detector_id:
-                    enabled_regions.append(region)
-
+            result = self.get_detector_id(region)
+            if is_error(result):
+                continue
+            if self.detector_id_of(result):
+                enabled_regions.append(region)
         return enabled_regions

@@ -151,6 +151,7 @@ The registry is read through `all_checks()` only, which returns a `MappingProxyT
 5. **Correct service package** — `cls.__module__` must be `...services.<svc>.checks.sra_<svc>_NN` with `<svc>` matching the file stem's service segment. This is the one rule catching a *filing* mistake: `services/guardduty/checks/sra_shield_01.py` is self-consistent under rules 1–4, yet would inherit `GuardDutyCheck`, use GuardDuty's namespace and client, and report `Service=Shield` on every row.
 6. **No check inherits another check** — two classes would answer to one metadata lineage and a `Finding` would no longer be attributable to exactly one check ID.
 7. **No class attribute shadows a metadata property** — `check_id`, `service`, `severity`, `account_type`. These are read-only properties delegating to `meta`; a class attribute of the same name shadows the property and silently wins. Checked on `cls` and every intermediate base below `SecurityCheck`.
+8. **A check may not declare `NOT_CONFIGURED_ERRORS`.** It is the one class attribute a *service base class* may declare that a check may not, and it is enforced here rather than left to convention. The table's whole purpose is that two checks reading the same error result from the same operation cannot classify it differently; a check declaring its own would re-create exactly the per-check classification the contract removes.
 
 `register()` is the **last** step, so any failure leaves the registry byte-identical and a failed import contributes no partial catalog entry.
 
@@ -242,6 +243,55 @@ actual_value=f"Delegated admin account is {delegated_admin_id}, but no audit acc
 
 That row could not be written outside the loop. The rule is about what the row *says*, not about loop position for its own sake.
 
+## The fan-out trap
+
+**A guard placed above a per-resource loop collapses every row that loop would
+have produced.** This was hit twice during the client-error-contract migration,
+in Batches 3 and 4, and it is the one mistake in this file that a green test suite
+will not catch — the rows simply are not there to be wrong about.
+
+The shape of a fanning-out check:
+
+```python
+for region in self.regions:
+    protections = self.list_protections(region)     # enumerate
+    if "Error" in protections:
+        yield self.error(...)                        # one row for the Region
+        continue
+    for protection in protections.get("Protections", []):
+        web_acl = self.get_web_acl_for_resource(region, protection["ResourceArn"])
+        if "Error" in web_acl:
+            yield self.error(...)                    # one row for THIS resource
+            continue                                 # <- not `return`
+        ...
+```
+
+Two rules follow from it.
+
+**Put the per-resource error branch inside the loop, and `continue`, not
+`return`.** One undetermined resource costs one row; a `return` costs every
+resource after it, and a `return` above the loop costs all of them. A check that
+fanned out to 40 protected resources and now emits one ERROR row for the Region has
+not become more concise — it has stopped reporting 40 resources.
+
+**Where the batch is an implementation detail, keep the fan-out anyway.**
+`SRA-SECURITYINCIDENTRESPONSE-04` batches accounts in hundreds because
+`BatchGetMemberAccountDetails` caps at 100. When a batch call fails it yields one
+ERROR row **per account in that batch**, not one for the batch: coverage is asserted
+per account, and collapsing the batch would drop up to 100 accounts out of the
+report.
+
+The reverse case is also a trap, and it bites after this contract rather than
+before it: **a post-loop global verdict that fires when every Region errored.**
+Five Config checks ended with a "not found in any Region" FAIL that rested on
+Regions which had never answered. Each now tracks an `undetermined` flag and
+returns, because the per-Region ERROR rows already report the gap.
+
+Contrast with the **missing-input** guard, which genuinely belongs above the loop:
+see Region labelling above. The distinction is whether the guard's condition can be
+changed by an AWS call. A missing `--audit-account` cannot, so nothing is lost by
+deciding it first. An error result can, and is per-resource.
+
 ## Account lists
 
 Always `self.audit_accounts` and `self.log_archive_accounts`. Both are read-only properties delegating to `ScanContext`, and both return `[]` when the flag was not supplied.
@@ -282,23 +332,46 @@ The rules that matter when authoring:
 
 - `_has` / `_get` / `_set` are for **service base classes only**. A check class never touches them; it calls the typed accessor on its base class.
 - Cache keys are `"<thing>:<discriminator>"`. No account-ID or session-region prefix — the context is already per-scan and per-account.
-- **Never cache a failure.** If the AWS call errors, leave the slot empty so a retry re-issues the call.
-- `get_client(region)` can return `None`, and a missing wrapper for that region is the only reason it does. Always handle it.
+- **Never cache a failure, and return it unchanged.** If the client returns an error result, leave the slot empty *and* hand the error result back. Both halves matter: an accessor that swallowed it and returned `[]` would satisfy "did not cache a failure" while handing the check exactly the ambiguous value this contract removes.
+- `_set` refuses an error result and logs a warning, as a backstop. Do not rely on it — the accessor is the control, and the contract tests hold it per accessor.
+- `get_client(region)` can return `None`, and a missing wrapper for that region is the only reason it does. Return `no_client_result(service="<Display Name>", region=region)` — never `{}`, never `[]`. Its `Code` is `NoClient`, and it is never cached.
+- The accepted cost: where two checks call the same failing accessor, the call is issued once per calling check rather than once per scan. That is the price of a retry being possible, and it is bounded. The alternative was replaying one failure for the rest of the scan.
 
-## Logging
+## Logging, and the stdout contract
 
-Use the single shared logger. Never `print()` from check, base, or client code — stdout must stay clean for the MCP server.
+Use the single shared logger. **Never `print()` from check, base, or client code**,
+and never add a stdout handler. `core/logging.py` strips the root logger's handlers
+at import and installs a **stderr-only** handler, with `propagate = False`.
 
 ```python
 from sraverify.core.logging import logger
 ```
 
-`logger.debug(f"ServiceName: <message>")` in base classes, `logger.warning` for a missing client, `logger.error` for an API failure.
+`logger.debug(f"ServiceName: <message>")` in base classes, `logger.warning` for a
+missing client, `logger.error` for an API failure.
+
+This is a contract, not a convention, and it is asserted:
+`tests/property/test_stdout_contract_property.py` holds that nothing in the package
+writes to stdout. Two consumers depend on it. The MCP server speaks JSON-RPC over
+stdout, so one stray `print` corrupts the protocol. And the acceptance gate parses
+`aws_call_failed` and `check_done` records out of the CodeBuild `stderr/` artefact,
+which is only separable from the report because the report goes to a file and the
+diagnostics go to stderr.
+
+`AWSClient.aws_error` emits exactly one record per failure, in one line:
+
+```
+aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
+```
+
+`message` is last and `json.dumps`-encoded, so an AWS message containing a newline
+cannot break the one-line promise the gate's parser depends on. Do not add a second
+log record for the same failure — "exactly one" is asserted per client method.
 
 ## Error handling: three tiers
 
-1. **Client** — catch `ClientError`, log, return `{"Error": {"Code", "Message"}}`. Clients never raise.
-2. **Check** — inspect for the `"Error"` key and decide FAIL vs ERROR.
+1. **Client** — catch `AWS_EXCEPTIONS`, `return self.aws_error(e)`. Clients never raise for an AWS outcome, and never classify one. `structure.md` carries the canonical client shape and the reasoning behind the parameterless handler.
+2. **Check** — inspect for the `"Error"` key and decide FAIL vs ERROR through `self.is_not_configured(error)`, against the service's declared table. Never by comparing a code inline.
 3. **Orchestrator** — anything escaping `execute()` is caught per check in `run_checks`, logged with `exc_info=True`, and converted into exactly one synthetic ERROR row by `_synthetic_error`. A broken check degrades one row, not the whole scan. The synthetic row carries `region=GLOBAL_REGION`, `resource_id=None`, the check's **real** `severity` from `meta` (the pre-change row carried `"UNKNOWN"`, which was never a legal `Severity`), and `actual_value` naming the exception type as well as its message. It falls back to `meta.remediation.text` — the one place that is allowed, because the orchestrator knows only that something broke, and a cell naming the control beats an empty one.
 
 Note that a check raising midway contributes one synthetic ERROR row **and nothing else**: the rows it yielded before failing go with the discarded generator.
@@ -309,11 +382,13 @@ Note that a check raising midway contributes one synthetic ERROR row **and nothi
 - A permission or transport failure is an **ERROR**.
 - **Missing required input is an ERROR, not a FAIL.** Six checks got this wrong and have been fixed. A missing `--audit-account` means the control could not be evaluated; reporting it as FAIL asserts a negative the scan never established.
 
+The judgement is **declared, not coded**. Every check's error branch has the same
+two arms:
+
 ```python
 if "Error" in response:
-    error_code = response["Error"].get("Code", "")
-    error_message = response["Error"].get("Message", "Unknown error")
-    if error_code == "AWSOrganizationsNotInUseException":
+    error = response["Error"]
+    if self.is_not_configured(error):
         yield self.failed(
             region="global",
             resource_id=self.account_id,
@@ -323,11 +398,93 @@ if "Error" in response:
         yield self.error(
             region=region,
             resource_id=self.account_id,
-            actual_value=f"Error: {error_message}",
-            remediation="Grant the member role organizations:DescribeOrganization",
+            actual_value=(
+                f"{error['Operation']} failed: {error['Code']}: "
+                f"{error['Message']}"
+            ),
+            remediation=self._remediation_for(error),
         )
     return
 ```
+
+Three things in that shape are contractual.
+
+**`self.is_not_configured(error)`, never an inline code compare.** It reads
+`type(self).NOT_CONFIGURED_ERRORS` — declared on the **service base class**, never
+on a check, and `__init_subclass__` enforces that. Shield had the same
+`error_code == "ResourceNotFoundException"` compare in all fourteen of its checks,
+and `macie` had a `staticmethod` predicate that judged a code with no idea which
+operation produced it. One table means two checks reading the same error result from
+the same operation cannot classify it differently, *and* that the same code can be
+classified differently by two operations where they warrant it —
+`BadRequestException` means "not configured" through
+`guardduty:DescribeOrganizationConfiguration` and "wrong account" through
+`guardduty:ListOrganizationAdminAccounts`.
+
+**The ERROR `ActualValue` is `f"{Operation} failed: {Code}: {Message}"`.** Not a
+bare message. It is what lets a reader tell a permission gap from an unreachable
+endpoint without opening the build log, and
+`test_every_error_row_names_the_failed_operation_and_code` asserts the shape over
+all 158 checks.
+
+**The ERROR remediation is `self._remediation_for(error)`.** An ERROR row reports
+that the control could not be evaluated, so its remediation concerns fixing the
+*scan*, not fixing the control — which is why `error()` has no metadata fallback.
+`_remediation_for` picks wording by `Code` class in four buckets: transport,
+`NoClient`, access-denied, and everything else. The first two name the **service**,
+because neither carries an operation; the last two name the **operation**, because
+AWS answered and botocore attached one.
+
+### Declaring a `NOT_CONFIGURED_ERRORS` entry
+
+```python
+class OrganizationsCheck(SecurityCheck):
+    NAMESPACE = "organizations"
+
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "DescribeOrganization": {
+            "AWSOrganizationsNotInUseException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
+                    "API_DescribeOrganization.html -- returned when the account is "
+                    "not a member of an organization."
+                ),
+            ),
+        },
+    }
+```
+
+Keyed **operation first**, then code, then optionally a case-insensitive `message`
+substring for an *overloaded* code — one AWS returns for both a semantic condition
+and an access failure, so the code alone cannot separate them. `macie2` returns
+`AccessDeniedException` both when Macie is disabled in a Region and when the caller
+lacks the permission; only the message tells them apart.
+
+`evidence` is **required and non-blank**, and it is a structural field validated at
+construction rather than a comment. An entry converts an ERROR into a FAIL — it
+turns "we could not tell" into "we established the control is absent" — so an entry
+without evidence is an assertion, and a wrong one fabricates a finding out of a
+permission failure. Two forms count: the AWS API reference page that documents the
+code's meaning **for that operation**, or an observed `aws_call_failed` line from a
+controlled account. `test_discriminator_property.py` rejects a placeholder.
+
+**Anything undeclared resolves to ERROR.** That asymmetry is the whole design: a
+code AWS introduces later, or a known code arriving from an operation nobody
+considered, produces an honest "could not determine" rather than a fabricated FAIL.
+An empty table is legal and means "this service has no semantic codes" —
+`auditmanager`, `config`, `cloudtrail`, `ec2` and `iam` all declare `{}`, each with
+its reason recorded on the base class. `auditmanager`'s is the instructive one: the
+"Please complete AWS Audit Manager setup" condition could not be confirmed against
+a not-yet-set-up account, so it was **omitted** rather than declared on inference.
+
+**Under-declaring is a real failure mode, and the property suite cannot see it.**
+An undeclared code resolving to ERROR is the conservative default and violates
+nothing. `shield` shipped a table that omitted `ListProtections` and
+`DescribeDRTAccess` on the reasoning that "no protections" arrives as a successful
+empty list — true of a subscribed account, false of an unsubscribed one, where both
+calls fail with `ResourceNotFoundException: The subscription does not exist.` Ten
+controls would have stopped being reported as findings. Only the acceptance gate,
+reading real `aws_call_failed` records against real verdict movements, caught it.
 
 `WARN` was never a legal `Status`. `Status` has exactly `PASS`, `FAIL`, `ERROR`. The three former `status="WARN"` sites — two in `sra_config_07`, one in `sra_config_08` — are now `failed()`, per the product principle that a partially configured control is a failure.
 
@@ -363,10 +520,9 @@ Each of these is real and deliberately still here. The "why" matters, so nobody 
 
 - **`sra_firewallmanager_01` hardcodes `region = "us-east-1"` and has no region loop at all.** Firewall Manager's admin API is genuinely single-region, but the literal means `--regions` has no effect on the row's `Region` cell.
 - **`sra_securityincidentresponse_01` labels its four real rows with `self.regions[0]`** (falling back to `us-east-1`), so the same org-wide fact gets a different `Region` depending on `--regions` ordering — an **unstable row key**. Only its missing-input row is `global`. Deferred because relabelling moves the `Region` cell on genuine verdicts, which changes rows a consumer may already be diffing.
-- **`sra_securitylake_16` and `sra_securitylake_17` emit FAIL on an `AccessDeniedException`.** The cause is one level down: `SecurityLakeClient.list_subscribers` returns a bare `[]` on `ClientError` instead of the `{"Error": ...}` sentinel the client convention requires, so the check cannot tell "no subscribers" from "could not look". An undetermined state reported as a definite negative.
 - **`sra_macie_07` builds its `ActualValue` by joining a `set`** (`missing_accounts` is a set difference), so the cell's ordering is non-deterministic across runs and undiffable.
-- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and its `list_memberships()`, `get_delegated_administrators()`, and `get_organization_accounts()` all pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. That produces a false ERROR whenever the SIR region is not first in `--regions` — it masked 13 genuine PASS rows in a live account.
-- **`sra_securityincidentresponse_04` reports "no active Security Incident Response memberships found" as ERROR** where the project rule makes it a FAIL: AWS answered, and the answer is that the control is absent.
+- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_delegated_administrators()`, `get_organization_accounts()` and `get_role()` all pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which the acceptance gate reads as a regression it cannot attribute.
+- **`ShieldClient.list_protections` reads the first page only.** Paginating would change which resources the per-resource fan-out covers, and a row-count change is what the acceptance gate cannot attribute to a verdict fix.
 - **`IAMCheck._validate_metadata` is dead and unusable.** It validates `check_name`, `description`, and `check_logic` as instance attributes; `check_name` no longer exists on a check at all, and the other two live on `meta`. Nothing calls it.
 - **`SRA-CONFIG-08`'s ex-WARN branch is reachable but has never been observed.** It fires when the audit account is the Config delegated administrator for exactly one of `config.amazonaws.com` and `config-multiaccountsetup.amazonaws.com`. Exercising it needs an org configured that way.
 

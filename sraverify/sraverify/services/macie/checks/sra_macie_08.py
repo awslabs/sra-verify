@@ -50,6 +50,42 @@ class SRA_MACIE_08(MacieCheck):
             One Finding per Region.
         """
         for region in self.regions:
+            # Establish enablement through GetAdministratorAccount first, because
+            # DescribeOrganizationConfiguration cannot establish it.
+            #
+            # When Macie is off, macie2 answers GetAdministratorAccount with
+            # "Macie is not enabled" -- declared semantic -- but answers
+            # DescribeOrganizationConfiguration with "you must be the Macie
+            # administrator for an organization", which is *not* declared,
+            # because that sentence is also what an organization returns when
+            # Macie is enabled and delegated to a different account. One message
+            # covers two conditions and cannot separate them.
+            #
+            # Without this guard the two checks reading
+            # DescribeOrganizationConfiguration reported ERROR on an
+            # organization where the eight reading other operations all reported
+            # FAIL -- same account, same Region, same scan. Asking the
+            # unambiguous operation first resolves that disagreement without
+            # declaring the ambiguous sentence semantic, so a genuine permission
+            # denial on DescribeOrganizationConfiguration is still an ERROR.
+            #
+            # Inside the Region loop: Macie enablement is per-Region, and so is
+            # the row. Costs one GetAdministratorAccount per Region only when the
+            # accessor's slot is cold -- an error is never cached, so on a
+            # disabled organization this re-issues rather than reusing SRA-MACIE-05's
+            # call.
+            admin_account = self.get_macie_administrator_account(region)
+            if "Error" in admin_account and self.is_not_configured(
+                admin_account["Error"]
+            ):
+                yield self.failed(
+                    region=region,
+                    resource_id=f"macie2/{self.account_id}/{region}",
+                    checked_value="autoEnable: true",
+                    actual_value=f"Macie is not enabled in {region}, so new member accounts are not auto-enrolled",
+                )
+                continue
+
             # Get organization configuration using the base class method with caching
             org_config = self.get_organization_configuration(region)
 

@@ -148,10 +148,12 @@ class MacieClient(AWSClient):
             error result.
 
             An ``AccessDeniedException`` whose message says "must be the Macie
-            administrator" is deliberately **not** declared in the discriminator
-            table: it means the scan was pointed at an account that is not the
-            Macie administrator, which is an ERROR about the scan rather than a
-            finding about Macie.
+            administrator" is **not** declared in the discriminator table: that
+            sentence is returned both when Macie is disabled and when Macie is
+            enabled but delegated to another account, so it cannot establish
+            either on its own. The two checks that read this operation call
+            ``GetAdministratorAccount`` first, whose "Macie is not enabled"
+            message *is* declared, and classify from that.
         """
         try:
             return self.client.describe_organization_configuration()

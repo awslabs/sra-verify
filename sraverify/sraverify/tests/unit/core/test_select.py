@@ -766,6 +766,46 @@ def test_the_supplied_service_value_is_carried_unstripped(selector, registered):
     assert excinfo.value.args == ("all", "  NoSuchService  ", None)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "expected_fragments"),
+    [
+        pytest.param(
+            {"account_type": "audit", "check_id": "SRA-TESTGD-01"},
+            ("--account-type audit", "--check SRA-TESTGD-01"),
+            id="account-type-and-check-id",
+        ),
+        pytest.param(
+            {"service": "NoSuchService"},
+            ("--account-type all", "--service 'NoSuchService'"),
+            id="service-only",
+        ),
+    ],
+)
+def test_the_message_names_the_flags_rather_than_rendering_a_tuple(
+    selector, registered, kwargs, expected_fragments
+):
+    # The CLI logs str(exc) and exits 2. A three-arg exception renders by default
+    # as ('audit', None, 'SRA-TESTGD-01'), which requires the reader to work out
+    # which value is which; the args stay available for a library caller.
+    with pytest.raises(NoChecksSelectedError) as excinfo:
+        selector._select(**kwargs)
+
+    message = str(excinfo.value)
+    assert not message.startswith("("), f"still rendering the args tuple: {message}"
+    for fragment in expected_fragments:
+        assert fragment in message, f"{fragment!r} missing from {message!r}"
+    assert "--list-checks" in message, "no pointer to the inventory command"
+
+
+def test_an_omitted_filter_is_not_named_in_the_message(selector, registered):
+    # Only the filters the operator actually supplied are named. Reporting
+    # "--service None" would send them looking for a flag they never passed.
+    with pytest.raises(NoChecksSelectedError) as excinfo:
+        selector._select(account_type="audit", check_id="SRA-TESTGD-01")
+
+    assert "--service" not in str(excinfo.value)
+
+
 def test_an_empty_registry_raises_no_checks_selected(selector, catalog):
     catalog([])
 

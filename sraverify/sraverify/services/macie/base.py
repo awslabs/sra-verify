@@ -73,10 +73,20 @@ class MacieCheck(SecurityCheck):
     #: ``NotConfigured.evidence`` is a required field.
     #:
     #: ``DescribeOrganizationConfiguration`` gets the needle too, and only for the
-    #: "not enabled" message. The "must be the Macie administrator" condition is
-    #: deliberately not declared: it means the scan was pointed at a
-    #: non-administrator account, which is a fact about the scan, so it stays an
-    #: ERROR.
+    #: "not enabled" message. The "must be the Macie administrator" condition stays
+    #: undeclared, because that one sentence covers two different organizations: one
+    #: where Macie is off entirely, and one where Macie is on and delegated to some
+    #: other account. Declaring it would assert the first while the second is
+    #: equally consistent with the evidence.
+    #:
+    #: That is a limit on this table, not on the checks. ``SRA-MACIE-08`` and
+    #: ``-10`` are the only two checks whose sole operation is
+    #: ``DescribeOrganizationConfiguration``, and both call
+    #: :meth:`get_macie_administrator_account` first: ``GetAdministratorAccount``
+    #: answers the same disabled organization with "Macie is not enabled", which
+    #: *is* declared. So enablement is established through the operation that can
+    #: establish it, and a genuine permission denial on
+    #: ``DescribeOrganizationConfiguration`` remains an ERROR.
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
         "GetClassificationExportConfiguration": {
             "ResourceNotFoundException": NotConfigured(

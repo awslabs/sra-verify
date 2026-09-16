@@ -65,7 +65,7 @@ Bare `pytest` from the pip project root reaches the same tests and needs no `PYT
 cd sra-verify/sraverify && pytest -q
 ```
 
-Both report **7867 passed, 410 skipped**, and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (~26 hypothesis and reflection modules, including catalog-wide properties that iterate the real 158 registered checks and the 92 real client methods) plus `tests/unit/{core,cli,util}/`. `tests/unit/mcp/` and `tests/unit/services/` hold only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees and nothing else.
+Both report **7854 passed, 411 skipped**, and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (~26 hypothesis and reflection modules, including catalog-wide properties that iterate the real 158 registered checks and the 92 real client methods) plus `tests/unit/{core,cli,util}/`. `tests/unit/mcp/` and `tests/unit/services/` hold only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees and nothing else.
 
 Add `-p no:logging` when you want readable output: several modules assert on log records, and pytest's live-log capture floods the terminal otherwise.
 

@@ -944,7 +944,7 @@ clean scan that found nothing. The CLI turns both into exit 2.
 
 ## Tests
 
-The suite lives at `sraverify/tests/` and collects **7867 tests**. None of them needs AWS
+The suite lives at `sraverify/tests/` and collects **8265 tests**. None of them needs AWS
 credentials or issues an AWS call.
 
 From the pip project root:

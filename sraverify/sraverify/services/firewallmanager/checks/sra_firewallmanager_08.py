@@ -52,11 +52,26 @@ class SRA_FIREWALLMANAGER_08(FirewallManagerCheck):
             policies_response = self.list_policies(region)
 
             if "Error" in policies_response:
+                error = policies_response["Error"]
+                # Inside the per-Region loop, so one undetermined Region costs one
+                # row rather than the whole check's output.
+                #
+                # No is_not_configured branch, unlike SRA-FIREWALLMANAGER-01..07.
+                # Nothing is declared for ListPolicies -- "no policies" arrives
+                # there as a successful response with an empty PolicyList -- and
+                # this check treats that successful empty response as a PASS, on
+                # the reasoning that a Region with no policies has no policy with
+                # remediation disabled. A FAIL arm here would contradict that
+                # verdict, so any error from this call is an inability to
+                # determine.
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=policies_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Firewall Manager API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
                 continue
 

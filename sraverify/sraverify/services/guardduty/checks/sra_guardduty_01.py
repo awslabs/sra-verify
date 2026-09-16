@@ -48,7 +48,37 @@ class SRA_GUARDDUTY_01(GuardDutyCheck):
             One Finding per Region.
         """
         for region in self.regions:
-            detector_id = self.get_detector_id(region)
+            detectors = self.get_detector_id(region)
+
+            # Before the migration a failed ListDetectors call and a Region
+            # with no detector both arrived here as None, and both produced
+            # the FAIL below -- a masked FAIL, asserting the detector is
+            # absent on the strength of a call that never answered.
+            if "Error" in detectors:
+                error = detectors["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=None,
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                        remediation=f"Enable GuardDuty in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=None,
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            detector_id = self.detector_id_of(detectors)
 
             if not detector_id:
                 yield self.failed(

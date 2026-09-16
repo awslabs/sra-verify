@@ -73,14 +73,31 @@ class SRA_ORGANIZATIONS_09(OrganizationsCheck):
         # Get organization roots
         roots_response = self.get_roots()
         if "Error" in roots_response:
-            error_message = roots_response["Error"].get("Message", "Unknown error")
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=f"Error: {error_message}",
-                remediation="Check IAM permissions for Organizations API access",
-                checked_value="Log Archive account in Security OU",
-            )
+            error = roots_response["Error"]
+            if self.is_not_configured(error):
+                # A declared semantic pair: AWS answered and the control is
+                # absent. For Organizations that means either no organization
+                # exists, or the policy type is not enabled.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"AWS Organizations reports the control absent: "
+                        f"{error['Code']}"
+                    ),
+                    checked_value="Log Archive account in Security OU",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                    checked_value="Log Archive account in Security OU",
+                )
             return
 
         roots = roots_response.get("Roots", [])
@@ -100,14 +117,31 @@ class SRA_ORGANIZATIONS_09(OrganizationsCheck):
         # Get OUs under the root to find Security OU
         ous_response = self.get_ous_for_parent(root_id)
         if "Error" in ous_response:
-            error_message = ous_response["Error"].get("Message", "Unknown error")
-            yield self.error(
-                region=region,
-                resource_id=root_id,
-                actual_value=f"Error: {error_message}",
-                remediation="Check IAM permissions for Organizations API access",
-                checked_value="Log Archive account in Security OU",
-            )
+            error = ous_response["Error"]
+            if self.is_not_configured(error):
+                # A declared semantic pair: AWS answered and the control is
+                # absent. For Organizations that means either no organization
+                # exists, or the policy type is not enabled.
+                yield self.failed(
+                    region=region,
+                    resource_id=root_id,
+                    actual_value=(
+                        f"AWS Organizations reports the control absent: "
+                        f"{error['Code']}"
+                    ),
+                    checked_value="Log Archive account in Security OU",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=root_id,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                    checked_value="Log Archive account in Security OU",
+                )
             return
 
         ous = ous_response.get("OrganizationalUnits", [])
@@ -138,14 +172,31 @@ class SRA_ORGANIZATIONS_09(OrganizationsCheck):
         # Get accounts in Security OU
         accounts_response = self.get_accounts_for_parent(security_ou_id)
         if "Error" in accounts_response:
-            error_message = accounts_response["Error"].get("Message", "Unknown error")
-            yield self.error(
-                region=region,
-                resource_id=security_ou_id,
-                actual_value=f"Error: {error_message}",
-                remediation="Check IAM permissions for Organizations API access",
-                checked_value="Log Archive account in Security OU",
-            )
+            error = accounts_response["Error"]
+            if self.is_not_configured(error):
+                # A declared semantic pair: AWS answered and the control is
+                # absent. For Organizations that means either no organization
+                # exists, or the policy type is not enabled.
+                yield self.failed(
+                    region=region,
+                    resource_id=security_ou_id,
+                    actual_value=(
+                        f"AWS Organizations reports the control absent: "
+                        f"{error['Code']}"
+                    ),
+                    checked_value="Log Archive account in Security OU",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=security_ou_id,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                    checked_value="Log Archive account in Security OU",
+                )
             return
 
         accounts = accounts_response.get("Accounts", [])

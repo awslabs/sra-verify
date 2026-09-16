@@ -49,18 +49,31 @@ class SRA_MACIE_09(MacieCheck):
         """
         for region in self.regions:
             # Get Macie members using the base class method with caching
-            macie_members = self.get_macie_members(region)
+            members_response = self.get_macie_members(region)
 
-            # Check if the API call was successful
-            if macie_members is None:
-                yield self.failed(
-                    region=region,
-                    resource_id=f"macie2/{self.account_id}/{region}",
-                    checked_value="All member accounts have Macie enabled",
-                    actual_value="Failed to retrieve Macie members",
-                    remediation="Ensure you have the necessary permissions to call the Macie ListMembers API"
-                )
+            if "Error" in members_response:
+                error = members_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="All member accounts have Macie enabled",
+                        actual_value=f"Macie is not enabled in {region}, so it has no member accounts",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="All member accounts have Macie enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
+
+            macie_members = members_response.get('members', [])
 
             # Check if there are any members
             if not macie_members:

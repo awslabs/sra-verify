@@ -50,7 +50,26 @@ class SRA_EC2_01(EC2Check):
         """
         for region in self.regions:
             # Get EBS encryption by default status using the base class method with caching
-            encryption_status = self.get_ebs_encryption_by_default(region)
+            encryption_response = self.get_ebs_encryption_by_default(region)
+
+            if "Error" in encryption_response:
+                # ec2's NOT_CONFIGURED_ERRORS is empty:
+                # GetEbsEncryptionByDefault answers a boolean, so encryption being
+                # off is a successful response, not an error. Every error here is
+                # an inability to determine.
+                error = encryption_response['Error']
+                yield self.error(
+                    region=region,
+                    resource_id=f"ec2:{self.account_id}:{region}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+                continue
+
+            encryption_status = encryption_response
 
             # Check if the API call was successful
             if not encryption_status:

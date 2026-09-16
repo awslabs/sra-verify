@@ -54,7 +54,30 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
             One global Finding for the delegated administrator.
         """
 
-        delegated_admin = self.get_delegated_admin()
+        delegated_response = self.get_delegated_admin()
+
+        if "Error" in delegated_response:
+            error = delegated_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value="No AWS Organization exists, so IAM Access Analyzer can have no delegated administrator",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        delegated_admins = delegated_response.get('DelegatedAdministrators', [])
+        delegated_admin = delegated_admins[0] if delegated_admins else {}
 
         if not delegated_admin:
             yield self.failed(
@@ -65,48 +88,35 @@ class SRA_ACCESSANALYZER_03(AccessAnalyzerCheck):
             )
             return
 
-        try:
-            # Get the delegated admin account ID
-            delegated_admin_id = delegated_admin.get('Id')
+        # Get the delegated admin account ID
+        delegated_admin_id = delegated_admin.get('Id')
 
-            # Audit accounts reach the check through the ScanContext-delegating
-            # property. This used to be a two-branch hasattr probe whose first
-            # branch tested an underscore-prefixed attribute that lives on
-            # ScanContext and never on a check, so it was always False; the
-            # elif fallback already resolved through this property. Collapsing
-            # the two is behavior-preserving.
-            audit_accounts = self.audit_accounts
+        # Audit accounts reach the check through the ScanContext-delegating
+        # property, which returns [] when --audit-account was not supplied.
+        audit_accounts = self.audit_accounts
 
-            if not audit_accounts:
-                yield self.error(
-                    region="global",
-                    resource_id=delegated_admin_id,
-                    actual_value="Audit Account ID not provided",
-                    remediation="Provide the Audit account IDs using --audit-account flag",
-                )
-                return
-
-            # Check if delegated admin matches any of the specified Audit accounts
-            if delegated_admin_id in audit_accounts:
-                yield self.passed(
-                    region="global",
-                    resource_id=delegated_admin_id,
-                    actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
-                               f"matches one of the specified Audit accounts {', '.join(audit_accounts)}",
-                )
-            else:
-                yield self.failed(
-                    region="global",
-                    resource_id=delegated_admin_id,
-                    actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
-                               f"does not match any of the specified Audit accounts ({', '.join(audit_accounts)})",
-                    remediation=f"Update the delegated administrator to be one of the Audit accounts ({', '.join(audit_accounts)})",
-                )
-
-        except Exception as e:
+        if not audit_accounts:
             yield self.error(
                 region="global",
-                resource_id=delegated_admin_id if 'delegated_admin_id' in locals() else f"organization/{self.account_id}",
-                actual_value=f"Error checking delegated administrator: {str(e)}",
-                remediation="Ensure proper permissions to check Organizations structure",
+                resource_id=delegated_admin_id,
+                actual_value="Audit Account ID not provided",
+                remediation="Provide the Audit account IDs using --audit-account flag",
+            )
+            return
+
+        # Check if delegated admin matches any of the specified Audit accounts
+        if delegated_admin_id in audit_accounts:
+            yield self.passed(
+                region="global",
+                resource_id=delegated_admin_id,
+                actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
+                           f"matches one of the specified Audit accounts {', '.join(audit_accounts)}",
+            )
+        else:
+            yield self.failed(
+                region="global",
+                resource_id=delegated_admin_id,
+                actual_value=f"IAM Access Analyzer delegated administrator (Account: {delegated_admin_id}) "
+                           f"does not match any of the specified Audit accounts ({', '.join(audit_accounts)})",
+                remediation=f"Update the delegated administrator to be one of the Audit accounts ({', '.join(audit_accounts)})",
             )

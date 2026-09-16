@@ -3,12 +3,13 @@ Check if App Runner services are associated with AWS WAF.
 """
 from collections.abc import Iterable
 
+from sraverify.core.availability import service_available_in_region
+from sraverify.core.aws_errors import TRANSPORT_ERROR_CODES
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.waf.base import WAFCheck
-from sraverify.services.waf.client import TRANSPORT_ERROR_CODES
 
 
 class SRA_WAF_06(WAFCheck):
@@ -62,7 +63,11 @@ class SRA_WAF_06(WAFCheck):
             # claim we were unable to look when in fact there was nothing to
             # look at. This fact cannot be changed by an AWS call, so the guard
             # precedes the call.
-            if not self.region_supports_service("apprunner", region):
+            # Called directly rather than through a WAFCheck delegate. The
+            # delegate was the original implementation, lifted to core/ so every
+            # service could reach it and left behind only so the WAF checks did
+            # not have to change in the same commit; this is the one call site.
+            if not service_available_in_region("apprunner", region):
                 logger.debug(
                     f"WAF: App Runner has no endpoint in {region}; "
                     f"SRA-WAF-06 reports nothing for this Region"
@@ -71,40 +76,32 @@ class SRA_WAF_06(WAFCheck):
 
             services_response = self.get_apprunner_services(region)
 
-            # An empty response means no WAF client wrapper exists for this
-            # Region, so the control was not evaluated. Reporting it as "no App
-            # Runner services found" would be a PASS we never established.
-            if not services_response:
-                yield self.error(
-                    region=region,
-                    resource_id=None,
-                    actual_value=f"No WAF client available for region {region}",
-                    remediation=f"Confirm that {region} is enabled for this account and reachable from the scanning environment"
-                )
-                continue
-
             # App Runner is supported here but the call still failed, so the
             # control could not be evaluated. A transport failure and a denied
             # permission need different advice.
             if "Error" in services_response:
                 error = services_response["Error"]
-                error_code = error.get("Code", "Unknown")
-                error_message = error.get("Message", "Unknown error")
-                if error_code in TRANSPORT_ERROR_CODES:
+                # App Runner is supported here but the call still failed, so the
+                # control could not be evaluated. This check keeps its own wording
+                # for the transport case rather than deferring to
+                # _remediation_for: it is the one check that has already
+                # established the endpoint *should* exist in this Region, and a
+                # helper that knows only the code cannot say that.
+                if error["Code"] in TRANSPORT_ERROR_CODES:
                     remediation = (
                         f"App Runner is available in {region} but its endpoint could not be "
                         f"reached. Check network egress and DNS resolution from the scanning "
                         f"environment, then re-run."
                     )
                 else:
-                    remediation = (
-                        "Grant the member role apprunner:ListServices so App Runner services "
-                        "can be enumerated"
-                    )
+                    remediation = self._remediation_for(error)
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=f"Could not list App Runner services in {region}: {error_code}: {error_message}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
                     remediation=remediation
                 )
                 continue
@@ -124,27 +121,29 @@ class SRA_WAF_06(WAFCheck):
                 service_name = service.get("ServiceName")
                 service_id = service.get("ServiceId")
 
-                client = self.get_client(region)
-                if not client:
-                    continue
-
-                web_acl_response = client.get_web_acl_for_resource(service_arn)
+                web_acl_response = self.get_web_acl_for_resource(region, service_arn)
 
                 if "Error" in web_acl_response:
-                    error_code = web_acl_response["Error"].get("Code")
-                    if error_code == "AccessDeniedException":
-                        yield self.error(
-                            region=region,
-                            resource_id=service_name or service_id,
-                            actual_value=web_acl_response["Error"].get("Message", "Access denied"),
-                            remediation="Check IAM permissions for wafv2:GetWebACLForResource and apprunner:DescribeWebAclForService"
-                        )
-                    else:
+                    error = web_acl_response["Error"]
+                    # WAFNonexistentItemException is the declared "this resource
+                    # has no associated Web ACL" answer, and the only code that
+                    # is; every other code is an inability to determine.
+                    if self.is_not_configured(error):
                         yield self.failed(
                             region=region,
                             resource_id=service_name or service_id,
                             actual_value="No WAF Web ACL associated",
                             remediation="Associate a WAF Web ACL with this App Runner service using the AWS Console, CLI, or API"
+                        )
+                    else:
+                        yield self.error(
+                            region=region,
+                            resource_id=service_name or service_id,
+                            actual_value=(
+                                f"{error['Operation']} failed: {error['Code']}: "
+                                f"{error['Message']}"
+                            ),
+                            remediation=self._remediation_for(error),
                         )
                     continue
 

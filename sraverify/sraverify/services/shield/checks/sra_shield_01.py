@@ -49,8 +49,8 @@ class SRA_SHIELD_01(ShieldCheck):
         status = self.get_subscription_status(region)
 
         if "Error" in status:
-            error_code = status["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            error = status["Error"]
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -61,8 +61,11 @@ class SRA_SHIELD_01(ShieldCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=status["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Shield API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
         elif status.get("SubscriptionState") == "ACTIVE":
             yield self.passed(

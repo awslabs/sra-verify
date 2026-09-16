@@ -224,10 +224,23 @@ There is no registration step. Writing the file registers it.
    against the AWS documentation. Do not assume.
 2. New service? Create `services/<svc>/` with `__init__.py` (the discovery call), `base.py`,
    `client.py`, and `checks/__init__.py`.
-3. **`client.py`** — add the raw call. Paginate where a paginator exists. Wrap in
-   `try/except ClientError`, log, and return the error sentinel rather than raising.
-4. **`base.py`** — add a cached typed accessor under the class `NAMESPACE`. Reuse an
-   existing accessor if one already fetches the data.
+3. **`client.py`** — add the raw call to a class that inherits `AWSClient`. Acquire the
+   boto3 client in `__init__`, never in the method. Paginate where a paginator exists,
+   with the whole loop inside the `try`. The handler is
+   `except AWS_EXCEPTIONS as e: return self.aws_error(e)` — the same two lines as every
+   other method in the tree. Then add a `ClientAdapter` for it to
+   `tests/property/test_client_contract_property.py`, or that service's completeness test
+   fails.
+4. **`base.py`** — add a cached typed accessor under the class `NAMESPACE`. Return
+   `no_client_result(...)` when `get_client(region)` is `None`, and return an error result
+   unchanged without caching it. Reuse an existing accessor if one already fetches the
+   data. Then add an `AccessorAdapter` for it to
+   `tests/property/test_accessor_cache_property.py`, or
+   `test_every_public_base_method_is_classified` fails for that service.
+4a. **Is any error code from the new call *semantic*** — does it mean "the control is not
+   configured" rather than "we could not look"? If so, declare it in the base class's
+   `NOT_CONFIGURED_ERRORS` with its evidence. If you are not sure, leave it out: an
+   undeclared code yields an honest ERROR.
 5. **`checks/sra_<svc>_NN.py`** — the check class with `meta = CheckMeta(...)` and a
    yielding `execute()`.
 6. Verify: `sraverify --check SRA-<SERVICE>-NN --debug`.
@@ -506,23 +519,90 @@ def _setup_clients(self):
 
 ### Client method
 
+Every `<Service>Client` inherits `AWSClient` (`core/aws_client.py`) and chains
+`super().__init__(region, ctx)`.
+
 ```python
-def list_roots(self) -> Dict[str, Any]:
-    try:
-        roots = []
-        for page in self.client.get_paginator('list_roots').paginate():
-            roots.extend(page.get('Roots', []))
-        return {"Roots": roots}
-    except ClientError as e:
-        error_code = e.response.get('Error', {}).get('Code', '')
-        error_message = e.response.get('Error', {}).get('Message', str(e))
-        logger.error(f"Error listing roots: {error_message}")
-        return {"Error": {"Code": error_code, "Message": error_message}}
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
+
+
+class OrganizationsClient(AWSClient):
+    def __init__(self, ctx: ScanContext):
+        # Organizations is global: pinned inside the wrapper.
+        super().__init__("us-east-1", ctx)
+        self.client = ctx.get_client("organizations", region="us-east-1")
+
+    def list_roots(self) -> Mapping[str, Any]:
+        try:
+            roots = []
+            for page in self.client.get_paginator("list_roots").paginate():
+                roots.extend(page.get("Roots", []))
+            return {"Roots": roots}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 ```
 
-Clients take `ctx` and never raise. They return either a named-key success dict or
-`{"Error": {"Code", "Message"}}`. Always obtain the boto3 client from `ctx.get_client(...)`
-so the bounded config and client cache apply.
+That `except` clause is byte-identical in all 92 client methods, and that is the point:
+there is nothing to type per call site, so nothing that can be typed wrong. Earlier drafts
+passed `operation="ListRoots"` and `region=self.region`; both were removed on the
+reasoning that a value typed at 92 call sites will be typed wrong at one of them.
+
+**`AWS_EXCEPTIONS` is `(ClientError, BotoCoreError)`**, named as a tuple so an `except`
+clause cannot narrow the pair by accident. `except ClientError` alone is what let transport
+failures escape seven clients — an unreachable endpoint raised straight past the wrapper,
+out of `execute()`, and the orchestrator turned the whole check into one synthetic ERROR
+row, discarding every row it had already yielded for other Regions. Anything outside those
+two families — `AttributeError`, `KeyError`, `TypeError` — is a programming defect and must
+propagate; a handler that caught `Exception` would turn a typo into a plausible ERROR row
+per Region, recurring on every scan.
+
+**`self.aws_error(e)` takes only the exception.** The Region comes from `self.region`. The
+operation comes from `e.operation_name`, which botocore sets on every `ClientError`, and is
+`UNKNOWN_OPERATION` (`"Request"`) for a `BotoCoreError`, which never completed a request and
+so has no operation to claim. It logs exactly one record and returns the error result. It
+raises `TypeError` if handed anything that is not an AWS outcome, because a client that got
+there has caught too much.
+
+**Boto3 clients are acquired in `__init__` and nowhere else.** `ctx.get_client` reads
+bundled endpoint data and issues no network call, so its failure is deterministic and
+belongs to the orchestrator's guard; inside a method's `try` it would be caught as a
+`BotoCoreError` and turned into an error result describing a call that never happened. It is
+also what lets `util/generate_iam_policy.py` attribute each `self.<attr>.<method>(...)` to
+one AWS service by reading `__init__`.
+
+Clients never raise for an AWS outcome and **never classify one**. That judgement belongs to
+the check, against the service's declared table — see below.
+
+### The error result
+
+`core/aws_errors.py` defines the one shape a client returns in place of a response:
+
+```python
+{"Error": {"Code": "AccessDeniedException", "Message": "...", "Operation": "ListSubscribers"}}
+```
+
+Every field is a non-blank `str`. `"Error" in result` is the only test that separates
+success from failure, at every tier; `is_error(value)` is the strict form, and
+`error_result()` rejects exactly the inputs `is_error` would, so a malformed error result
+cannot be constructed.
+
+The shape is the whole point. Before it, the client tier returned four different things on
+failure — a `Code`+`Message` dict, the same dict with the code dropped, the string
+`"ERROR:{code}:{message}"`, and in 101 of 144 handlers a bare `{}`, `[]`, `None` or `bool`.
+A check handed the last of those cannot tell a disabled service from a denied permission
+from an unreachable endpoint, so it lands on whichever branch its author wrote for "no
+data" — and where that branch is `failed()`, an undetermined state is published as an
+established negative. In the 891-row baseline that was **502 rows**, 56% of the report.
+
+Two more constructors:
+
+- `no_client_result(service=..., region=...)` — what an accessor returns when
+  `get_client(region)` is `None`. No request was made, so `Code` is `NoClient` and
+  `Operation` is `UNKNOWN_OPERATION`. Never cached.
+- `TRANSPORT_ERROR_CODES` — the `Code` values the three "the network did not carry the
+  call" `BotoCoreError` subclasses produce, **derived** from the exception tuple rather than
+  written out, so the set a check tests against cannot drift from the one a client
+  produces.
 
 ## Caching
 
@@ -536,12 +616,21 @@ exists to prevent.
 - Cache keys are `"<thing>:<discriminator>"` with no account or session-region prefix — the
   context is already per-scan and per-account. `IAMCheck` is the exception and keys on
   `account_id`, because an assumed-role session can in principle cross account boundaries.
-- **Never cache a failure.**
+- **Never cache a failure, and return it unchanged.** Both halves matter: an accessor that
+  swallowed the error result and returned `[]` would satisfy "did not cache a failure" while
+  handing the check exactly the ambiguous value the contract removes. `_set` refuses an
+  error result as a backstop and logs a warning, but the accessor is the control.
+- The accepted cost: where two checks call the same failing accessor, the call is issued
+  once per calling check rather than once per scan. That is the price of a retry being
+  possible; the alternative was replaying one failure for the rest of the scan.
 
 ## Error handling: three tiers
 
-1. **Client** — catch `ClientError`, log, return `{"Error": {...}}`. Clients never raise.
-2. **Check** — inspect for the `"Error"` key and decide FAIL vs ERROR.
+1. **Client** — catch `AWS_EXCEPTIONS`, `return self.aws_error(e)`. Clients never raise for
+   an AWS outcome, and never decide FAIL versus ERROR.
+2. **Check** — inspect for the `"Error"` key and decide FAIL vs ERROR through
+   `self.is_not_configured(error)`, against the service's declared table. Never by
+   comparing a code inline.
 3. **Orchestrator** — one guarded block per check in `run_checks`, spanning construction,
    `initialize`, and consumption of `execute()`. Anything escaping it is logged with
    `exc_info=True` and converted by `_synthetic_error` into a single ERROR row built from
@@ -569,11 +658,12 @@ not in place. **ERROR** means we could not determine whether it is.
   phantom FAIL sends someone chasing a misconfiguration that does not exist *and* hides the
   fact that the control was never evaluated.
 
+The judgement is **declared, not coded**. Every check's error branch has the same two arms:
+
 ```python
 if "Error" in response:
-    error_code = response["Error"].get("Code", "")
-    error_message = response["Error"].get("Message", "Unknown error")
-    if error_code == "AWSOrganizationsNotInUseException":
+    error = response["Error"]
+    if self.is_not_configured(error):
         yield self.failed(
             region="global",
             resource_id=self.account_id,
@@ -583,11 +673,62 @@ if "Error" in response:
         yield self.error(
             region=region,
             resource_id=self.account_id,
-            actual_value=f"Error: {error_message}",
-            remediation="Grant the member role organizations:DescribeOrganization",
+            actual_value=(
+                f"{error['Operation']} failed: {error['Code']}: "
+                f"{error['Message']}"
+            ),
+            remediation=self._remediation_for(error),
         )
     return
 ```
+
+Three parts of that shape are contractual.
+
+**`self.is_not_configured(error)`.** It reads `type(self).NOT_CONFIGURED_ERRORS`, declared
+on the **service base class** and never on a check — `__init_subclass__` enforces that,
+because the table's purpose is that two checks reading the same error result from the same
+operation cannot classify it differently.
+
+```python
+class OrganizationsCheck(SecurityCheck):
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "DescribeOrganization": {
+            "AWSOrganizationsNotInUseException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
+                    "API_DescribeOrganization.html -- returned when the account is not "
+                    "a member of an organization."
+                ),
+            ),
+        },
+    }
+```
+
+Keyed **operation first**, then code, then optionally a case-insensitive `message`
+substring for a code AWS overloads — `macie2` returns `AccessDeniedException` both when
+Macie is disabled in a Region and when the caller lacks the permission, and only the
+message separates them. The same code can also mean different things through different
+operations: `BadRequestException` is "not configured" through
+`guardduty:DescribeOrganizationConfiguration` and "wrong account" through
+`guardduty:ListOrganizationAdminAccounts`.
+
+`evidence` is required, non-blank, and validated at construction rather than left as a
+comment. An entry turns "we could not tell" into "we established the control is absent", so
+an entry without evidence is an assertion, and a wrong one fabricates a finding out of a
+permission failure. **Anything undeclared resolves to ERROR** — a code AWS introduces later
+produces an honest "could not determine" rather than a fabricated FAIL. An empty table is
+legal and means the service has no semantic codes.
+
+**The ERROR `ActualValue` is `f"{Operation} failed: {Code}: {Message}"`**, not a bare
+message. It is what lets a reader tell a permission gap from an unreachable endpoint
+without opening the build log.
+
+**The ERROR remediation is `self._remediation_for(error)`.** An ERROR reports that the
+control was not evaluated, so its remediation concerns fixing the *scan*, not the control —
+which is why `error()` has no metadata fallback. `_remediation_for` picks wording by `Code`
+class in four buckets: transport, `NoClient`, access-denied, and everything else. The first
+two name the service, because neither carries an operation; the last two name the
+operation, because AWS answered and botocore attached one.
 
 `WARN` was never a legal `Status`. `Status` has exactly `PASS`, `FAIL`, and `ERROR`; a
 partially configured control is a FAIL.
@@ -684,6 +825,24 @@ from sraverify.core.logging import logger
 
 Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes,
 `logger.warning` for a missing client, `logger.error` for an API failure.
+
+**stdout being empty is a contract**, asserted by
+`tests/property/test_stdout_contract_property.py`. The MCP server speaks JSON-RPC over
+stdout, so one stray `print` corrupts the protocol. And one structured record on stderr
+keeps a scan's failures greppable under `--debug` — `AWSClient.aws_error` emits exactly one
+
+```
+aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
+```
+
+per failed call at **`debug`**, with `message` last and `json.dumps`-encoded so an AWS message
+containing an embedded newline cannot break the one-line promise. One failed call is one line, so
+`grep -c aws_call_failed` answers "how many calls failed" on a `--debug` log.
+
+`logger.error` is reserved for something that produced an ERROR row. A failed AWS call is not
+one — `AccessDeniedException: Macie is not enabled` becomes a FAIL — and the client tier cannot
+tell a semantic refusal from a broken scan, so logging it at `error` would classify one tier
+before `is_not_configured` runs.
 
 ## Library usage
 
@@ -785,7 +944,7 @@ clean scan that found nothing. The CLI turns both into exit 2.
 
 ## Tests
 
-The suite lives at `sraverify/tests/` and collects **3026 tests**. None of them needs AWS
+The suite lives at `sraverify/tests/` and collects **8265 tests**. None of them needs AWS
 credentials or issues an AWS call.
 
 From the pip project root:
@@ -800,11 +959,31 @@ From the workspace root, point `PYTHONPATH` at the pip project root:
 PYTHONPATH=sraverify python -m pytest sraverify/sraverify/tests/ -q
 ```
 
-- `tests/unit/core/` — registration, enums, `Finding`, `CheckMeta`, registry, selection
+- `tests/unit/core/` — registration, enums, `Finding`, `CheckMeta`, registry, selection,
+  the error result, `AWSClient.aws_error`, `_remediation_for`, the availability lookup
 - `tests/unit/cli/` — exit codes, including the scan paths
-- `tests/property/` — hypothesis modules covering metadata validation, `Finding`
-  immutability and value types, the row contract, CSV round-trip, helper signatures, the
-  accumulator ban, context isolation, registry bijection, and selection
+- `tests/property/` — hypothesis and reflection modules covering metadata validation,
+  `Finding` immutability and value types, the row contract, CSV round-trip, helper
+  signatures, the accumulator ban, context isolation, registry bijection, and selection
+
+The client-error-contract modules are the largest block, and between them they hold the whole
+contract:
+
+| Module | What it holds |
+| --- | --- |
+| `test_client_contract_property.py` | All 92 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition |
+| `test_accessor_cache_property.py` | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key |
+| `test_check_classification_property.py` | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call |
+| `test_discriminator_property.py` | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared |
+| `test_no_confessing_fail_property.py` | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access |
+| `test_stdout_contract_property.py` | Nothing in the package writes to stdout |
+
+Two of these carry **prescriptive** adapter tables — the `ClientAdapter` tables name the
+boto3 method, operation and success shape each client method is contracted to produce, and
+the `AccessorAdapter` tables do the same for base accessors. A new client method or accessor
+must be added to its table, or the completeness test fails for that service. That is
+deliberate: the tables are how the suite knows what to drive, so an unlisted method would be
+silently untested.
 
 Several property modules are **catalog-wide**: they enumerate all 158 registered checks with
 `pytest.mark.parametrize` rather than sampling, so a failure names the offending check ID in

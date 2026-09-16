@@ -57,11 +57,15 @@ class SRA_WAF_07(WAFCheck):
             instances_response = self.get_verified_access_instances(region)
 
             if "Error" in instances_response:
+                error = instances_response["Error"]
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=instances_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for EC2 and WAF API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
                 continue
 
@@ -83,27 +87,29 @@ class SRA_WAF_07(WAFCheck):
                 # Format: arn:partition:ec2:region:account-id:verified-access-instance/instance-id
                 instance_arn = f"arn:aws:ec2:{region}:{self.account_id}:verified-access-instance/{instance_id}"
 
-                client = self.get_client(region)
-                if not client:
-                    continue
-
-                web_acl_response = client.get_web_acl_for_resource(instance_arn)
+                web_acl_response = self.get_web_acl_for_resource(region, instance_arn)
 
                 if "Error" in web_acl_response:
-                    error_code = web_acl_response["Error"].get("Code")
-                    if error_code == "AccessDeniedException":
-                        yield self.error(
-                            region=region,
-                            resource_id=instance_id,
-                            actual_value=web_acl_response["Error"].get("Message", "Access denied"),
-                            remediation="Check IAM permissions for wafv2:GetWebACLForResource and ec2:GetVerifiedAccessInstanceWebAcl"
-                        )
-                    else:
+                    error = web_acl_response["Error"]
+                    # WAFNonexistentItemException is the declared "this resource
+                    # has no associated Web ACL" answer, and the only code that
+                    # is; every other code is an inability to determine.
+                    if self.is_not_configured(error):
                         yield self.failed(
                             region=region,
                             resource_id=instance_id,
                             actual_value="No WAF Web ACL associated",
                             remediation="Associate a WAF Web ACL with this Verified Access instance using the AWS Console, CLI, or API"
+                        )
+                    else:
+                        yield self.error(
+                            region=region,
+                            resource_id=instance_id,
+                            actual_value=(
+                                f"{error['Operation']} failed: {error['Code']}: "
+                                f"{error['Message']}"
+                            ),
+                            remediation=self._remediation_for(error),
                         )
                     continue
 

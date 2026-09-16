@@ -81,9 +81,42 @@ class SRA_CONFIG_06(ConfigCheck):
             return
 
         # Check each region for delivery channels
+        # Set by the guard below when a Region's Config state could not be
+        # read. A global 'not found in any region' FAIL must not fire on the
+        # strength of Regions that never answered.
+        undetermined = False
         for region in self.regions:
             # Get delivery channels for the region
-            channels = self.get_delivery_channels(region)
+            channels_response = self.get_delivery_channels(region)
+
+            if "Error" in channels_response:
+                error = channels_response['Error']
+                if self.is_not_configured(error):
+                    # A declared semantic code: AWS answered and the control is
+                    # absent. config declares AWSOrganizationsNotInUseException
+                    # (DescribeOrganization) and NoSuchBucketPolicy
+                    # (GetBucketPolicy); an empty recorder or channel list is a
+                    # successful response, not an error, so nothing is declared for
+                    # the describe_* operations themselves.
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=f"AWS Config is not configured in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                undetermined = True
+                continue
+
+            channels = channels_response.get('DeliveryChannels', [])
 
             if not channels:
                 # No delivery channel found in this region

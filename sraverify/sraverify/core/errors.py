@@ -44,4 +44,34 @@ class UnknownCheckError(SRAVerifyError):
 
 
 class NoChecksSelectedError(SRAVerifyError):
-    """The filter combination matched zero checks."""
+    """The filter combination matched zero checks.
+
+    Raised with the three filter values as positional args --- ``account_type``,
+    ``service``, ``check_id``, where ``None`` marks a filter that was not supplied
+    and ``"all"`` is the account-type equivalent. The args tuple is deliberately
+    left as those three values rather than replaced by a composed message: a
+    library caller needs them separately to explain the failure in its own terms.
+
+    ``__str__`` renders them as a sentence, because the CLI logs ``str(exc)`` and
+    the default rendering of a three-arg exception is the raw tuple --
+    ``('audit', None, 'SRA-MACIE-05')`` --- which makes an operator work out which
+    value is which before they can act on it.
+    """
+
+    def __str__(self) -> str:
+        """Render the filter combination as an actionable sentence.
+
+        Returns:
+            The supplied filters, named as the flags that set them, and a pointer
+            to the inventory command.
+        """
+        account_type, service, check_id = (list(self.args) + [None, None, None])[:3]
+        parts = [f"--account-type {account_type}"]
+        if service is not None:
+            parts.append(f"--service {service!r}")
+        if check_id is not None:
+            parts.append(f"--check {check_id}")
+        return (
+            f"No checks matched {', '.join(parts)}. "
+            "Run --list-checks to see which checks exist for that account type."
+        )

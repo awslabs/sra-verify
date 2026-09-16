@@ -61,14 +61,31 @@ class SRA_ORGANIZATIONS_03(OrganizationsCheck):
 
         # Check for errors getting roots
         if "Error" in roots_response:
-            error_message = roots_response["Error"].get("Message", "Unknown error")
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=f"Error: {error_message}",
-                remediation="Check IAM permissions for Organizations API access",
-                checked_value="Infrastructure OU exists under root",
-            )
+            error = roots_response["Error"]
+            if self.is_not_configured(error):
+                # A declared semantic pair: AWS answered and the control is
+                # absent. For Organizations that means either no organization
+                # exists, or the policy type is not enabled.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"AWS Organizations reports the control absent: "
+                        f"{error['Code']}"
+                    ),
+                    checked_value="Infrastructure OU exists under root",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                    checked_value="Infrastructure OU exists under root",
+                )
             return
 
         roots = roots_response.get("Roots", [])
@@ -91,14 +108,31 @@ class SRA_ORGANIZATIONS_03(OrganizationsCheck):
 
         # Check for errors getting OUs
         if "Error" in ous_response:
-            error_message = ous_response["Error"].get("Message", "Unknown error")
-            yield self.error(
-                region=region,
-                resource_id=root_id,
-                actual_value=f"Error: {error_message}",
-                remediation="Check IAM permissions for Organizations API access",
-                checked_value="Infrastructure OU exists under root",
-            )
+            error = ous_response["Error"]
+            if self.is_not_configured(error):
+                # A declared semantic pair: AWS answered and the control is
+                # absent. For Organizations that means either no organization
+                # exists, or the policy type is not enabled.
+                yield self.failed(
+                    region=region,
+                    resource_id=root_id,
+                    actual_value=(
+                        f"AWS Organizations reports the control absent: "
+                        f"{error['Code']}"
+                    ),
+                    checked_value="Infrastructure OU exists under root",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=root_id,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                    checked_value="Infrastructure OU exists under root",
+                )
             return
 
         ous = ous_response.get("OrganizationalUnits", [])

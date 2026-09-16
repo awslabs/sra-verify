@@ -58,7 +58,7 @@ network:
 
   * ``_StubSession.client()`` returns a ``_StubClient`` whose every method
     raises ``ClientError``. Service ``client.py`` wrappers catch ``ClientError``
-    and return their ``{"Error": {...}}`` sentinel, so check bodies genuinely
+    and return their ``{"Error": {...}}`` error_result, so check bodies genuinely
     execute and take their FAIL-or-ERROR branches. That matters for the file
     spy: a session that merely *refused* to build a client would fail every
     check inside ``_setup_clients``, no ``execute()`` would run at all, and the
@@ -301,7 +301,7 @@ class _StubClient:
     """A boto3 client stand-in whose every operation raises ``ClientError``.
 
     Chosen over a client that refuses to exist. Service ``client.py`` wrappers
-    catch ``ClientError`` and return their ``{"Error": {...}}`` sentinel, so
+    catch ``ClientError`` and return their ``{"Error": {...}}`` error_result, so
     check bodies run to completion and take a real branch. A session that
     refused to build a client at all would fail every check inside
     ``_setup_clients``, no ``execute()`` would ever run, and the file spy below

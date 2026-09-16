@@ -79,7 +79,35 @@ class SRA_SECURITYLAKE_16(SecurityLakeCheck):
             resource_id = f"arn:aws:securitylake:{region}:{self.account_id}:subscriber/query-access"
 
             # Get subscribers using the base class method
-            subscribers = self.get_subscribers(region)
+            subscribers_response = self.get_subscribers(region)
+
+            if "Error" in subscribers_response:
+                error = subscribers_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value=f"Audit account {audit_account_id} has query access",
+                        actual_value=f"No Security Lake data lake exists in {region}, so the control is not configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value=f"Audit account {audit_account_id} has query access",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            # The guard above is load-bearing for this check in particular:
+            # AccessDeniedException is deliberately not in the discriminator
+            # table, so a denied ListSubscribers yields ERROR rather than
+            # "is not set up as a subscriber".
+            subscribers = subscribers_response.get('subscribers', [])
 
             # Check if any subscriber is the audit account with query access
             audit_subscriber = next(

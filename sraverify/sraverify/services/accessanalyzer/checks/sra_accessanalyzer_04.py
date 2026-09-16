@@ -59,17 +59,6 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
             One Finding per Region, or a single global Finding when no analyzer
             exists anywhere or Access Analyzer is available in no Region.
         """
-        # First, verify this check is running from an audit account - silently add to findings without logging warnings
-        if self.audit_accounts:
-            if self.account_id not in self.audit_accounts:
-                # Don't log a warning, just add to findings
-                yield self.error(
-                    region="global",
-                    resource_id="accessanalyzer:account-validation",
-                    actual_value=f"Invalid account for IAM Access Analyzer check: Account {self.account_id} is not an audit account",
-                    remediation=f"This check must be run from an audit account ({', '.join(self.audit_accounts)}). Either run this check from one of the designated audit accounts or update your configuration to specify the correct audit account(s) using the --audit-account parameter.",
-                )
-                return
 
         # If no regions have Access Analyzer available, return a single error
         if not self._clients:
@@ -81,14 +70,24 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
             )
             return
 
-        # Check if any analyzers exist across all regions
+        # Count analyzers across the Regions we could read. A Region whose
+        # lookup failed is not evidence of zero analyzers, so it is counted
+        # separately and reported in its own row by the main loop below -- this
+        # check emits one row per Region, and an undetermined Region must not
+        # collapse the others.
         total_analyzers = 0
-        for region, client in self._clients.items():
-            analyzers = self.get_analyzers(region)
-            total_analyzers += len(analyzers)
+        undetermined = 0
+        for region in self._clients:
+            analyzers_response = self.get_analyzers(region)
+            if "Error" in analyzers_response:
+                undetermined += 1
+                continue
+            total_analyzers += len(analyzers_response.get('analyzers', []))
 
-        # If no analyzers exist at all, return a single global finding
-        if total_analyzers == 0:
+        # "No analyzers anywhere" can only be asserted when every Region answered.
+        # With even one Region undetermined, the global FAIL would be claiming more
+        # than the scan established, so the per-Region rows below carry it instead.
+        if total_analyzers == 0 and undetermined == 0:
             yield self.failed(
                 region="global",
                 resource_id="accessanalyzer:global",
@@ -100,49 +99,57 @@ class SRA_ACCESSANALYZER_04(AccessAnalyzerCheck):
             )
             return
 
-        # Track if we found organization analyzers in any region
-        found_org_analyzers = False
-        all_regions_checked = True
-
         # Check each region where Access Analyzer is available
-        for region, client in self._clients.items():
-            try:
-                # Get analyzers for this region using the base class method that handles caching
-                analyzers = self.get_analyzers(region)
+        for region in self._clients:
+            analyzers_response = self.get_analyzers(region)
 
-                # Look for analyzers with organization zone of trust in this specific region
-                # that are created by this account
-                org_analyzers = [
-                    a for a in analyzers
-                    if a.get('type') == 'ORGANIZATION'
-                    and a.get('status') == 'ACTIVE'
-                    and a.get('arn', '').split(':')[4] == self.account_id
-                ]
-
-                if org_analyzers:
-                    # If we found organization analyzers in this region created by this account, report a PASS
-                    found_org_analyzers = True
-                    analyzer_names = [a.get('name', 'Unknown') for a in org_analyzers]
-                    analyzer_arn = org_analyzers[0].get('arn', f"arn:aws:access-analyzer:{region}:{self.account_id}:analyzer/{region}")
-
-                    yield self.passed(
-                        region=region,
-                        resource_id=analyzer_arn,
-                        actual_value=f"Found IAM Access Analyzer with Organization zone of trust in {region}: {', '.join(analyzer_names)}",
-                    )
-                else:
-                    # If no organization analyzers in this region created by this account
+            if "Error" in analyzers_response:
+                error = analyzers_response['Error']
+                if self.is_not_configured(error):
                     yield self.failed(
                         region=region,
-                        resource_id="No Organization analyzer found in this region",
-                        actual_value=f"No IAM Access Analyzer with Organization zone of trust found in {region}",
-                        remediation=f"Create an IAM Access Analyzer with Organization zone of trust in {region} using the AWS CLI command: aws accessanalyzer create-analyzer --analyzer-name org-analyzer --type ORGANIZATION --region {region}",
+                        resource_id=f"access-analyzer/{self.account_id}/{region}",
+                        actual_value=(
+                            f"No IAM Access Analyzer with Organization zone of "
+                            f"trust found in {region}"
+                        ),
                     )
-            except Exception as e:
-                all_regions_checked = False
-                yield self.error(
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"access-analyzer/{self.account_id}/{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            analyzers = analyzers_response.get('analyzers', [])
+
+            # Look for analyzers with organization zone of trust in this specific
+            # region that are created by this account
+            org_analyzers = [
+                a for a in analyzers
+                if a.get('type') == 'ORGANIZATION'
+                and a.get('status') == 'ACTIVE'
+                and a.get('arn', '').split(':')[4] == self.account_id
+            ]
+
+            if org_analyzers:
+                analyzer_names = [a.get('name', 'Unknown') for a in org_analyzers]
+                analyzer_arn = org_analyzers[0].get('arn', f"arn:aws:access-analyzer:{region}:{self.account_id}:analyzer/{region}")
+
+                yield self.passed(
                     region=region,
-                    resource_id="error",
-                    actual_value=f"Error checking IAM Access Analyzer in {region}: {str(e)}",
-                    remediation="Ensure you have proper permissions to list IAM Access Analyzers and that the service is available in this region",
+                    resource_id=analyzer_arn,
+                    actual_value=f"Found IAM Access Analyzer with Organization zone of trust in {region}: {', '.join(analyzer_names)}",
+                )
+            else:
+                yield self.failed(
+                    region=region,
+                    resource_id="No Organization analyzer found in this region",
+                    actual_value=f"No IAM Access Analyzer with Organization zone of trust found in {region}",
+                    remediation=f"Create an IAM Access Analyzer with Organization zone of trust in {region} using the AWS CLI command: aws accessanalyzer create-analyzer --analyzer-name org-analyzer --type ORGANIZATION --region {region}",
                 )

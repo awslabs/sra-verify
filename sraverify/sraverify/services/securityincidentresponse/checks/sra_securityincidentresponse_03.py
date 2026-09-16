@@ -52,12 +52,25 @@ class SRA_SECURITYINCIDENTRESPONSE_03(SecurityIncidentResponseCheck):
         memberships_response = self.list_memberships()
 
         if "Error" in memberships_response:
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=memberships_response["Error"].get("Message", "Unknown error"),
-                remediation="Check IAM permissions for Security Incident Response API access"
-            )
+            error = memberships_response["Error"]
+            if self.is_not_configured(error):
+                # AWS reported the membership absent, which is the same finding as
+                # the empty items list below.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value="No Security Incident Response membership exists",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation="Check IAM permissions for Security Incident Response API access"
+                )
             return
 
         memberships = memberships_response.get("items", [])
@@ -78,13 +91,26 @@ class SRA_SECURITYINCIDENTRESPONSE_03(SecurityIncidentResponseCheck):
             # Get detailed membership info
             membership_details = self.get_membership(membership_id)
 
+            # Inside the per-membership loop, so one undetermined membership costs
+            # one row rather than the whole check's output.
             if "Error" in membership_details:
-                yield self.error(
-                    region=region,
-                    resource_id=membership_id,
-                    actual_value=membership_details["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Security Incident Response GetMembership API access"
-                )
+                error = membership_details["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=membership_id,
+                        actual_value=f"Membership {membership_id} no longer exists",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=membership_id,
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation="Check IAM permissions for Security Incident Response GetMembership API access"
+                    )
                 continue
 
             # Check opt-in features for Triage

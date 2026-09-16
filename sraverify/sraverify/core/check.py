@@ -47,12 +47,18 @@ from __future__ import annotations
 import re
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Final, Optional
 
 import boto3
 
+from sraverify.core.aws_errors import (
+    NO_CLIENT_CODE,
+    TRANSPORT_ERROR_CODES,
+    NotConfiguredTable,
+)
+from sraverify.core.aws_errors import is_not_configured as _is_not_configured
 from sraverify.core.enums import AccountType, Severity, Status
 from sraverify.core.errors import CheckIdentityError
 from sraverify.core.finding import Finding
@@ -103,6 +109,90 @@ _HELPER_NAMES: Final = {
     Status.ERROR: "error",
 }
 
+#: The error codes that mean "the caller is not permitted", across the services
+#: this scanner consults. AWS spells the same condition four ways depending on
+#: the service, so ``_remediation_for`` matches against the set rather than one
+#: literal.
+#: Message substrings, matched case-insensitively, that mark an access-denied as a
+#: **service-level refusal of the calling account** rather than a missing IAM
+#: action. Read only by :meth:`_remediation_for`, to pick the remediation.
+#:
+#: The distinction is not academic and getting it wrong is expensive. Several AWS
+#: services refuse an organization-scoped read from any account that is not the
+#: delegated administrator, no matter what IAM allows, and they report it as
+#: ``AccessDeniedException`` — the same code a genuine permission gap produces.
+#: Told to "grant the member role permission to call ListLogSources", an operator
+#: grants an action the role already holds, re-runs, sees the identical row, and
+#: concludes the scanner is broken.
+#:
+#: Both needles were observed on a 13-account organization scan on 2026-09-16,
+#: from an account holding the action in question and reproduced with
+#: ``AdministratorAccess``, which is what establishes that IAM is not the
+#: constraint:
+#:
+#: * ``securitylake:ListLogSources`` / ``ListSubscribers`` / ``GetDataLakeSources``
+#:   — "The request failed because you don't have sufficient permissions to
+#:   perform this operation **for your organization**. Contact your administrator
+#:   for assistance."
+#: * ``macie2:DescribeOrganizationConfiguration`` — "The request failed because
+#:   you **must be the Macie administrator** for an organization to perform this
+#:   operation"
+#:
+#: Deliberately narrow. A plain IAM denial names the principal and the action
+#: — "User: arn:aws:sts::…:assumed-role/SRAMemberRole/… is not authorized to
+#: perform: iam:ListUsers" — and matches neither needle, so it keeps the
+#: grant-the-permission advice, which for it is correct.
+_NOT_THE_ADMINISTRATOR_NEEDLES: Final = (
+    "for your organization",
+    "must be the",
+)
+
+#: Message substrings that mark an access-denied as a genuine **IAM** denial, for
+#: which granting the action is the fix. IAM says so in as many words, naming the
+#: principal and the action it refused:
+#:
+#:     User: arn:aws:sts::…:assumed-role/SRAMemberRole/sraverify-session is not
+#:     authorized to perform: iam:ListUsers on resource: …
+#:
+#: Needed as its own bucket because a third case exists that neither this nor
+#: :data:`_NOT_THE_ADMINISTRATOR_NEEDLES` matches. ``securitylake`` answers
+#: ``GetDataLakeSources`` from a non-delegated-administrator account with
+#: ``UnauthorizedException: Unauthorized`` — no principal, no action, no mention
+#: of the organization. Reproduced with ``AdministratorAccess`` on 2026-09-16, so
+#: it is provably not an IAM gap in *that* account, but nothing in the response
+#: says which of the two it is.
+#:
+#: So the fallback names both causes rather than picking one. That is the same
+#: discipline as the FAIL-versus-ERROR rule one tier up: where the evidence does
+#: not distinguish two explanations, say so instead of choosing the one that reads
+#: better. Advice covering two causes costs a reader a few seconds; advice
+#: confidently naming the wrong one costs them a policy change and a re-run.
+_IAM_DENIAL_NEEDLES: Final = (
+    "is not authorized to perform",
+    "no identity-based policy allows",
+    "with an explicit deny",
+)
+
+#: The error codes that mean "the caller is not permitted", across the services
+#: this scanner consults. AWS spells the same condition four ways depending on
+#: the service, so ``_remediation_for`` matches against the set rather than one
+#: literal.
+_ACCESS_DENIED_CODES: Final = frozenset(
+    {
+        "AccessDeniedException",
+        "AccessDenied",
+        "UnauthorizedOperation",
+        "UnauthorizedException",
+    }
+)
+
+#: The one class attribute a *service base* class may declare that a *check*
+#: may not. The discriminator table belongs to the service, because its whole
+#: purpose is that two checks reading the same error result from the same operation
+#: cannot classify it differently; a check that declared its own would have
+#: re-created exactly the per-check classification this contract removes.
+_SERVICE_ONLY_NAMES: Final = ("NOT_CONFIGURED_ERRORS",)
+
 
 class SecurityCheck(ABC):
     """Base class for all security checks.
@@ -114,6 +204,17 @@ class SecurityCheck(ABC):
     """
 
     meta: ClassVar[CheckMeta]
+
+    #: Per-service declaration of which ``(operation, code)`` pairs mean "the
+    #: control is not configured". Declared on the **service base class**, never
+    #: on a check -- ``__init_subclass__`` enforces that. Read by
+    #: :meth:`is_not_configured`.
+    #:
+    #: Empty here on purpose. A service with no declared semantics classifies
+    #: every error as non-semantic, so every failure yields ERROR. That is the
+    #: safe default: an unrecognized code produces an honest "could not
+    #: determine" rather than a fabricated finding.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
 
     def __init__(self) -> None:
         """Construct the check.
@@ -322,6 +423,27 @@ class SecurityCheck(ABC):
                         f"property that delegates to meta ({module_file})"
                     )
 
+        # ---- Shape rule: the discriminator table belongs to the service - #
+        # A check may not declare NOT_CONFIGURED_ERRORS. The table's entire
+        # purpose is that two checks reading the same error result from the same
+        # operation cannot classify it differently; a check that declared its
+        # own would have re-created the per-check classification this contract
+        # removes, and it would do so invisibly, because the shadowing would be
+        # legal Python and the check would keep working.
+        #
+        # Read via vars(cls) rather than getattr, exactly as the `meta` rule
+        # does: every check *inherits* a table from its service base, and
+        # getattr cannot tell an inherited one from a declared one.
+        for name in _SERVICE_ONLY_NAMES:
+            if name in vars(cls):
+                raise CheckIdentityError(
+                    f"discriminator table declared on a check: {cls.__name__}."
+                    f"{name} must be declared on the service base class, not on "
+                    f"an individual check, so that every check of the service "
+                    f"classifies a given (operation, code) pair identically "
+                    f"({module_file})"
+                )
+
         # ---- Commit --------------------------------------------------- #
         # Register LAST. Every rule above raises before the registry is
         # touched, which is what gives 4.15 its "no partial entry" guarantee
@@ -493,12 +615,9 @@ class SecurityCheck(ABC):
 
         There is deliberately **no** ``remediation`` parameter (7.2), not even
         one defaulting to ``""``. A PASS has nothing to remediate, so the empty
-        cell is structural rather than conventional: the 178 semantically empty
-        remediation arguments in the pre-change catalog -- ``"No remediation
-        needed"`` x114, ``""`` x45, ``"No action needed"`` x19 -- are simply
-        unrepresentable, and three spellings of "nothing to do" collapse into
-        one canonical empty cell. Passing ``remediation=`` here is a
-        ``TypeError`` (7.11).
+        cell is structural rather than conventional, and the several spellings of
+        "nothing to do" that a free-text field invites are unrepresentable.
+        Passing ``remediation=`` here is a ``TypeError`` (7.11).
 
         Args:
             region: AWS region name, or ``GLOBAL_REGION``.
@@ -674,6 +793,132 @@ class SecurityCheck(ABC):
             the only condition under which this returns ``None``.
         """
         return self._clients.get(region)
+
+    # ------------------------------------------------------------------ #
+    # Error classification.
+    #
+    # A base accessor hands a check a dict. The check tests ``"Error" in
+    # result`` before reading any success-path key, and if it is there, asks
+    # these two methods what the error means and what to say about it.
+    # ------------------------------------------------------------------ #
+
+    def is_not_configured(self, error: Mapping[str, str]) -> bool:
+        """
+        Classify an error result's ``Error`` sub-dict against this service's table.
+
+        ``True`` means AWS answered and the answer is that the control is
+        absent, so the check should yield ``failed()``. ``False`` means the
+        control could not be evaluated, so the check should yield ``error()``.
+
+        Reads ``type(self).NOT_CONFIGURED_ERRORS`` rather than
+        ``self.NOT_CONFIGURED_ERRORS`` for the same reason ``__init_subclass__``
+        reads ``vars(cls)`` for ``meta``: the table is a class-level
+        declaration, and going through the type makes it impossible for an
+        instance attribute to shadow it.
+
+        The error result carries ``Operation``, which is why this takes one
+        argument. Threading the operation name separately would mean every
+        accessor had to know which operation its client called and pass it
+        upward, and every one of the 100-odd call sites would be a
+        two-argument call.
+
+        Args:
+            error: An error result's ``Error`` sub-dict.
+
+        Returns:
+            ``True`` if the pair is declared semantic for this service.
+        """
+        return _is_not_configured(type(self).NOT_CONFIGURED_ERRORS, error)
+
+    def _remediation_for(self, error: Mapping[str, str]) -> str:
+        """
+        Return scan-environment remediation wording for a non-semantic error.
+
+        An ERROR row reports that the control could **not be evaluated**, so its
+        remediation concerns fixing the *scan*, not fixing the control. That is
+        why ``error()`` has no metadata fallback and why this helper exists:
+        ``meta.remediation.text`` is the right advice for a FAIL by
+        construction, and emitting "Enable GuardDuty in every enabled Region"
+        against an ``AccessDeniedException`` would be confidently wrong.
+
+        Wording is chosen by ``Code`` class, in six buckets: transport,
+        ``NoClient``, then three for access-denied -- wrong account, IAM gap, and
+        cause-not-stated -- and everything else. The first two name the
+        **service**; the rest name the **operation**. That split is not
+        cosmetic -- it follows from which errors carry an operation at all. A
+        transport failure and a missing client both mean nothing was sent, so
+        ``AWSClient.aws_error`` records :data:`UNKNOWN_OPERATION` and there is no
+        operation to name; interpolating the placeholder produced "so a client
+        exists for Request", which reads as though ``Request`` were an API. An
+        access-denied or otherwise-unclassified code came from AWS answering, so
+        botocore attached the real operation and naming it is the most actionable
+        thing available.
+
+        The three access-denied buckets are split on the **message**, not the
+        code, because AWS reports "you lack an IAM action" and "you are the wrong
+        account for an organization-scoped read" with the same
+        ``AccessDeniedException``, and sometimes reports the second with no detail
+        at all. See :data:`_NOT_THE_ADMINISTRATOR_NEEDLES` for why conflating the
+        first two is worse than being vague -- it produces advice that cannot work,
+        which costs an operator a policy change, a re-run, and their trust in the
+        report -- and :data:`_IAM_DENIAL_NEEDLES` for why the third bucket names
+        both causes instead of guessing between them.
+
+        This deliberately does **not** compose an IAM action string. Requirement
+        4.8 forbids it, because ``meta.service`` is a display name and not an IAM
+        prefix -- ``IAM Access Analyzer`` is ``access-analyzer``,
+        ``FirewallManager`` is ``fms``, ``Security Lake`` is ``securitylake`` --
+        so an interpolated ``f"{service}:{Operation}"`` would be wrong for
+        several services, and a fabricated action is worse than a vague one. A
+        check that wants to name the exact action passes its own
+        ``remediation=``; ``error()`` still rejects a blank one.
+
+        Args:
+            error: An error result's ``Error`` sub-dict.
+
+        Returns:
+            A non-blank remediation string naming the service or the operation.
+        """
+        code = error.get("Code", "")
+        operation = error.get("Operation", "") or "the AWS call"
+
+        if code in TRANSPORT_ERROR_CODES:
+            return (
+                f"Confirm the {self.service} endpoint for this Region is "
+                f"reachable from the scanner's network, then re-run the scan"
+            )
+        if code == NO_CLIENT_CODE:
+            return (
+                f"Confirm the Region is enabled for this account and was "
+                f"supplied to --regions, so a {self.service} client exists for it"
+            )
+        if code in _ACCESS_DENIED_CODES:
+            message = error.get("Message", "").lower()
+            if any(n in message for n in _NOT_THE_ADMINISTRATOR_NEEDLES):
+                return (
+                    f"{operation} was refused because the scanned account is not "
+                    f"the {self.service} delegated administrator, not for want of "
+                    f"an IAM permission -- granting one will not change this. "
+                    f"Confirm which account holds that role and that this check's "
+                    f"account type is scanned against it"
+                )
+            if any(n in message for n in _IAM_DENIAL_NEEDLES):
+                return (
+                    f"Grant the member role permission to call {operation} for this "
+                    f"service (see the SRAVerifyCheckPermissions policy in "
+                    f"1-sraverify-member-roles.yaml), then re-run the scan"
+                )
+            return (
+                f"{operation} was refused without saying why. Check both causes: "
+                f"whether the member role is granted the action (see "
+                f"1-sraverify-member-roles.yaml), and whether the scanned account "
+                f"is the {self.service} delegated administrator, which several "
+                f"services require for an organization-wide read"
+            )
+        return (
+            f"Investigate {code} from {operation} in the scan log "
+            f"(the aws_call_failed record names the Region), then re-run the scan"
+        )
 
     # ------------------------------------------------------------------ #
     # Read-only properties that delegate to the class's own metadata.

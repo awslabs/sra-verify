@@ -1,255 +1,226 @@
 """
-SecurityHub client for interacting with AWS SecurityHub service.
+Security Hub client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+The "not subscribed to AWS Security Hub" condition travels as
+``InvalidAccessException`` with its message intact, and
+``SecurityHubCheck.NOT_CONFIGURED_ERRORS`` declares it with a message needle.
+
+Pagination here is an explicit ``NextToken`` loop rather than a paginator.
 """
-from typing import Dict, List, Optional, Any
+from typing import Any, Mapping
 
-from botocore.exceptions import ClientError
-
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.logging import logger
 from sraverify.core.scan_context import ScanContext
 
 
-class SecurityHubClient:
-    """Client for interacting with AWS SecurityHub service."""
+class SecurityHubClient(AWSClient):
+    """Client for interacting with AWS Security Hub service."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
-        Initialize SecurityHub client for a specific region.
+        Initialize Security Hub client for a specific region.
 
         Args:
             region: AWS region name
-            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
-                ``Client_Config``, and per-scan boto3 client cache. Underlying
-                boto3 clients are obtained via ``ctx.get_client(...)`` so the
-                bounded timeouts and retry policy are applied and the same
-                client instance is reused across all wrappers in this scan.
+            ctx: ScanContext for the current scan; the underlying boto3 clients
+                are obtained via ``ctx.get_client(...)`` so the per-scan client
+                cache and bounded ``Client_Config`` are applied.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('securityhub', region=region)
         self.org_client = ctx.get_client('organizations', region=region)
 
-    def get_enabled_standards(self) -> List[Dict[str, Any]]:
+    def get_enabled_standards(self) -> Mapping[str, Any]:
         """
         Get all enabled Security Hub standards.
 
         Returns:
-            List of enabled standards or None if Security Hub is not enabled
+            ``{"StandardsSubscriptions": [...]}`` with every page merged, on
+            success, or the error result. "Not subscribed" is an
+            ``InvalidAccessException`` whose message says so, declared in the
+            discriminator table, and reaches the check like any other error.
         """
         try:
-            logger.debug(f"Getting enabled standards in {self.region}")
             response = self.client.get_enabled_standards()
-            standards = response.get('StandardsSubscriptions', [])
-
-            # Handle pagination
+            standards = list(response.get('StandardsSubscriptions', []))
             while response.get('NextToken'):
-                response = self.client.get_enabled_standards(NextToken=response['NextToken'])
+                response = self.client.get_enabled_standards(
+                    NextToken=response['NextToken']
+                )
                 standards.extend(response.get('StandardsSubscriptions', []))
+            logger.debug(
+                f"SecurityHub: Found {len(standards)} enabled standards in "
+                f"{self.region}"
+            )
+            return {"StandardsSubscriptions": standards}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(standards)} enabled standards in {self.region}")
-            return standards
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', '')
-
-            # Check if this is the "not subscribed to AWS Security Hub" error
-            if error_code == 'InvalidAccessException' and 'not subscribed to AWS Security Hub' in error_message:
-                # Return None specifically for this error to indicate Security Hub is not enabled
-                # Don't log this as an error since it's an expected condition we want to check for
-                logger.debug(f"Security Hub is not enabled in {self.region}")
-                return None
-
-            # For other errors, log a warning instead of an error
-            logger.warning(f"Error getting enabled standards in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.warning(f"Unexpected error getting enabled standards in {self.region}: {e}")
-            return []
-
-    def list_organization_admin_accounts(self) -> List[Dict[str, Any]]:
+    def list_organization_admin_accounts(self) -> Mapping[str, Any]:
         """
-        List Security Hub administrator accounts for the organization.
+        List Security Hub organization admin accounts.
 
         Returns:
-            List of administrator accounts
+            ``{"AdminAccounts": [...]}`` with every page merged, on success, or
+            the error result.
         """
         try:
-            logger.debug(f"Listing organization admin accounts in {self.region}")
             response = self.client.list_organization_admin_accounts()
-            admin_accounts = response.get('AdminAccounts', [])
-
-            # Handle pagination
+            admin_accounts = list(response.get('AdminAccounts', []))
             while response.get('NextToken'):
-                response = self.client.list_organization_admin_accounts(NextToken=response['NextToken'])
+                response = self.client.list_organization_admin_accounts(
+                    NextToken=response['NextToken']
+                )
                 admin_accounts.extend(response.get('AdminAccounts', []))
+            logger.debug(
+                f"SecurityHub: Found {len(admin_accounts)} organization admin "
+                f"accounts in {self.region}"
+            )
+            return {"AdminAccounts": admin_accounts}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(admin_accounts)} organization admin accounts in {self.region}")
-            return admin_accounts
-        except ClientError as e:
-            logger.error(f"Error listing organization admin accounts in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing organization admin accounts in {self.region}: {e}")
-            return []
-
-    def get_administrator_account(self) -> Dict[str, Any]:
+    def get_administrator_account(self) -> Mapping[str, Any]:
         """
-        Get the Security Hub administrator account for the current account.
+        Get the Security Hub administrator account.
 
         Returns:
-            Administrator account information
+            The ``GetAdministratorAccount`` response on success, or the error
+            result.
         """
         try:
-            logger.debug(f"Getting administrator account in {self.region}")
-            response = self.client.get_administrator_account()
-            logger.debug(f"Administrator account: {response}")
-            return response
-        except ClientError as e:
-            logger.error(f"Error getting administrator account in {self.region}: {e}")
-            return {}
-        except Exception as e:
-            logger.error(f"Unexpected error getting administrator account in {self.region}: {e}")
-            return {}
+            return self.client.get_administrator_account()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_organization_configuration(self) -> Dict[str, Any]:
+    def describe_organization_configuration(self) -> Mapping[str, Any]:
         """
         Describe the Security Hub organization configuration.
 
         Returns:
-            Organization configuration
+            The ``DescribeOrganizationConfiguration`` response on success, or the
+            error result.
         """
         try:
-            logger.debug(f"Describing organization configuration in {self.region}")
-            response = self.client.describe_organization_configuration()
-            logger.debug(f"Organization configuration: {response}")
-            return response
-        except ClientError as e:
-            # Don't log the error here, let the check handle it
-            return {}
-        except Exception as e:
-            # Only log unexpected errors
-            logger.error(f"Unexpected error describing organization configuration in {self.region}: {e}")
-            return {}
+            return self.client.describe_organization_configuration()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-
-    def list_enabled_products_for_import(self) -> Optional[List[str]]:
+    def list_enabled_products_for_import(self) -> Mapping[str, Any]:
         """
         List enabled products for import into Security Hub.
 
         Returns:
-            List of enabled product ARNs, or None if Security Hub is not enabled
+            ``{"ProductSubscriptions": [...]}`` with every page merged, on
+            success, or the error result.
+
+            The second half of the ``None`` tri-state, resolved the same way as
+            :meth:`get_enabled_standards`.
         """
         try:
-            logger.debug(f"Listing enabled products for import in {self.region}")
             response = self.client.list_enabled_products_for_import()
-            product_subscriptions = response.get('ProductSubscriptions', [])
-
-            # Handle pagination
+            products = list(response.get('ProductSubscriptions', []))
             while response.get('NextToken'):
-                response = self.client.list_enabled_products_for_import(NextToken=response['NextToken'])
-                product_subscriptions.extend(response.get('ProductSubscriptions', []))
+                response = self.client.list_enabled_products_for_import(
+                    NextToken=response['NextToken']
+                )
+                products.extend(response.get('ProductSubscriptions', []))
+            logger.debug(
+                f"SecurityHub: Found {len(products)} enabled products in "
+                f"{self.region}"
+            )
+            return {"ProductSubscriptions": products}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(product_subscriptions)} enabled products in {self.region}")
-            return product_subscriptions
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', '')
-
-            # Check if this is the "not subscribed to AWS Security Hub" error
-            if error_code == 'InvalidAccessException' and 'not subscribed to AWS Security Hub' in error_message:
-                # Return None specifically for this error to indicate Security Hub is not enabled
-                logger.debug(f"Security Hub is not enabled in {self.region}")
-                return None
-
-            # For other errors, log as error and return empty list
-            logger.error(f"Error listing enabled products in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing enabled products in {self.region}: {e}")
-            return []
-
-    def list_delegated_administrators(self, service_principal: str = "securityhub.amazonaws.com") -> List[Dict[str, Any]]:
+    def list_delegated_administrators(
+        self, service_principal: str = "securityhub.amazonaws.com"
+    ) -> Mapping[str, Any]:
         """
-        List delegated administrators for SecurityHub.
+        List Organizations delegated administrators for a service principal.
 
         Args:
-            service_principal: Service principal to check for delegated administrators
+            service_principal: Service principal to check for delegated
+                administrators.
 
         Returns:
-            List of delegated administrators
+            ``{"DelegatedAdministrators": [...]}`` with every page merged, on
+            success, or the error result.
+
+            This reaches ``organizations``, not ``securityhub``, so its errors are
+            Organizations errors and mean something different from Security Hub
+            not being subscribed. That is why the discriminator table declares
+            nothing for ``ListDelegatedAdministrators``.
         """
         try:
-            logger.debug(f"Listing delegated administrators for {service_principal} in {self.region}")
-            response = self.org_client.list_delegated_administrators(ServicePrincipal=service_principal)
-            delegated_admins = response.get('DelegatedAdministrators', [])
-
-            # Handle pagination
+            response = self.org_client.list_delegated_administrators(
+                ServicePrincipal=service_principal
+            )
+            delegated_admins = list(response.get('DelegatedAdministrators', []))
             while response.get('NextToken'):
                 response = self.org_client.list_delegated_administrators(
                     ServicePrincipal=service_principal,
-                    NextToken=response['NextToken']
+                    NextToken=response['NextToken'],
                 )
-                delegated_admins.extend(response.get('DelegatedAdministrators', []))
+                delegated_admins.extend(
+                    response.get('DelegatedAdministrators', [])
+                )
+            logger.debug(
+                f"SecurityHub: Found {len(delegated_admins)} delegated "
+                f"administrators for {service_principal}"
+            )
+            return {"DelegatedAdministrators": delegated_admins}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(delegated_admins)} delegated administrators for {service_principal}")
-            for admin in delegated_admins:
-                logger.debug(f"Delegated admin: {admin.get('Id')} - {admin.get('Name')}")
-            return delegated_admins
-        except ClientError as e:
-            logger.error(f"Error listing delegated administrators for {service_principal}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing delegated administrators: {e}")
-            return []
-
-    def list_members(self) -> List[Dict[str, Any]]:
+    def list_members(self) -> Mapping[str, Any]:
         """
         List Security Hub member accounts.
 
         Returns:
-            List of member accounts
+            ``{"Members": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
-            logger.debug(f"Listing Security Hub members in {self.region}")
             response = self.client.list_members()
-            members = response.get('Members', [])
-
-            # Handle pagination
+            members = list(response.get('Members', []))
             while response.get('NextToken'):
-                response = self.client.list_members(NextToken=response['NextToken'])
+                response = self.client.list_members(
+                    NextToken=response['NextToken']
+                )
                 members.extend(response.get('Members', []))
+            logger.debug(
+                f"SecurityHub: Found {len(members)} members in {self.region}"
+            )
+            return {"Members": members}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            logger.debug(f"Found {len(members)} Security Hub members in {self.region}")
-            return members
-        except ClientError as e:
-            logger.error(f"Error listing Security Hub members in {self.region}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing Security Hub members in {self.region}: {e}")
-            return []
-
-    def list_organization_accounts(self) -> List[Dict[str, Any]]:
+    def list_organization_accounts(self) -> Mapping[str, Any]:
         """
-        List all accounts in the organization.
+        List all accounts in the AWS Organization.
 
         Returns:
-            List of organization accounts
+            ``{"Accounts": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
-            logger.debug(f"Listing organization accounts in {self.region}")
             response = self.org_client.list_accounts()
-            accounts = response.get('Accounts', [])
-
-            # Handle pagination
+            accounts = list(response.get('Accounts', []))
             while response.get('NextToken'):
-                response = self.org_client.list_accounts(NextToken=response['NextToken'])
+                response = self.org_client.list_accounts(
+                    NextToken=response['NextToken']
+                )
                 accounts.extend(response.get('Accounts', []))
-
-            logger.debug(f"Found {len(accounts)} organization accounts")
-            return accounts
-        except ClientError as e:
-            logger.error(f"Error listing organization accounts: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error listing organization accounts: {e}")
-            return []
+            logger.debug(
+                f"SecurityHub: Found {len(accounts)} organization accounts"
+            )
+            return {"Accounts": accounts}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

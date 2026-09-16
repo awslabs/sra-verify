@@ -73,7 +73,29 @@ class SRA_ACCESSANALYZER_01(AccessAnalyzerCheck):
         # Check each region where Access Analyzer is available
         for region, client in self._clients.items():
             logger.debug(f"Checking region {region} for account-level analyzers")
-            analyzers = self.get_analyzers(region)
+            analyzers_response = self.get_analyzers(region)
+
+            if "Error" in analyzers_response:
+                error = analyzers_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"access-analyzer/{self.account_id}/{region}",
+                        actual_value="No IAM Access Analyzer is configured in this Region",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"access-analyzer/{self.account_id}/{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            analyzers = analyzers_response.get('analyzers', [])
 
             # Check if any analyzer exists with account-level zone of trust
             account_analyzer = None

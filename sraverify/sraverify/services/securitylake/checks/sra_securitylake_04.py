@@ -58,6 +58,28 @@ class SRA_SECURITYLAKE_04(SecurityLakeCheck):
             # Get organization configuration using the base class method
             config = self.get_organization_configuration(region)
 
+            if "Error" in config:
+                error = config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Organization configuration enabled",
+                        actual_value=f"No Security Lake data lake exists in {region}, so the control is not configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Organization configuration enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
             if not config:
                 yield self.failed(
                     region=region,

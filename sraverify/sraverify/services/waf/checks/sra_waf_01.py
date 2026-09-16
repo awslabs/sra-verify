@@ -56,11 +56,15 @@ class SRA_WAF_01(WAFCheck):
         distributions_response = self.get_distributions()
 
         if "Error" in distributions_response:
+            error = distributions_response["Error"]
             yield self.error(
                 region=region,
                 resource_id=None,
-                actual_value=distributions_response["Error"].get("Message", "Unknown error"),
-                remediation="Check IAM permissions for CloudFront API access"
+                actual_value=(
+                    f"{error['Operation']} failed: {error['Code']}: "
+                    f"{error['Message']}"
+                ),
+                remediation=self._remediation_for(error),
             )
             return
 

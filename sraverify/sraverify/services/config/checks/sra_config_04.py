@@ -75,9 +75,48 @@ class SRA_CONFIG_04(ConfigCheck):
         org_aggregator_name = None
         org_aggregator_arn = None
 
+        # Set by the guard below when a Region's Config state could not be
+
+        # read. A global 'not found in any region' FAIL must not fire on the
+
+        # strength of Regions that never answered.
+
+        undetermined = False
+
         for region in self.regions:
             # Get configuration aggregators for the region using the cache
-            aggregators = self.get_configuration_aggregators(region)
+            aggregators_response = self.get_configuration_aggregators(region)
+
+            if "Error" in aggregators_response:
+                error = aggregators_response['Error']
+                if self.is_not_configured(error):
+                    # A declared semantic code: AWS answered and the control is
+                    # absent. config declares AWSOrganizationsNotInUseException
+                    # (DescribeOrganization) and NoSuchBucketPolicy
+                    # (GetBucketPolicy); an empty recorder or channel list is a
+                    # successful response, not an error, so nothing is declared for
+                    # the describe_* operations themselves.
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=f"AWS Config is not configured in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                undetermined = True
+                continue
+
+            aggregators = aggregators_response.get(
+                'ConfigurationAggregators', []
+            )
 
             # Check if any of the aggregators is an organization aggregator
             for aggregator in aggregators:
@@ -93,6 +132,13 @@ class SRA_CONFIG_04(ConfigCheck):
                 break
 
         # Yield a single finding based on whether an organization aggregator was found
+        # A global 'not found in any region' verdict must not rest on Regions
+        # that never answered. Each undetermined Region already yielded its own
+        # ERROR row above, so returning here reports the gap without also
+        # asserting the control is absent.
+        if undetermined and not found_org_aggregator:
+            return
+
         if found_org_aggregator:
             yield self.passed(
                 region="global",

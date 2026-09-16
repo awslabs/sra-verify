@@ -67,12 +67,74 @@ class SRA_CONFIG_01(ConfigCheck):
             return
 
         # Check each region for configuration recorder
+        # Set by the guard below when a Region's Config state could not be
+        # read. A global 'not found in any region' FAIL must not fire on the
+        # strength of Regions that never answered.
+        undetermined = False
         for region in self.regions:
             # Get configuration recorders for the region
-            recorders = self.get_configuration_recorders(region)
+            recorders_response = self.get_configuration_recorders(region)
 
-            # Get configuration recorder status for the region
-            recorder_statuses = self.get_configuration_recorder_status(region)
+            if "Error" in recorders_response:
+                error = recorders_response['Error']
+                if self.is_not_configured(error):
+                    # A declared semantic code: AWS answered and the control is
+                    # absent. config declares AWSOrganizationsNotInUseException
+                    # (DescribeOrganization) and NoSuchBucketPolicy
+                    # (GetBucketPolicy); an empty recorder or channel list is a
+                    # successful response, not an error, so nothing is declared for
+                    # the describe_* operations themselves.
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=f"AWS Config is not configured in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                undetermined = True
+                continue
+
+            status_response = self.get_configuration_recorder_status(region)
+
+            if "Error" in status_response:
+                error = status_response['Error']
+                if self.is_not_configured(error):
+                    # A declared semantic code: AWS answered and the control is
+                    # absent. config declares AWSOrganizationsNotInUseException
+                    # (DescribeOrganization) and NoSuchBucketPolicy
+                    # (GetBucketPolicy); an empty recorder or channel list is a
+                    # successful response, not an error, so nothing is declared for
+                    # the describe_* operations themselves.
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=f"AWS Config is not configured in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"config:{self.account_id}:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                undetermined = True
+                continue
+
+            recorders = recorders_response.get('ConfigurationRecorders', [])
+            recorder_statuses = status_response.get(
+                'ConfigurationRecordersStatus', []
+            )
 
             if not recorders:
                 # No configuration recorder found in this region
@@ -116,12 +178,20 @@ class SRA_CONFIG_01(ConfigCheck):
                         ),
                     )
                 else:
-                    # Configuration recorder exists but no status found
-                    yield self.failed(
+                    # The recorder exists, but DescribeConfigurationRecorderStatus
+                    # returned no entry for it. AWS answered and its answer is silent
+                    # about this recorder, so whether it is recording is undetermined --
+                    # which is an ERROR, not a FAIL asserting the control is absent.
+                    yield self.error(
                         region=region,
                         resource_id=recorder_arn,
-                        actual_value=f"Configuration recorder '{recorder_name}' exists but status could not be determined",
+                        actual_value=(
+                            f"DescribeConfigurationRecorderStatus returned no status "
+                            f"entry for recorder '{recorder_name}'"
+                        ),
                         remediation=(
-                            f"Check the configuration recorder status in {region} and ensure it's properly configured"
+                            f"Re-run the scan; if it persists, confirm the recorder in "
+                            f"{region} is fully provisioned and that the member role may "
+                            f"call config:DescribeConfigurationRecorderStatus"
                         ),
                     )

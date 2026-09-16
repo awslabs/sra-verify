@@ -69,12 +69,25 @@ class SRA_SECURITYINCIDENTRESPONSE_01(SecurityIncidentResponseCheck):
         response = self.get_delegated_administrators()
 
         if "Error" in response:
-            yield self.error(
-                region=region,
-                resource_id=None,
-                actual_value=response["Error"].get("Message", "Unknown error"),
-                remediation="Check IAM permissions for Organizations API access"
-            )
+            error = response["Error"]
+            if self.is_not_configured(error):
+                # AWS reported the registration absent, which is the same finding
+                # as an empty delegated-administrator list below.
+                yield self.failed(
+                    region=region,
+                    resource_id=None,
+                    actual_value="No delegated administrator is configured for Security Incident Response",
+                )
+            else:
+                yield self.error(
+                    region=region,
+                    resource_id=None,
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation="Check IAM permissions for Organizations API access"
+                )
             return
 
         delegated_admins = response.get("DelegatedAdministrators", [])

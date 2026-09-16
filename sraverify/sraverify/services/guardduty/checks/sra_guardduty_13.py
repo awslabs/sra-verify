@@ -53,20 +53,65 @@ class SRA_GUARDDUTY_13(GuardDutyCheck):
         """
         # Check all regions
         for region in self.regions:
-            detector_id = self.get_detector_id(region)
+            detectors = self.get_detector_id(region)
 
-            # Handle regions where we can't access GuardDuty
+            # Test for the error result before reading any success-path key: this
+            # is where "GuardDuty is not enabled here" and "the call failed" part
+            # company.
+            if "Error" in detectors:
+                error = detectors["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            detector_id = self.detector_id_of(detectors)
+
             if not detector_id:
-                yield self.error(
+                # Reached only after the error test above passed, so ListDetectors
+                # succeeded and named no detector: GuardDuty is not enabled in this
+                # Region. AWS answered, and the answer is that the control is absent,
+                # which is a FAIL. Reporting it as ERROR asserted an inability to
+                # determine something we had in fact determined.
+                yield self.failed(
                     region=region,
                     resource_id=f"guardduty:{region}",
-                    actual_value="Unable to access GuardDuty in this region",
-                    remediation="Check permissions or if GuardDuty is supported in this region",
+                    actual_value="No GuardDuty detector in this Region",
+                    remediation=f"Enable GuardDuty in {region}",
                 )
                 continue
 
             # List organization admin accounts for GuardDuty
             admin_accounts_response = self.list_organization_admin_accounts(region)
+
+            if "Error" in admin_accounts_response:
+                error = admin_accounts_response["Error"]
+                yield self.error(
+                    region=region,
+                    resource_id=f"guardduty:{region}:{detector_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+                continue
             admin_accounts = admin_accounts_response.get('AdminAccounts', [])
 
             if admin_accounts:

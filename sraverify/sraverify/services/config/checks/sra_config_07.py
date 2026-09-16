@@ -57,7 +57,29 @@ class SRA_CONFIG_07(ConfigCheck):
             global Finding when none is registered.
         """
         # Get delegated administrators for both Config service principals
-        delegated_admins = self.get_delegated_administrators()
+        delegated_response = self.get_delegated_administrators()
+
+        if "Error" in delegated_response:
+            error = delegated_response['Error']
+            if self.is_not_configured(error):
+                yield self.failed(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value="No AWS Organization exists, so AWS Config can have no delegated administrator",
+                )
+            else:
+                yield self.error(
+                    region="global",
+                    resource_id=f"organization/{self.account_id}",
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
+                )
+            return
+
+        delegated_admins = delegated_response.get('DelegatedAdministrators', [])
 
         if not delegated_admins:
             # No delegated administrator found for either service principal

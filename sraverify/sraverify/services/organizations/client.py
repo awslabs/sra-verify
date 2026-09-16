@@ -1,151 +1,129 @@
 """
-Organizations client for interacting with AWS Organizations service.
+Organizations client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+Organizations is a global service, so the client is pinned to ``us-east-1`` and the
+wrapper takes no region.
 """
-from typing import Dict, Any
+from typing import Any, Mapping
 
-from botocore.exceptions import ClientError
-
-from sraverify.core.logging import logger
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class OrganizationsClient:
-    """Client for interacting with AWS Organizations service.
-
-    Organizations is a global AWS service, so the underlying boto3 client is
-    always pinned to ``us-east-1`` regardless of the session's configured
-    region.
-    """
+class OrganizationsClient(AWSClient):
+    """Client for interacting with AWS Organizations."""
 
     def __init__(self, ctx: ScanContext):
         """
-        Initialize Organizations client.
+        Initialize the Organizations client.
+
+        Organizations is a global service; the boto3 client is pinned to
+        ``us-east-1`` so every code path shares one cached instance.
 
         Args:
-            ctx: The per-scan ``ScanContext`` that owns the boto3 session,
-                ``Client_Config``, and per-scan boto3 client cache. The
-                underlying boto3 client is obtained via ``ctx.get_client(...)``
-                so the bounded timeouts and retry policy are applied and the
-                same client instance is reused across all wrappers in this
-                scan.
+            ctx: ScanContext for the current scan.
         """
-        self.ctx = ctx
-        # Organizations is a global service, always use us-east-1
+        super().__init__("us-east-1", ctx)
         self.client = ctx.get_client('organizations', region='us-east-1')
 
-    def describe_organization(self) -> Dict[str, Any]:
+    def describe_organization(self) -> Mapping[str, Any]:
         """
-        Get organization details.
+        Describe the organization.
 
         Returns:
-            Dictionary with Organization key containing organization details,
-            or Error key if an error occurred.
+            The ``DescribeOrganization`` response on success, or the error result.
+
+            ``AWSOrganizationsNotInUseException`` means no organization exists,
+            which is a real answer and is declared in
+            ``OrganizationsCheck.NOT_CONFIGURED_ERRORS``.
         """
         try:
-            response = self.client.describe_organization()
-            return response
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(f"Error describing organization: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+            return self.client.describe_organization()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_roots(self) -> Dict[str, Any]:
+    def list_roots(self) -> Mapping[str, Any]:
         """
-        List organization roots with pagination support.
+        List the organization roots.
 
         Returns:
-            Dictionary with Roots key containing list of roots,
-            or Error key if an error occurred.
+            ``{"Roots": [...]}`` with every page merged, on success, or the error
+            result.
         """
         try:
             roots = []
-            paginator = self.client.get_paginator('list_roots')
-            for page in paginator.paginate():
+            for page in self.client.get_paginator('list_roots').paginate():
                 roots.extend(page.get('Roots', []))
             return {"Roots": roots}
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(f"Error listing roots: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_organizational_units_for_parent(self, parent_id: str) -> Dict[str, Any]:
+    def list_organizational_units_for_parent(
+        self, parent_id: str
+    ) -> Mapping[str, Any]:
         """
-        List organizational units under a parent with pagination support.
+        List the organizational units under a parent.
 
         Args:
-            parent_id: The ID of the parent root or OU
+            parent_id: Root or OU ID.
 
         Returns:
-            Dictionary with OrganizationalUnits key containing list of OUs,
-            or Error key if an error occurred.
+            ``{"OrganizationalUnits": [...]}`` with every page merged, on success,
+            or the error result.
         """
         try:
             ous = []
-            paginator = self.client.get_paginator('list_organizational_units_for_parent')
+            paginator = self.client.get_paginator(
+                'list_organizational_units_for_parent'
+            )
             for page in paginator.paginate(ParentId=parent_id):
                 ous.extend(page.get('OrganizationalUnits', []))
             return {"OrganizationalUnits": ous}
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(f"Error listing OUs for parent {parent_id}: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_policies(self, policy_type: str = "SERVICE_CONTROL_POLICY") -> Dict[str, Any]:
+    def list_policies(
+        self, policy_type: str = "SERVICE_CONTROL_POLICY"
+    ) -> Mapping[str, Any]:
         """
-        List policies by type with pagination support.
+        List the organization policies of a type.
 
         Args:
-            policy_type: Type of policy to list (default: SERVICE_CONTROL_POLICY)
+            policy_type: e.g. ``"SERVICE_CONTROL_POLICY"``.
 
         Returns:
-            Dictionary with Policies key containing list of policies,
-            or Error key if an error occurred.
+            ``{"Policies": [...]}`` with every page merged, on success, or the
+            error result.
+
+            ``PolicyTypeNotEnabledException`` means the policy type is not enabled
+            for the organization, which is a real answer and is declared in the
+            discriminator table.
         """
         try:
             policies = []
-            paginator = self.client.get_paginator('list_policies')
-            for page in paginator.paginate(Filter=policy_type):
+            for page in self.client.get_paginator('list_policies').paginate(
+                Filter=policy_type
+            ):
                 policies.extend(page.get('Policies', []))
             return {"Policies": policies}
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(f"Error listing policies of type {policy_type}: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_accounts_for_parent(self, parent_id: str) -> Dict[str, Any]:
+    def list_accounts_for_parent(self, parent_id: str) -> Mapping[str, Any]:
         """
-        List accounts under a parent (root or OU) with pagination support.
+        List the accounts directly under a parent.
 
         Args:
-            parent_id: The ID of the parent root or OU
+            parent_id: Root or OU ID.
 
         Returns:
-            Dictionary with Accounts key containing list of accounts,
-            or Error key if an error occurred.
+            ``{"Accounts": [...]}`` with every page merged, on success, or the
+            error result.
         """
         try:
             accounts = []
@@ -153,13 +131,5 @@ class OrganizationsClient:
             for page in paginator.paginate(ParentId=parent_id):
                 accounts.extend(page.get('Accounts', []))
             return {"Accounts": accounts}
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(f"Error listing accounts for parent {parent_id}: {error_message}")
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

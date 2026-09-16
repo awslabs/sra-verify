@@ -1,38 +1,43 @@
 """
 Base class for EC2 security checks.
 
-As of the scan-context-refactor (task 8.8), per-scan cached AWS responses
-live on the attached :class:`~sraverify.core.scan_context.ScanContext` under
-the ``"ec2"`` namespace. The previous class-level
-``_ebs_encryption_default_cache`` dict has been removed; reads and writes
-go through ``self._ctx._has`` / ``self._ctx._get`` / ``self._ctx._set``,
-which keeps the cache scoped to one ``run_checks`` invocation and makes
-the cache eligible for garbage collection when the scan ends.
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"ec2"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+One accessor, reading the account-level default EBS encryption setting per Region.
 """
-from typing import Dict, Optional, Any
+from typing import Any, ClassVar, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.ec2.client import EC2Client
 from sraverify.core.logging import logger
+from sraverify.services.ec2.client import EC2Client
 
 
 class EC2Check(SecurityCheck):
     """Base class for all EC2 security checks."""
 
-    #: Namespace string used for ``ScanContext`` cache reads/writes
-    #: (Requirement 5.8).
     NAMESPACE = "ec2"
+
+    #: Empty, deliberately. ``GetEbsEncryptionByDefault`` answers a **boolean** --
+    #: an account with default encryption switched off is a successful response
+    #: carrying ``EbsEncryptionByDefault: False``, not an error. So there is no
+    #: code from this operation that means "not configured", and every error is an
+    #: inability to determine.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
 
     def _setup_clients(self):
         """Set up EC2 clients for each region.
 
-        The underlying boto3 ``ec2`` clients are obtained via
-        ``self._ctx.get_client(...)`` inside :class:`EC2Client`, so they
-        share the bounded ``Client_Config`` and de-duplicate across
-        service base classes that need an EC2 client in the same region.
+        Each wrapper obtains its underlying boto3 ``ec2`` and ``sts`` clients from
+        ``self._ctx.get_client(...)``.
         """
-        # Clear existing clients
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = EC2Client(region, ctx=self._ctx)
@@ -49,35 +54,30 @@ class EC2Check(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def get_ebs_encryption_by_default(self, region: str) -> Dict[str, Any]:
+    def get_ebs_encryption_by_default(self, region: str) -> Mapping[str, Any]:
         """
-        Get the EBS encryption by default status for the account in the region with caching.
-
-        Reads from / writes to the ``ScanContext``'s ``"ec2"`` namespace, so
-        the cache is per-scan rather than process-wide.
+        Get the account's default EBS encryption setting for a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Dictionary containing EBS encryption by default status
+            ``{"EbsEncryptionByDefault": bool}``, or an error result.
         """
         cache_key = f"ebs_encryption_default:{region}"
-
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached EBS encryption by default status for {region}")
+            logger.debug(f"EC2: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No EC2 client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(f"EC2: No client available for region {region}")
+            return no_client_result(service="EC2", region=region)
 
-        # Get EBS encryption by default status from client
-        encryption_status = client.get_ebs_encryption_by_default()
+        result = client.get_ebs_encryption_by_default()
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
 
-        # Cache the result on the ScanContext under the "ec2" namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, encryption_status)
-        logger.debug(f"Cached EBS encryption by default status for {region}")
-
-        return encryption_status
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result

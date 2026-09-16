@@ -54,8 +54,8 @@ class SRA_SHIELD_02(ShieldCheck):
         subscription = self.get_subscription_state(region)
 
         if "Error" in subscription:
-            error_code = subscription["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            error = subscription["Error"]
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -66,8 +66,11 @@ class SRA_SHIELD_02(ShieldCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=subscription["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Shield API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
         elif "Subscription" in subscription:
             auto_renew = subscription["Subscription"].get("AutoRenew", "")

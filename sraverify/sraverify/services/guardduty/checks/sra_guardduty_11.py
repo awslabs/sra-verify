@@ -49,20 +49,75 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
         """
         # Check all regions
         for region in self.regions:
-            detector_id = self.get_detector_id(region)
+            detectors = self.get_detector_id(region)
 
-            # Handle regions where we can't access GuardDuty
+            # Test for the error result before reading any success-path key: this
+            # is where "GuardDuty is not enabled here" and "the call failed" part
+            # company.
+            if "Error" in detectors:
+                error = detectors["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            detector_id = self.detector_id_of(detectors)
+
             if not detector_id:
-                yield self.error(
+                # Reached only after the error test above passed, so ListDetectors
+                # succeeded and named no detector: GuardDuty is not enabled in this
+                # Region. AWS answered, and the answer is that the control is absent,
+                # which is a FAIL. Reporting it as ERROR asserted an inability to
+                # determine something we had in fact determined.
+                yield self.failed(
                     region=region,
                     resource_id=f"guardduty:{region}",
-                    actual_value="Unable to access GuardDuty in this region",
-                    remediation="Check permissions or if GuardDuty is supported in this region",
+                    actual_value="No GuardDuty detector in this Region",
+                    remediation=f"Enable GuardDuty in {region}",
                 )
                 continue
 
             # Get detector details
             detector_details = self.get_detector_details(region)
+
+            if "Error" in detector_details:
+                error = detector_details["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=(
+                            f"GuardDuty is not configured in this Region "
+                            f"({error['Code']})"
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"guardduty:{region}:{detector_id}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
 
             if detector_details:
                 # Check if EKS runtime protection is enabled in the Features array
@@ -98,9 +153,20 @@ class SRA_GUARDDUTY_11(GuardDutyCheck):
                         remediation=f"Enable Runtime Monitoring for GuardDuty in {region} to monitor operating system-level, networking, and file events in workloads",
                     )
             else:
-                yield self.failed(
+                # Not reachable in practice: the detector ID was resolved above,
+                # so an empty GetDetector response would mean the detector
+                # vanished between two calls. An ERROR rather than a FAIL,
+                # because that is an undetermined state and not evidence the
+                # control is absent.
+                yield self.error(
                     region=region,
                     resource_id=f"guardduty:{region}:{detector_id}",
-                    actual_value="Unable to retrieve detector details",
-                    remediation="Check GuardDuty permissions and configuration",
+                    actual_value=(
+                        "GetDetector returned no detector configuration for "
+                        f"{detector_id}"
+                    ),
+                    remediation=(
+                        "Re-run the scan; if it persists, confirm the detector "
+                        f"still exists in {region}"
+                    ),
                 )

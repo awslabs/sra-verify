@@ -53,7 +53,31 @@ class SRA_INSPECTOR_01(InspectorCheck):
 
         for region in self.regions:
             # Get account status using the base class method with caching
-            account_status = self.get_account_status(region)
+            status_response = self.get_account_status(region)
+
+            if "Error" in status_response:
+                error = status_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{self.account_id}",
+                        actual_value=f"Inspector account status could not be read in {region}",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{self.account_id}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            account_status = self.account_status_of(
+                status_response, self.account_id
+            )
 
             # Check if state status is enabled
             state_status = account_status.get('state', {}).get('status')

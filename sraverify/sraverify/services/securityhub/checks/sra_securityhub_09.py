@@ -56,9 +56,33 @@ class SRA_SECURITYHUB_09(SecurityHubCheck):
         # Check each region separately
         for region in self.regions:
             # Get Security Hub members
-            securityhub_members = self.get_security_hub_members(region)
+            members_response = self.get_security_hub_members(region)
 
             resource_id = f"securityhub:members/{self.account_id}/{region}"
+
+            if "Error" in members_response:
+                error = members_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="All Security Hub member accounts have Enabled status",
+                        actual_value=f"Security Hub is not enabled in region {region}, so it has no member accounts",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="All Security Hub member accounts have Enabled status",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            securityhub_members = members_response.get('Members', [])
 
             # Check if there are any members
             if not securityhub_members:

@@ -1,40 +1,62 @@
 """
 Base class for CloudTrail security checks.
 
-As of the scan-context-refactor (task 8.2), CloudTrail's three previously
-class-level caches (``_describe_trails_cache``, ``_trail_status_cache``,
-``_delegated_admin_account_id_cache``) have been replaced with calls to the
-per-scan :class:`ScanContext` namespaced primitives under the ``"cloudtrail"``
-namespace. The session-region-name prefix that used to be baked into every
-cache key (e.g., ``f"{self.session.region_name}:{region}"``) is dropped here
-because the per-scan context already scopes the cache to a single session.
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"cloudtrail"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+:meth:`describe_trails` is account-wide rather than per-Region: it uses the first
+Region's client and CloudTrail returns every visible trail, shadow trails
+included. Its cache key carries only the boolean flag for that reason.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, Dict, List, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.cloudtrail.client import CloudTrailClient
 from sraverify.core.logging import logger
+from sraverify.services.cloudtrail.client import CloudTrailClient
 
 
 class CloudTrailCheck(SecurityCheck):
     """Base class for all CloudTrail security checks."""
 
-    # All cached AWS-API responses for CloudTrail are stored under this
-    # namespace on the per-scan ``ScanContext``. Cache keys are simple
-    # service-internal strings (e.g., ``"describe_trails:True"``) since the
-    # ``ScanContext`` itself is per-scan and per-session, so there is no
-    # need to disambiguate by session region anymore.
     NAMESPACE = "cloudtrail"
+
+    #: The ``(operation, code)`` pairs that mean "the control is not configured".
+    #:
+    #: ``TrailNotFoundException`` from ``GetTrailStatus`` is the only entry: the
+    #: requested resource is the trail whose status a check is asking about, so its
+    #: absence is the finding. Nothing is declared for ``DescribeTrails``: an
+    #: account with no trail is a **successful** response with an empty
+    #: ``trailList``, so any error there is an inability to determine.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetTrailStatus": {
+            "TrailNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/"
+                    "API_GetTrailStatus.html -- TrailNotFoundException is returned "
+                    "when the trail named in the request does not exist. A check "
+                    "asking whether a trail is logging is asking about that trail, "
+                    "so its absence is the control being absent. Nothing is "
+                    "declared for DescribeTrails because 'no trails' is a "
+                    "successful empty trailList there, not an error."
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up CloudTrail clients for each region.
 
-        The underlying boto3 clients held by :class:`CloudTrailClient` are
-        obtained from ``self._ctx.get_client(...)`` so they share the per-scan
-        bounded ``Client_Config`` and the ``(service, region)`` client cache.
+        Each wrapper obtains its underlying boto3 ``cloudtrail``,
+        ``organizations`` and ``sts`` clients from ``self._ctx.get_client(...)``.
         """
-        # Clear existing clients
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = CloudTrailClient(region, ctx=self._ctx)
@@ -51,129 +73,157 @@ class CloudTrailCheck(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def describe_trails(self, include_shadow_trails: bool = True) -> List[Dict[str, Any]]:
+    @staticmethod
+    def parse_delivery_time(value: Any) -> Optional["datetime"]:
         """
-        Get all CloudTrail trails across all regions using the client with caching.
+        Parse one of ``GetTrailStatus``'s delivery timestamps.
+
+        Exists so no ``except`` clause appears inside a check's ``execute()``.
+        Three checks -- ``_08``, ``_09``, ``_10`` -- compare a delivery time
+        against a 24-hour window, and each wrapped the parse in
+        ``except (ValueError, TypeError)``. That handler was not catching an AWS
+        failure at all; it was catching a malformed timestamp. The contract still
+        forbids it in ``execute()``, because the orchestrator is the only tier
+        that may handle exceptions, so the parse moves here and answers ``None``
+        instead of raising.
 
         Args:
-            include_shadow_trails: Include shadow trails in the response
+            value: A ``LatestDeliveryTime``-style member: boto3 usually hands back
+                a ``datetime``, but a string is accepted and parsed.
 
         Returns:
-            List of all trails
+            The parsed ``datetime``, or ``None`` when the value is absent or
+            unparseable. ``None`` is a shape problem in AWS's response, not a
+            verdict, and the caller reports it as such.
         """
-        if not self.regions:
-            logger.warning("No regions specified")
-            return []
+        from datetime import datetime as _dt
 
-        # Cache key only needs to disambiguate by the boolean flag; the
-        # per-scan ctx already scopes by session.
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value if hasattr(value, "tzinfo") else None
+        try:
+            return _dt.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    def describe_trails(
+        self, include_shadow_trails: bool = True
+    ) -> Mapping[str, Any]:
+        """
+        Get every visible CloudTrail trail, with caching.
+
+        Args:
+            include_shadow_trails: Include shadow trails in the response.
+
+        Returns:
+            ``{"trailList": [...]}`` on success, or an error result. Test for
+            ``"Error"`` before iterating -- every check here does, and one that
+            forgot would raise.
+        """
         cache_key = f"describe_trails:{include_shadow_trails}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached trails for {cache_key}")
+            logger.debug(f"CloudTrail: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Use any region to get all trails
-        client = self.get_client(self.regions[0])
-        if not client:
-            logger.warning("No CloudTrail client available")
-            return []
+        if not self.regions:
+            logger.warning("CloudTrail: No regions specified")
+            return no_client_result(service="CloudTrail", region="global")
 
-        # Get all trails using the client
-        trails = client.describe_trails(include_shadow_trails=include_shadow_trails)
+        region = self.regions[0]
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(f"CloudTrail: No client available for region {region}")
+            return no_client_result(service="CloudTrail", region=region)
 
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, trails)
-        logger.debug(f"Cached {len(trails)} trails for {cache_key}")
+        result = client.describe_trails(
+            include_shadow_trails=include_shadow_trails
+        )
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
 
-        return trails
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-    def get_organization_trails(self) -> List[Dict[str, Any]]:
+    def get_organization_trails(self) -> Mapping[str, Any]:
         """
-        Get all organization CloudTrail trails.
+        Get the organization trails.
+
+        Filters :meth:`describe_trails`; issues no call of its own.
 
         Returns:
-            List of organization trails
+            ``{"trailList": [...]}`` holding only organization trails, or
+            :meth:`describe_trails`'s error result unchanged. Passing the error
+            through rather than returning an empty list is the point: "no
+            organization trail exists" and "we could not list trails" must stay
+            distinguishable.
         """
-        # Get all trails first
-        all_trails = self.describe_trails()
+        response = self.describe_trails()
+        if is_error(response):
+            return response
 
-        # Filter for organization trails
         org_trails = [
-            trail for trail in all_trails
+            trail for trail in response.get('trailList', [])
             if trail.get('IsOrganizationTrail', False)
         ]
+        logger.debug(f"CloudTrail: Found {len(org_trails)} organization trails")
+        return {"trailList": org_trails}
 
-        logger.debug(f"Found {len(org_trails)} organization trails")
-        return org_trails
-
-    def get_trail_status(self, region: str, trail_arn: str) -> Dict[str, Any]:
+    def get_trail_status(self, region: str, trail_arn: str) -> Mapping[str, Any]:
         """
-        Get status of a specific CloudTrail trail using the client with caching.
+        Get a trail's status, with caching.
 
         Args:
             region: AWS region name
-            trail_arn: ARN of the trail
+            trail_arn: The trail ARN.
 
         Returns:
-            Dictionary containing trail status
+            The ``GetTrailStatus`` response, or an error result.
         """
-        # Cache key includes both the trail ARN and the region the call was
-        # issued from. The ARN alone is unique, but the region is included to
-        # match the pre-refactor key shape.
         cache_key = f"trail_status:{trail_arn}:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached trail status for {trail_arn} in {region}")
+            logger.debug(f"CloudTrail: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No CloudTrail client available for region {region}")
-            return {}
+        if client is None:
+            logger.warning(f"CloudTrail: No client available for region {region}")
+            return no_client_result(service="CloudTrail", region=region)
 
-        # Get trail status from client
-        status = client.get_trail_status(trail_arn)
+        result = client.get_trail_status(trail_arn)
+        if is_error(result):
+            return result
 
-        # Cache the result
-        self._ctx._set(self.NAMESPACE, cache_key, status)
-        logger.debug(f"Cached trail status for {trail_arn} in {region}")
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-        return status
-
-    def get_delegated_administrators(self) -> List[Dict[str, Any]]:
+    def get_delegated_administrators(self) -> Mapping[str, Any]:
         """
-        Get CloudTrail delegated administrators with caching.
+        Get the Organizations delegated administrators for CloudTrail, with caching.
 
         Returns:
-            List of delegated administrators
+            ``{"DelegatedAdministrators": [...]}``, or an error result.
         """
-        if not self.regions:
-            logger.warning("No regions specified")
-            return []
-
         account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
-
-        # Cache key is keyed only on the account ID; the session-region prefix
-        # that the pre-refactor implementation used is dropped because the
-        # per-scan ctx already scopes the cache to a single session.
         cache_key = f"delegated_admins:{account_id}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached delegated administrators for {cache_key}")
+            logger.debug(f"CloudTrail: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Use any region to get delegated administrators
-        client = self.get_client(self.regions[0])
-        if not client:
-            logger.warning("No CloudTrail client available")
-            return []
+        if not self.regions:
+            logger.warning("CloudTrail: No regions specified")
+            return no_client_result(service="CloudTrail", region="global")
 
-        # Get delegated administrators from client
-        delegated_admins = client.list_delegated_administrators()
+        region = self.regions[0]
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(f"CloudTrail: No client available for region {region}")
+            return no_client_result(service="CloudTrail", region=region)
 
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, delegated_admins)
-        logger.debug(f"Cached {len(delegated_admins)} delegated administrators for {cache_key}")
+        result = client.list_delegated_administrators()
+        if is_error(result):
+            return result
 
-        return delegated_admins
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result

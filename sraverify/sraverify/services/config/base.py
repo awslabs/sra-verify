@@ -1,34 +1,92 @@
 """
 Base class for AWS Config security checks.
+
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"config"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
+
+Two shapes here are deliberate exceptions to the accessor pattern:
+
+* :meth:`get_configuration_recorders` **caches nothing**. It is the only accessor
+  in the tree that calls its client on every invocation.
+* :meth:`get_delegated_administrators` **loops over two service principals** --
+  ``config.amazonaws.com`` and ``config-multiaccountsetup.amazonaws.com`` --
+  caching one slot per principal and merging the results. A single call therefore
+  writes the cache more than once, which is why it is classified as derived rather
+  than as a plain accessor.
+
+:meth:`bucket_region_of` is a pure helper over a success dict, not an accessor. It
+maps a ``None`` ``LocationConstraint`` to ``"us-east-1"``, which is what the API
+means -- doing that inside the client would make a failed call indistinguishable
+from a bucket that really is in us-east-1.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, Dict, List, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.config.client import ConfigClient
 from sraverify.core.logging import logger
+from sraverify.services.config.client import ConfigClient
 
 
 class ConfigCheck(SecurityCheck):
-    """Base class for all AWS Config security checks.
+    """Base class for all AWS Config security checks."""
 
-    Cached AWS responses are stored on the per-scan ``ScanContext`` under the
-    ``"config"`` namespace via ``self._ctx._has`` / ``_get`` / ``_set``.
-    Class-level cache dicts have been removed (Requirements 5.4, 5.18).
-    """
-
-    # Service namespace used by ``ScanContext`` cache primitives.
     NAMESPACE = "config"
 
-    # Config service principals
-    CONFIG_SERVICE_PRINCIPALS = [
+    #: Both service principals Config can be delegated under. Checked together
+    #: because an organization may have either or both registered.
+    CONFIG_SERVICE_PRINCIPALS: ClassVar[tuple] = (
         "config.amazonaws.com",
-        "config-multiaccountsetup.amazonaws.com"
-    ]
+        "config-multiaccountsetup.amazonaws.com",
+    )
+
+    #: The ``(operation, code)`` pairs that mean "the control is not configured".
+    #:
+    #: Both entries are about a resource whose *absence is the finding*: no
+    #: organization, or a bucket with no policy. Nothing is declared for the
+    #: ``describe_*`` operations, because Config having no recorder or no delivery
+    #: channel is a **successful** response with an empty list, not an error -- so
+    #: any error from those is an inability to determine.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "DescribeOrganization": {
+            "AWSOrganizationsNotInUseException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
+                    "API_DescribeOrganization.html -- "
+                    "AWSOrganizationsNotInUseException is returned when the "
+                    "account is not a member of an organization, which is the "
+                    "control being absent rather than an inability to determine. "
+                    "This is the pair product.md names as the canonical example of "
+                    "a semantic AWS code."
+                ),
+            ),
+        },
+        "GetBucketPolicy": {
+            "NoSuchBucketPolicy": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/AmazonS3/latest/API/"
+                    "API_GetBucketPolicy.html -- NoSuchBucketPolicy means the "
+                    "bucket has no policy attached, which is exactly what a check "
+                    "asking whether the Config delivery bucket restricts access is "
+                    "testing for. The sibling AccessDenied is deliberately not "
+                    "declared: it means the role may not read the policy."
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
-        """Set up Config clients for each region."""
-        # Clear existing clients
+        """Set up Config clients for each region.
+
+        Each wrapper obtains its underlying boto3 ``config``, ``organizations``,
+        ``s3`` and ``sts`` clients from ``self._ctx.get_client(...)``.
+        """
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = ConfigClient(region, ctx=self._ctx)
@@ -45,198 +103,195 @@ class ConfigCheck(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def get_configuration_recorders(self, region: str) -> List[Dict[str, Any]]:
+    @staticmethod
+    def bucket_region_of(response: Mapping[str, Any]) -> str:
         """
-        Get configuration recorders for a specific region.
+        Read a bucket's Region out of a successful ``GetBucketLocation`` response.
+
+        Call only after ``"Error" in response`` is False. That ordering is the
+        whole point: ``LocationConstraint`` is ``None`` for us-east-1, so this
+        mapping is only sound once a failure has been ruled out.
 
         Args:
-            region: AWS region name
+            response: A successful :meth:`get_bucket_location` response.
 
         Returns:
-            List of configuration recorders
+            The bucket's Region, with ``None`` resolved to ``"us-east-1"``.
         """
-        # Get client for the region
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Config client available for region {region}")
-            return []
+        return response.get('LocationConstraint') or 'us-east-1'
 
-        # Get configuration recorders from client
-        recorders = client.describe_configuration_recorders()
-        logger.debug(f"Found {len(recorders)} configuration recorders for {region}")
-
-        return recorders
-
-    def get_configuration_recorder_status(self, region: str) -> List[Dict[str, Any]]:
+    def _cached_call(
+        self, region: str, cache_key: str, method: str, *args: Any
+    ) -> Mapping[str, Any]:
         """
-        Get configuration recorder status for a specific region with caching.
+        Run one client method for a Region through the accessor shape.
 
         Args:
-            region: AWS region name
+            region: AWS region name.
+            cache_key: Key within the ``"config"`` namespace.
+            method: Name of the :class:`ConfigClient` method to call.
+            *args: Positional arguments for that method.
 
         Returns:
-            List of configuration recorder statuses
+            The cached or freshly fetched response dict, or an error result.
         """
-        # Check cache first
-        cache_key = f"recorder_status:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached configuration recorder status for {region}")
+            logger.debug(f"Config: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Get client for the region
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Config client available for region {region}")
-            return []
+        if client is None:
+            logger.warning(f"Config: No client available for region {region}")
+            return no_client_result(service="Config", region=region)
 
-        # Get configuration recorder status from client
-        statuses = client.describe_configuration_recorder_status()
+        logger.debug(f"Config: Fetching {cache_key}")
+        result = getattr(client, method)(*args)
 
-        # Cache the results - store the complete response
-        self._ctx._set(self.NAMESPACE, cache_key, statuses)
-        logger.debug(f"Cached {len(statuses)} configuration recorder statuses for {region}")
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
 
-        return statuses
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-    def get_delivery_channels(self, region: str) -> List[Dict[str, Any]]:
+    def get_configuration_recorders(self, region: str) -> Mapping[str, Any]:
         """
-        Get delivery channels for a specific region.
+        Get the configuration recorders in a Region.
+
+        **Uncached, deliberately.** This is the one accessor in the tree that
+        re-issues its call every time.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of delivery channels
+            ``{"ConfigurationRecorders": [...]}``, or an error result.
         """
-        # Check cache first
-        cache_key = f"delivery_channels:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached delivery channels for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        # Get client for the region
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Config client available for region {region}")
-            return []
+        if client is None:
+            logger.warning(f"Config: No client available for region {region}")
+            return no_client_result(service="Config", region=region)
+        return client.describe_configuration_recorders()
 
-        # Get delivery channels from client
-        channels = client.describe_delivery_channels()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, channels)
-        logger.debug(f"Cached {len(channels)} delivery channels for {region}")
-
-        return channels
-
-    def get_delivery_channel_status(self, region: str) -> List[Dict[str, Any]]:
+    def get_configuration_recorder_status(self, region: str) -> Mapping[str, Any]:
         """
-        Get delivery channel status for a specific region with caching.
+        Get the configuration recorder status in a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of delivery channel statuses
+            ``{"ConfigurationRecordersStatus": [...]}``, or an error result.
         """
-        # Check cache first
-        cache_key = f"delivery_channel_status:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached delivery channel status for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(
+            region,
+            f"recorder_status:{region}",
+            "describe_configuration_recorder_status",
+        )
 
-        # Get client for the region
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Config client available for region {region}")
-            return []
-
-        # Get delivery channel status from client
-        statuses = client.describe_delivery_channel_status()
-
-        # Cache the results - store the complete response
-        self._ctx._set(self.NAMESPACE, cache_key, statuses)
-        logger.debug(f"Cached {len(statuses)} delivery channel statuses for {region}")
-
-        return statuses
-
-    def get_configuration_aggregators(self, region: str) -> List[Dict[str, Any]]:
+    def get_delivery_channels(self, region: str) -> Mapping[str, Any]:
         """
-        Get configuration aggregators for a specific region with caching.
+        Get the delivery channels in a Region, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of configuration aggregators
+            ``{"DeliveryChannels": [...]}``, or an error result.
         """
-        # Check cache first
-        cache_key = f"configuration_aggregators:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached configuration aggregators for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(
+            region, f"delivery_channels:{region}", "describe_delivery_channels"
+        )
 
-        # Get client for the region
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Config client available for region {region}")
-            return []
-
-        # Get configuration aggregators from client
-        aggregators = client.describe_configuration_aggregators()
-
-        # Cache the results
-        self._ctx._set(self.NAMESPACE, cache_key, aggregators)
-        logger.debug(f"Cached {len(aggregators)} configuration aggregators for {region}")
-
-        return aggregators
-
-    def get_delegated_administrators(self, service_principal=None) -> List[Dict[str, Any]]:
+    def get_delivery_channel_status(self, region: str) -> Mapping[str, Any]:
         """
-        Get Config delegated administrators with caching.
+        Get the delivery channel status in a Region, with caching.
 
         Args:
-            service_principal: Optional specific service principal to check
+            region: AWS region name
 
         Returns:
-            List of delegated administrators
+            ``{"DeliveryChannelsStatus": [...]}``, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"delivery_channel_status:{region}",
+            "describe_delivery_channel_status",
+        )
+
+    def get_configuration_aggregators(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the configuration aggregators in a Region, with caching.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            ``{"ConfigurationAggregators": [...]}``, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"configuration_aggregators:{region}",
+            "describe_configuration_aggregators",
+        )
+
+    def get_delegated_administrators(
+        self, service_principal: Optional[str] = None
+    ) -> Mapping[str, Any]:
+        """
+        Get Config delegated administrators, merged across service principals.
+
+        Config can be delegated under either ``config.amazonaws.com`` or
+        ``config-multiaccountsetup.amazonaws.com``, so both are consulted unless
+        one is named. Each principal's response is cached in its own slot.
+
+        **The first failure wins.** A merged list assembled from one successful
+        principal and one denied one would be indistinguishable from a complete
+        answer, and the checks that compare a delegated administrator against
+        ``--audit-account`` would draw a confident conclusion from half the data.
+
+        Args:
+            service_principal: A single principal to check, or ``None`` for both.
+
+        Returns:
+            ``{"DelegatedAdministrators": [...]}`` merged across principals, or the
+            first error result encountered.
         """
         if not self.regions:
-            logger.warning("No regions specified")
-            return []
+            logger.warning("Config: No regions specified")
+            return no_client_result(service="Config", region="global")
 
         account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return []
+        principals = (
+            [service_principal] if service_principal
+            else list(self.CONFIG_SERVICE_PRINCIPALS)
+        )
+        region = self.regions[0]
+        merged: List[Dict[str, Any]] = []
 
-        # If a specific service principal is provided, only check that one
-        service_principals = [service_principal] if service_principal else self.CONFIG_SERVICE_PRINCIPALS
-
-        all_delegated_admins = []
-
-        for sp in service_principals:
-            # Check cache first
-            cache_key = f"delegated_admin:{account_id}:{sp}"
+        for principal in principals:
+            cache_key = f"delegated_admin:{account_id}:{principal}"
             if self._ctx._has(self.NAMESPACE, cache_key):
-                logger.debug(f"Using cached delegated administrators for {cache_key}")
-                admins = self._ctx._get(self.NAMESPACE, cache_key)
-                all_delegated_admins.extend(admins)
+                logger.debug(f"Config: Using cached {cache_key}")
+                merged.extend(
+                    self._ctx._get(self.NAMESPACE, cache_key).get(
+                        'DelegatedAdministrators', []
+                    )
+                )
                 continue
 
-            # Use any region to get delegated administrators
-            client = self.get_client(self.regions[0])
-            if not client:
-                logger.warning("No Config client available")
-                continue
+            client = self.get_client(region)
+            if client is None:
+                logger.warning(f"Config: No client available for region {region}")
+                return no_client_result(service="Config", region=region)
 
-            # Get delegated administrators from client
-            delegated_admins = client.list_delegated_administrators(sp)
+            result = client.list_delegated_administrators(principal)
+            if is_error(result):
+                # Not cached, and not merged around: a partial answer here would
+                # be read as a complete one.
+                return result
 
-            # Cache the results
-            self._ctx._set(self.NAMESPACE, cache_key, delegated_admins)
-            logger.debug(f"Cached {len(delegated_admins)} delegated administrators for {cache_key}")
+            self._ctx._set(self.NAMESPACE, cache_key, result)
+            merged.extend(result.get('DelegatedAdministrators', []))
 
-            all_delegated_admins.extend(delegated_admins)
-
-        return all_delegated_admins
+        return {"DelegatedAdministrators": merged}

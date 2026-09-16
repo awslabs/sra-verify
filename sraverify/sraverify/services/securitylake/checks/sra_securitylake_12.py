@@ -65,7 +65,73 @@ class SRA_SECURITYLAKE_12(SecurityLakeCheck):
             logger.debug(f"Checking if WAF logs are enabled in {region}")
 
             # Get all organization accounts
-            org_accounts = self.get_organization_accounts(region)
+            accounts_response = self.get_organization_accounts(region)
+
+            if "Error" in accounts_response:
+                error = accounts_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default",
+                        checked_value="Log source configured for every active account",
+                        actual_value="No AWS Organization exists, so it has no accounts whose log sources could be configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"arn:aws:securitylake:{region}:{self.account_id}:datalake/default",
+                        checked_value="Log source configured for every active account",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            org_accounts = accounts_response.get('Accounts', [])
+
+            # check_log_source_configured() answers a bare bool and cannot report
+            # a failure, so the log-source read is guarded here, once per Region,
+            # before anything consults it. Without this a denied ListLogSources
+            # read as "the source is not configured" -- 104 such FAIL rows in a
+            # single-Region log-archive scan.
+            log_sources_response = self.get_log_sources(region)
+            if "Error" in log_sources_response:
+                error = log_sources_response['Error']
+                semantic = self.is_not_configured(error)
+                active_ids = sorted(
+                    a.get('Id') for a in org_accounts
+                    if a.get('Status') == 'ACTIVE' and a.get('Id')
+                )
+                for account_id in active_ids:
+                    resource_id = (
+                        f"arn:aws:securitylake:{region}:{account_id}:"
+                        f"log-source/WAF"
+                    )
+                    if semantic:
+                        yield self.failed(
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="WAF log source configured",
+                            actual_value=(
+                                f"No Security Lake data lake exists in {region}, "
+                                f"so no log source is configured for account "
+                                f"{account_id}"
+                            ),
+                        )
+                    else:
+                        yield self.error(
+                            region=region,
+                            resource_id=resource_id,
+                            checked_value="WAF log source configured",
+                            actual_value=(
+                                f"{error['Operation']} failed: {error['Code']}: "
+                                f"{error['Message']}"
+                            ),
+                            remediation=self._remediation_for(error),
+                        )
+                continue
             if not org_accounts:
                 logger.debug("No organization accounts found, checking current account only")
                 org_accounts = [{'Id': self.account_id, 'Status': 'ACTIVE'}]

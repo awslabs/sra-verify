@@ -1,13 +1,18 @@
 """
-GuardDuty client for interacting with AWS GuardDuty service.
+GuardDuty client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
 """
-from typing import Dict, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+from typing import Any, Mapping
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class GuardDutyClient:
+class GuardDutyClient(AWSClient):
     """Client for interacting with AWS GuardDuty service."""
 
     def __init__(self, region: str, ctx: ScanContext):
@@ -19,34 +24,30 @@ class GuardDutyClient:
             ctx: ScanContext for the current scan; the underlying boto3 client
                 is obtained via ``ctx.get_client('guardduty', region=region)``
                 so that the per-scan client cache and bounded ``Client_Config``
-                are applied (see Requirement 2.12).
+                are applied.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('guardduty', region=region)
 
-    def get_detector_id(self):
+    def get_detector_id(self) -> Mapping[str, Any]:
         """
-        Get the detector ID for the current region.
+        List the detector IDs in this Region.
 
         Returns:
-            Detector ID if GuardDuty is enabled, None otherwise
+            ``{"DetectorIds": [...]}`` on success, or the error result.
+
+            The whole response, not the first ID. Extraction happens after the
+            error test -- ``GuardDutyCheck.detector_id_of`` does it -- because a
+            method that returned the ID itself would have to encode "no detector"
+            and "the call failed" in the same ``None``, which is exactly the
+            defect this replaces.
         """
         try:
-            response = self.client.list_detectors()
-            detector_ids = response.get('DetectorIds', [])
-            if detector_ids:
-                return detector_ids[0]
-            logger.debug(f"No detector found in {self.region}")
-            return None
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = str(e)
-            logger.error(f"Error getting detector ID in {self.region}: {error_message}")
-            # Return a special error indicator instead of None
-            return f"ERROR:{error_code}:{error_message}"
+            return self.client.list_detectors()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def get_detector_details(self, detector_id: str) -> Dict[str, Any]:
+    def get_detector_details(self, detector_id: str) -> Mapping[str, Any]:
         """
         Get details for a specific detector.
 
@@ -54,15 +55,16 @@ class GuardDutyClient:
             detector_id: GuardDuty detector ID
 
         Returns:
-            Dictionary containing detector details
+            The ``GetDetector`` response on success, or the error result.
         """
         try:
             return self.client.get_detector(DetectorId=detector_id)
-        except ClientError as e:
-            logger.error(f"Error getting detector details for {detector_id} in {self.region}: {e}")
-            return {}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def describe_organization_configuration(self, detector_id: str) -> Dict[str, Any]:
+    def describe_organization_configuration(
+        self, detector_id: str
+    ) -> Mapping[str, Any]:
         """
         Get organization configuration for a specific detector.
 
@@ -70,41 +72,32 @@ class GuardDutyClient:
             detector_id: GuardDuty detector ID
 
         Returns:
-            Dictionary containing organization configuration details or error information
+            The ``DescribeOrganizationConfiguration`` response on success, or the
+            error result.
+
+            ``BadRequestException`` from *this* operation means no delegated
+            administrator has been enabled -- the control is absent -- and
+            ``GuardDutyCheck.NOT_CONFIGURED_ERRORS`` declares it so. The same code
+            from ``ListOrganizationAdminAccounts`` means something else entirely,
+            which is why the table is keyed by operation and why this client makes
+            no judgement about either.
         """
         try:
-            return self.client.describe_organization_configuration(DetectorId=detector_id)
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = str(e)
-            logger.error(f"Error getting organization configuration for {detector_id} in {self.region}: {error_message}")
+            return self.client.describe_organization_configuration(
+                DetectorId=detector_id
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-            # Return a dictionary with error information
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
-
-    def list_organization_admin_accounts(self) -> Dict[str, Any]:
+    def list_organization_admin_accounts(self) -> Mapping[str, Any]:
         """
         List organization admin accounts for GuardDuty.
 
         Returns:
-            Dictionary containing organization admin accounts details or error information
+            The ``ListOrganizationAdminAccounts`` response on success, or the
+            error result.
         """
         try:
             return self.client.list_organization_admin_accounts()
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            error_message = str(e)
-            logger.error(f"Error listing organization admin accounts for GuardDuty in {self.region}: {error_message}")
-
-            # Return a dictionary with error information
-            return {
-                "Error": {
-                    "Code": error_code,
-                    "Message": error_message
-                }
-            }
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

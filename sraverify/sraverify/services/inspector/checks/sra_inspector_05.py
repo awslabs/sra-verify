@@ -56,6 +56,29 @@ class SRA_INSPECTOR_05(InspectorCheck):
         for region in self.regions:
             # Get delegated admin account for this region
             delegated_admin_response = self.get_delegated_admin(region)
+
+            if "Error" in delegated_admin_response:
+                error = delegated_admin_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{region}/delegated-admin",
+                        checked_value="Inspector delegated admin account is configured",
+                        actual_value="No delegated admin account is configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{region}/delegated-admin",
+                        checked_value="Inspector delegated admin account is configured",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
             delegated_admin = delegated_admin_response.get('delegatedAdmin', {})
             delegated_admin_id = delegated_admin.get('accountId')
 

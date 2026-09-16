@@ -54,12 +54,59 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
         # Check each region separately
         for region in self.regions:
             # Get all organization accounts
-            org_accounts = self.get_organization_accounts(region)
+            accounts_response = self.get_organization_accounts(region)
 
             # Get Security Hub members
-            securityhub_members = self.get_security_hub_members(region)
+            members_response = self.get_security_hub_members(region)
 
             resource_id = f"securityhub:members/{self.account_id}/{region}"
+
+            if "Error" in accounts_response:
+                error = accounts_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="All active organization accounts are Security Hub members",
+                        actual_value="No AWS Organization exists, so it has no accounts to enrol in Security Hub",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="All active organization accounts are Security Hub members",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            if "Error" in members_response:
+                error = members_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="All active organization accounts are Security Hub members",
+                        actual_value=f"Security Hub is not enabled in region {region}, so it has no member accounts",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="All active organization accounts are Security Hub members",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            org_accounts = accounts_response.get('Accounts', [])
+            securityhub_members = members_response.get('Members', [])
 
             # Create sets of account IDs for comparison
             active_org_account_ids = set()

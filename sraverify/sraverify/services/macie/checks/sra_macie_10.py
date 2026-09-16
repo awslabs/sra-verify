@@ -51,18 +51,48 @@ class SRA_MACIE_10(MacieCheck):
             One Finding per Region.
         """
         for region in self.regions:
-            # Get organization configuration using the base class method with caching
-            org_config = self.get_organization_configuration(region)
-
-            # Check if the API call was successful
-            if not org_config:
+            # Establish enablement through GetAdministratorAccount first; see the
+            # same guard in sra_macie_08.py for why DescribeOrganizationConfiguration
+            # cannot establish it. In short: when Macie is off it answers
+            # "you must be the Macie administrator for an organization", which is
+            # also what an enabled-but-delegated-elsewhere organization answers,
+            # so that sentence is not declared semantic and this check would
+            # report ERROR where its eight siblings report FAIL.
+            admin_account = self.get_macie_administrator_account(region)
+            if "Error" in admin_account and self.is_not_configured(
+                admin_account["Error"]
+            ):
                 yield self.failed(
                     region=region,
                     resource_id=f"macie2/{self.account_id}/{region}",
                     checked_value="maxAccountLimitReached: false",
-                    actual_value="Failed to retrieve Macie organization configuration",
-                    remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie DescribeOrganizationConfiguration API"
+                    actual_value=f"Macie is not enabled in {region}, so no member account limit applies",
                 )
+                continue
+
+            # Get organization configuration using the base class method with caching
+            org_config = self.get_organization_configuration(region)
+
+            if "Error" in org_config:
+                error = org_config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="maxAccountLimitReached: false",
+                        actual_value=f"Macie is not enabled in {region}, so no member account limit applies",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="maxAccountLimitReached: false",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
 
             # Check if max account limit is reached

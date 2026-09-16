@@ -1,66 +1,149 @@
 """
 Base class for Macie security checks.
 
-Migrated to the per-scan ``ScanContext`` (task 8.9 of scan-context-refactor):
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"macie"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
 
-* The six class-level cache dicts (``_findings_publication_cache``,
-  ``_export_configuration_cache``, ``_macie_delegated_admin_cache``,
-  ``_macie_members_cache``, ``_org_members_cache``, ``_auto_enable_cache``)
-  are removed. Cached AWS responses live on ``self._ctx`` under the
-  ``"macie"`` namespace via the namespaced primitives ``_has`` / ``_get`` /
-  ``_set`` (Requirements 5.9, 5.18).
-* ``_setup_clients`` constructs ``MacieClient(region, ctx=self._ctx)`` per
-  region; the underlying boto3 clients are obtained from
-  ``ctx.get_client(...)`` so the bounded ``Client_Config`` is applied and
-  the same ``(service, region)`` boto3 instance is reused across the scan.
-* Cache keys are scoped to the typed method that wrote them (e.g.
-  ``"findings_publication:{region}"``). Today's
-  ``_macie_delegated_admin_cache`` is shared between
-  ``get_macie_delegated_admin`` and ``get_macie_administrator_account``,
-  which means the second call to land overwrites the first's entry. The
-  migration splits them into ``"delegated_admin:{region}"`` and
-  ``"administrator_account:{region}"`` so the two no longer collide.
-* The pre-refactor cache key prefix of ``f"{self.account_id}:{region}"``
-  is dropped: the per-scan ``ScanContext`` already scopes cached values to
-  a single account/session, so the region alone is sufficient.
+Cache keys are simple service-internal strings (e.g.
+``"findings_publication:us-east-1"``) because the context is already per-scan and
+per-account. The seven accessors share one implementation, :meth:`_cached_call`.
 
-Requirements: 5.9, 5.18.
+``macie2`` overloads ``AccessDeniedException`` across "Macie is disabled here" and
+"you lack the permission", so :data:`NOT_CONFIGURED_ERRORS` declares it with a
+message needle and keyed by operation. Checks call ``self.is_not_configured``;
+nothing here judges a code.
 """
-from typing import List, Optional, Dict, Any
+from typing import Any, ClassVar, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
-from sraverify.services.macie.client import MacieClient
 from sraverify.core.logging import logger
+from sraverify.services.macie.client import MacieClient
+
+#: Evidence for the overloaded ``AccessDeniedException``. Recorded once and shared
+#: by the four operations that return it, because it is one observed fact about
+#: ``macie2`` rather than four.
+_MACIE_DISABLED_EVIDENCE = (
+    "macie2 has no dedicated 'not enabled' error code. When Macie is disabled in "
+    "a Region it answers AccessDeniedException with a message saying so, which is "
+    "the same code returned when the caller merely lacks the IAM permission -- so "
+    "the message is the only available discriminator and is declared here as a "
+    "needle. Observed in the 2026-09-12 CodeBuild log as 'Macie is not enabled "
+    "for this account' against accounts where Macie had not been enabled; "
+    "https://docs.aws.amazon.com/macie/latest/APIReference/CommonErrors.html"
+)
+
+#: Evidence for ``ResourceNotFoundException``, which is unambiguous.
+_MACIE_NOT_FOUND_EVIDENCE = (
+    "https://docs.aws.amazon.com/macie/latest/APIReference/CommonErrors.html -- "
+    "ResourceNotFoundException means the requested resource does not exist. For "
+    "these operations the requested resource *is* the configuration under test, so "
+    "its absence is the finding rather than an inability to determine it. This is "
+    "the pair the bdad609 reference implementation already classified this way on "
+    "GetClassificationExportConfiguration."
+)
 
 
 class MacieCheck(SecurityCheck):
-    """Base class for all Macie security checks.
+    """Base class for all Macie security checks."""
 
-    Per-scan cached AWS responses live on the attached :class:`ScanContext`
-    under the ``"macie"`` namespace. Individual Macie check classes never
-    see the namespaced primitives directly: they call the typed methods on
-    this base class, which is the only thing that touches
-    ``self._ctx._has`` / ``_get`` / ``_set`` (Requirement 6.3).
-    """
-
-    # All cached AWS-API responses for Macie are stored under this namespace
-    # on the per-scan ``ScanContext``. Cache keys are simple service-internal
-    # strings (e.g., ``"findings_publication:us-east-1"``) since the
-    # ``ScanContext`` itself is per-scan and per-session, so there is no
-    # need to disambiguate by account ID or session region anymore.
+    # All cached AWS-API responses for Macie are stored under this namespace on
+    # the per-scan ``ScanContext``.
     NAMESPACE = "macie"
+
+    #: The ``(operation, code)`` pairs that mean "the control is not configured"
+    #: for Macie.
+    #:
+    #: Every entry is a ``macie2`` operation. The Organizations calls this service
+    #: also makes -- ``ListDelegatedAdministrators``, ``ListAccounts`` -- are
+    #: deliberately absent: their errors are Organizations errors and mean
+    #: something different, and a table keyed only by code would have conflated
+    #: them.
+    #:
+    #: ``AccessDeniedException`` carries a message needle on every entry because
+    #: ``macie2`` overloads it. Without the needle this table would convert every
+    #: permission denial in the member role into a fabricated FAIL -- which is the
+    #: precise failure mode the evidence rule exists to prevent, and the reason
+    #: ``NotConfigured.evidence`` is a required field.
+    #:
+    #: ``DescribeOrganizationConfiguration`` gets the needle too, and only for the
+    #: "not enabled" message. The "must be the Macie administrator" condition stays
+    #: undeclared, because that one sentence covers two different organizations: one
+    #: where Macie is off entirely, and one where Macie is on and delegated to some
+    #: other account. Declaring it would assert the first while the second is
+    #: equally consistent with the evidence.
+    #:
+    #: That is a limit on this table, not on the checks. ``SRA-MACIE-08`` and
+    #: ``-10`` are the only two checks whose sole operation is
+    #: ``DescribeOrganizationConfiguration``, and both call
+    #: :meth:`get_macie_administrator_account` first: ``GetAdministratorAccount``
+    #: answers the same disabled organization with "Macie is not enabled", which
+    #: *is* declared. So enablement is established through the operation that can
+    #: establish it, and a genuine permission denial on
+    #: ``DescribeOrganizationConfiguration`` remains an ERROR.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetClassificationExportConfiguration": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=_MACIE_NOT_FOUND_EVIDENCE,
+            ),
+            "AccessDeniedException": NotConfigured(
+                evidence=_MACIE_DISABLED_EVIDENCE,
+                message="macie is not enabled",
+            ),
+        },
+        "GetFindingsPublicationConfiguration": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=_MACIE_NOT_FOUND_EVIDENCE,
+            ),
+            "AccessDeniedException": NotConfigured(
+                evidence=_MACIE_DISABLED_EVIDENCE,
+                message="macie is not enabled",
+            ),
+        },
+        "DescribeOrganizationConfiguration": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=_MACIE_NOT_FOUND_EVIDENCE,
+            ),
+            "AccessDeniedException": NotConfigured(
+                evidence=_MACIE_DISABLED_EVIDENCE,
+                message="macie is not enabled",
+            ),
+        },
+        "GetAdministratorAccount": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=_MACIE_NOT_FOUND_EVIDENCE,
+            ),
+            "AccessDeniedException": NotConfigured(
+                evidence=_MACIE_DISABLED_EVIDENCE,
+                message="macie is not enabled",
+            ),
+        },
+        "ListMembers": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=_MACIE_NOT_FOUND_EVIDENCE,
+            ),
+            "AccessDeniedException": NotConfigured(
+                evidence=_MACIE_DISABLED_EVIDENCE,
+                message="macie is not enabled",
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up Macie clients for each region.
 
         Constructs one ``MacieClient`` wrapper per region in ``self.regions``.
-        Each wrapper obtains its underlying boto3 ``macie2`` and
-        ``organizations`` clients from ``self._ctx.get_client(...)``, so the
-        per-scan ``Client_Config`` and per-scan boto3 client cache are
-        applied.
+        Each wrapper obtains its underlying boto3 ``macie2``, ``organizations``,
+        and ``sts`` clients from ``self._ctx.get_client(...)``, so the per-scan
+        ``Client_Config`` and per-scan boto3 client cache are applied.
         """
-        # Clear existing clients
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = MacieClient(region, ctx=self._ctx)
@@ -77,261 +160,161 @@ class MacieCheck(SecurityCheck):
         """
         return self._clients.get(region)
 
-    def get_findings_publication_configuration(self, region: str) -> Dict[str, Any]:
+    def _cached_call(
+        self, region: str, cache_key: str, method: str, *args: Any
+    ) -> Mapping[str, Any]:
         """
-        Get the findings publication configuration for Macie with caching.
+        Run one client method for a Region through the accessor shape.
+
+        The seven public accessors below differ only in cache key and client
+        method, so the shape is written once here. That is a deliberate contrast
+        with the client tier, where the repetition is the point: a client's
+        ``except`` clause is what a reader checks when they doubt an error is
+        being preserved, whereas this sequence -- hit, no-client, call, error
+        guard, store -- has one correct form and seven chances to get it subtly
+        wrong.
 
         Args:
-            region: AWS region name
+            region: AWS region name.
+            cache_key: Key within the ``"macie"`` namespace.
+            method: Name of the :class:`MacieClient` method to call.
+            *args: Positional arguments for that method.
 
         Returns:
-            Dictionary containing findings publication configuration
+            The cached or freshly fetched response dict, or an error result.
         """
-        cache_key = f"findings_publication:{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Macie findings publication configuration for {region}")
+            logger.debug(f"Macie: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
         client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Macie client available for region {region}")
-            return {}
-
-        # Get findings publication configuration from client
-        config = client.get_findings_publication_configuration()
-
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, config)
-        logger.debug(f"Cached Macie findings publication configuration for {region}")
-
-        return config
-
-    def get_classification_export_configuration(self, region: str) -> Dict[str, Any]:
-        """
-        Get the classification export configuration for Macie with caching.
-
-        Args:
-            region: AWS region name
-
-        Returns:
-            Dictionary containing the classification export configuration, or
-            the client error sentinel ``{"Error": {"Code", "Message"}}`` if the
-            API call failed. Callers must inspect for the ``"Error"`` key and
-            decide FAIL vs ERROR; ``MacieCheck.is_macie_disabled_error`` makes
-            that judgement.
-
-            An empty dict means only that no Macie client wrapper exists for
-            ``region``, which is also an undetermined state rather than a
-            negative verdict.
-        """
-        cache_key = f"export_configuration:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Macie classification export configuration for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        client = self.get_client(region)
-        if not client:
+        if client is None:
             logger.warning(f"Macie: No client available for region {region}")
-            return {}
+            return no_client_result(service="Macie", region=region)
 
-        # Get classification export configuration from client
-        config = client.get_classification_export_configuration()
+        logger.debug(f"Macie: Fetching {cache_key}")
+        result = getattr(client, method)(*args)
 
-        # Never cache a failure: leave the slot empty so a retry re-issues the
-        # call rather than replaying the error for the rest of the scan.
-        if "Error" in config:
-            return config
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call. This is
+            # the line that stops one denied Macie call from being replayed to
+            # every later Macie check in the Region.
+            return result
 
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, config)
-        logger.debug(f"Cached Macie classification export configuration for {region}")
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
 
-        return config
-
-    @staticmethod
-    def is_macie_disabled_error(error: Dict[str, Any]) -> bool:
+    def get_findings_publication_configuration(
+        self, region: str
+    ) -> Mapping[str, Any]:
         """
-        Decide whether a Macie client error means "Macie is not enabled here".
-
-        Macie2 has no dedicated "not enabled" error code. When Macie is
-        disabled in a Region it answers ``AccessDeniedException`` with a
-        message saying so, which is the same code returned when the caller
-        simply lacks the IAM permission. The message is therefore the only
-        available discriminator, and getting it wrong in either direction is
-        costly: treating a permission failure as "not enabled" reports a
-        misconfiguration that was never established, and treating "not
-        enabled" as a permission failure hides a real finding behind an ERROR.
-
-        Args:
-            error: The ``Error`` sub-dict of a client error sentinel, i.e.
-                ``{"Code": ..., "Message": ...}``.
-
-        Returns:
-            True if AWS answered and the answer is that Macie is not enabled
-            (a FAIL). False if the call could not be completed (an ERROR).
-        """
-        code = error.get("Code", "")
-        message = error.get("Message", "")
-
-        # Macie session / configuration genuinely absent.
-        if code == "ResourceNotFoundException":
-            return True
-
-        # AccessDeniedException is overloaded; only the message separates
-        # "Macie is off" from "you may not ask".
-        if code == "AccessDeniedException" and "macie is not enabled" in message.lower():
-            return True
-
-        return False
-
-    def get_macie_delegated_admin(self, region: str) -> List[Dict[str, Any]]:
-        """
-        Get the Macie delegated administrator with caching.
+        Get the findings publication configuration for Macie, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of delegated administrators
+            The ``GetFindingsPublicationConfiguration`` response, or an error
+            result.
         """
-        cache_key = f"delegated_admin:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Macie delegated administrator for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(
+            region,
+            f"findings_publication:{region}",
+            "get_findings_publication_configuration",
+        )
 
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Macie client available for region {region}")
-            return []
-
-        # Get delegated administrator from client
-        delegated_admin = client.list_delegated_administrators()
-
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, delegated_admin)
-        logger.debug(f"Cached Macie delegated administrator for {region}")
-
-        return delegated_admin
-
-    def get_macie_members(self, region: str) -> List[Dict[str, Any]]:
+    def get_classification_export_configuration(
+        self, region: str
+    ) -> Mapping[str, Any]:
         """
-        Get Macie members with caching.
+        Get the classification export configuration for Macie, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of Macie members
+            The ``GetClassificationExportConfiguration`` response, or an error
+            result.
         """
-        cache_key = f"members:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Macie members for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(
+            region,
+            f"export_configuration:{region}",
+            "get_classification_export_configuration",
+        )
 
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Macie client available for region {region}")
-            return []
-
-        # Get members from client
-        members = client.list_members()
-
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, members)
-        logger.debug(f"Cached {len(members)} Macie members for {region}")
-
-        return members
-
-    def get_organization_members(self, region: str) -> List[Dict[str, Any]]:
+    def get_macie_delegated_admin(self, region: str) -> Mapping[str, Any]:
         """
-        Get AWS Organization members with caching.
+        Get the Macie delegated administrator, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            List of AWS Organization members
+            ``{"DelegatedAdministrators": [...]}``, or an error result. The list
+            is read by the check after the error test.
         """
-        cache_key = f"organization_members:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached AWS Organization members for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(
+            region, f"delegated_admin:{region}", "list_delegated_administrators"
+        )
 
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Macie client available for region {region}")
-            return []
-
-        # Get organization members from client
-        members = client.list_organization_accounts()
-
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, members)
-        logger.debug(f"Cached {len(members)} AWS Organization members for {region}")
-
-        return members
-
-    def get_organization_configuration(self, region: str) -> Dict[str, Any]:
+    def get_macie_members(self, region: str) -> Mapping[str, Any]:
         """
-        Get Macie organization configuration with caching.
+        Get Macie members, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Dictionary containing Macie organization configuration
+            ``{"members": [...]}``, or an error result.
         """
-        cache_key = f"organization_configuration:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Macie organization configuration for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(region, f"members:{region}", "list_members")
 
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Macie client available for region {region}")
-            return {}
-
-        # Get organization configuration from client
-        config = client.describe_organization_configuration()
-
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, config)
-        logger.debug(f"Cached Macie organization configuration for {region}")
-
-        return config
-
-    def get_macie_administrator_account(self, region: str) -> Dict[str, Any]:
+    def get_organization_members(self, region: str) -> Mapping[str, Any]:
         """
-        Get the Macie administrator account with caching.
-
-        Pre-refactor this method shared ``_macie_delegated_admin_cache``
-        with :meth:`get_macie_delegated_admin`, which meant the two methods
-        clobbered each other's cache entries. The migration splits them
-        into separate cache keys (``administrator_account`` vs.
-        ``delegated_admin``) so each method's response is cached
-        independently.
+        Get AWS Organization accounts, with caching.
 
         Args:
             region: AWS region name
 
         Returns:
-            Dictionary containing Macie administrator account information
+            ``{"Accounts": [...]}``, or an error result.
         """
-        cache_key = f"administrator_account:{region}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached Macie administrator account for {region}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
+        return self._cached_call(
+            region, f"organization_members:{region}", "list_organization_accounts"
+        )
 
-        client = self.get_client(region)
-        if not client:
-            logger.warning(f"No Macie client available for region {region}")
-            return {}
+    def get_organization_configuration(self, region: str) -> Mapping[str, Any]:
+        """
+        Get Macie organization configuration, with caching.
 
-        # Get administrator account from client
-        admin_account = client.get_administrator_account()
+        Args:
+            region: AWS region name
 
-        # Cache the result under the macie namespace.
-        self._ctx._set(self.NAMESPACE, cache_key, admin_account)
-        logger.debug(f"Cached Macie administrator account for {region}")
+        Returns:
+            The ``DescribeOrganizationConfiguration`` response, or an error
+            result.
+        """
+        return self._cached_call(
+            region,
+            f"organization_configuration:{region}",
+            "describe_organization_configuration",
+        )
 
-        return admin_account
+    def get_macie_administrator_account(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Macie administrator account, with caching.
+
+        Keyed separately from :meth:`get_macie_delegated_admin`; the two are
+        different facts about the organization.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            The ``GetAdministratorAccount`` response, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"administrator_account:{region}",
+            "get_administrator_account",
+        )

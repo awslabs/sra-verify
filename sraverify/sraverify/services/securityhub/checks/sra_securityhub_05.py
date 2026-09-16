@@ -54,25 +54,41 @@ class SRA_SECURITYHUB_05(SecurityHubCheck):
         # Check each region separately
         for region in self.regions:
             # Get enabled products for import in this specific region
-            enabled_products = self.get_enabled_products_for_import(region)
+            products_response = self.get_enabled_products_for_import(region)
 
             resource_id = f"securityhub:integrations/{self.account_id}"
 
-            # Check if Security Hub is not enabled (None response)
-            if enabled_products is None:
-                yield self.failed(
-                    region=region,
-                    resource_id=resource_id,
-                    checked_value="Security Hub enabled with product integrations",
-                    actual_value=f"Security Hub is not enabled in region {region}",
-                    remediation=(
-                        f"Enable Security Hub in region {region} first. "
-                        "Use the AWS CLI command: "
-                        f"aws securityhub enable-security-hub --region {region}, "
-                        "then configure product integrations."
-                    ),
-                )
-            elif not enabled_products:
+            if "Error" in products_response:
+                error = products_response["Error"]
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub enabled with product integrations",
+                        actual_value=f"Security Hub is not enabled in region {region}",
+                        remediation=(
+                            f"Enable Security Hub in region {region} first. "
+                            "Use the AWS CLI command: "
+                            f"aws securityhub enable-security-hub --region {region}, "
+                            "then configure product integrations."
+                        ),
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value="Security Hub enabled with product integrations",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            enabled_products = products_response.get('ProductSubscriptions', [])
+
+            if not enabled_products:
                 # Security Hub is enabled but no products configured
                 yield self.failed(
                     region=region,

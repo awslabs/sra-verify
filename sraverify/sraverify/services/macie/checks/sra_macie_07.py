@@ -58,32 +58,58 @@ class SRA_MACIE_07(MacieCheck):
 
         for region in self.regions:
             # Get organization members using the base class method with caching
-            org_members = self.get_organization_members(region)
+            org_response = self.get_organization_members(region)
 
-            # Check if the API call was successful
-            if not org_members:
-                yield self.failed(
-                    region=region,
-                    resource_id=f"organization/{self.account_id}",
-                    checked_value="All active member accounts have Macie relationship enabled",
-                    actual_value="Failed to retrieve AWS Organization members",
-                    remediation="Ensure you have the necessary permissions to call the Organizations ListAccounts API"
-                )
+            if "Error" in org_response:
+                error = org_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"organization/{self.account_id}",
+                        checked_value="All active member accounts have Macie relationship enabled",
+                        actual_value="No AWS Organization exists, so there are no member accounts to enrol in Macie",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"organization/{self.account_id}",
+                        checked_value="All active member accounts have Macie relationship enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
+
+            org_members = org_response.get('Accounts', [])
 
             # Get Macie members using the base class method with caching
-            macie_members = self.get_macie_members(region)
+            members_response = self.get_macie_members(region)
 
-            # Check if the API call was successful
-            if macie_members is None:
-                yield self.failed(
-                    region=region,
-                    resource_id=f"macie2/{self.account_id}",
-                    checked_value="All active member accounts have Macie relationship enabled",
-                    actual_value="Failed to retrieve Macie members",
-                    remediation="Ensure you have the necessary permissions to call the Macie ListMembers API"
-                )
+            if "Error" in members_response:
+                error = members_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="All active member accounts have Macie relationship enabled",
+                        actual_value=f"Macie is not enabled in {region}, so no member accounts are enrolled",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="All active member accounts have Macie relationship enabled",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
+
+            macie_members = members_response.get('members', [])
 
             # Filter active organization members
             active_org_members = [

@@ -59,6 +59,29 @@ class SRA_INSPECTOR_06(InspectorCheck):
         for region in self.regions:
             # Get delegated admin account for this region
             delegated_admin_response = self.get_delegated_admin(region)
+
+            if "Error" in delegated_admin_response:
+                error = delegated_admin_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"inspector2/{region}/delegated-admin",
+                        checked_value="Inspector delegated admin account is the audit account",
+                        actual_value="No delegated admin account is configured",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"inspector2/{region}/delegated-admin",
+                        checked_value="Inspector delegated admin account is the audit account",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
             delegated_admin = delegated_admin_response.get('delegatedAdmin', {})
             delegated_admin_id = delegated_admin.get('accountId')
 
@@ -78,11 +101,7 @@ class SRA_INSPECTOR_06(InspectorCheck):
                 continue
 
             # Audit accounts reach the check through the ScanContext-delegating
-            # property. This used to be a two-branch hasattr probe whose first
-            # branch tested an underscore-prefixed attribute that lives on
-            # ScanContext and never on a check, so it was always False; the
-            # elif fallback already resolved through this property. Collapsing
-            # the two is behavior-preserving.
+            # property, which returns [] when --audit-account was not supplied.
             audit_accounts = self.audit_accounts
 
             if not audit_accounts:

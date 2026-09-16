@@ -57,11 +57,15 @@ class SRA_WAF_02(WAFCheck):
             load_balancers_response = self.get_load_balancers(region)
 
             if "Error" in load_balancers_response:
+                error = load_balancers_response["Error"]
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=load_balancers_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for ELB and WAF API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
                 continue
 
@@ -82,19 +86,30 @@ class SRA_WAF_02(WAFCheck):
                 alb_arn = alb.get("LoadBalancerArn")
                 alb_name = alb.get("LoadBalancerName")
 
-                client = self.get_client(region)
-                if not client:
-                    continue
-
-                web_acl_response = client.get_web_acl_for_resource(alb_arn)
+                web_acl_response = self.get_web_acl_for_resource(region, alb_arn)
 
                 if "Error" in web_acl_response:
-                    yield self.error(
-                        region=region,
-                        resource_id=alb_name,
-                        actual_value=web_acl_response["Error"].get("Message", "Unknown error"),
-                        remediation="Check IAM permissions for WAF API access"
-                    )
+                    error = web_acl_response["Error"]
+                    # WAFNonexistentItemException is the declared "this resource
+                    # has no associated Web ACL" answer, and the only code that
+                    # is; every other code is an inability to determine.
+                    if self.is_not_configured(error):
+                        yield self.failed(
+                            region=region,
+                            resource_id=alb_name,
+                            actual_value="No WAF Web ACL associated",
+                            remediation="Associate a WAF Web ACL with this Application Load Balancer using the AWS Console, CLI, or API"
+                        )
+                    else:
+                        yield self.error(
+                            region=region,
+                            resource_id=alb_name,
+                            actual_value=(
+                                f"{error['Operation']} failed: {error['Code']}: "
+                                f"{error['Message']}"
+                            ),
+                            remediation=self._remediation_for(error),
+                        )
                     continue
 
                 web_acl = web_acl_response.get("WebACL")

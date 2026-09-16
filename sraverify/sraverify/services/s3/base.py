@@ -1,14 +1,23 @@
 """
 Base class for S3 security checks.
 
-Migrated to the per-scan :class:`ScanContext` model in task 8.6 of the
-scan-context-refactor spec: the previously class-level
-``_public_access_cache`` dict has been removed and the cached
-``get_public_access`` result now lives in the ``"s3"`` namespace on the
-attached ``ScanContext`` (Requirements 5.6, 5.18).
-"""
-from typing import Any, Dict
+Per-scan cached AWS responses live on the attached :class:`ScanContext` under the
+``"s3"`` namespace. Every accessor returns the client's response dict unchanged,
+or an error result, and none caches a failure.
 
+One accessor. Its table entry separates the two codes ``s3control`` overloads onto
+``GetPublicAccessBlock``: ``NoSuchPublicAccessBlockConfiguration``, which is the
+control genuinely being absent, from ``AccessDenied``, which is an inability to
+determine.
+"""
+from typing import Any, ClassVar, Mapping, Optional
+
+from sraverify.core.aws_errors import (
+    NotConfigured,
+    NotConfiguredTable,
+    is_error,
+    no_client_result,
+)
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
 from sraverify.services.s3.client import S3Client
@@ -17,68 +26,93 @@ from sraverify.services.s3.client import S3Client
 class S3Check(SecurityCheck):
     """Base class for all S3 security checks."""
 
-    #: Namespace used for all ``ctx._get`` / ``ctx._set`` / ``ctx._has``
-    #: calls made from this base class. Matches Requirement 5.6.
     NAMESPACE = "s3"
 
-    def _setup_clients(self):
-        """Set up S3 client wrappers for each region.
+    #: The one pair that means "the control is not configured" for S3.
+    #:
+    #: ``s3control`` returns exactly two codes here and they mean opposite things:
+    #: ``NoSuchPublicAccessBlockConfiguration`` is the control being absent, and
+    #: ``AccessDenied`` is the scan being unable to look. Only the first is
+    #: declared.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetPublicAccessBlock": {
+            "NoSuchPublicAccessBlockConfiguration": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/AmazonS3/latest/API/"
+                    "API_control_GetPublicAccessBlock.html -- "
+                    "NoSuchPublicAccessBlockConfiguration is returned when the "
+                    "specified account has no public access block configuration, "
+                    "which is exactly the control this check tests for. The "
+                    "sibling code AccessDenied is deliberately not declared: it "
+                    "means the member role lacks "
+                    "s3:GetAccountPublicAccessBlock, so the control could not be "
+                    "evaluated. Declaring both would make SRA-S3-01..-04 report "
+                    "a denied permission as a finding."
+                ),
+            ),
+        },
+    }
 
-        Each :class:`S3Client` obtains its underlying boto3 ``s3`` and
-        ``s3control`` clients through ``ctx.get_client(...)`` so the bounded
-        ``Client_Config`` is applied and the same boto3 client instance is
-        shared across all wrappers in this scan.
+    def _setup_clients(self):
+        """Set up S3 clients for each region.
+
+        Each wrapper obtains its underlying boto3 ``s3`` and ``s3control``
+        clients from ``self._ctx.get_client(...)``.
         """
-        # Clear existing clients
         self._clients.clear()
-        # Set up new clients only if regions are initialized
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = S3Client(region, ctx=self._ctx)
 
-    def get_public_access(self) -> Dict[str, Any]:
+    def get_client(self, region: str) -> Optional[S3Client]:
         """
-        Get the public access block configuration for the account with caching.
+        Get S3 client for a specific region.
 
-        The result is cached for the lifetime of the current scan in the
-        ``"s3"`` namespace on the attached :class:`ScanContext`. The cache
-        key includes the account ID; the previously-used session-region
-        prefix has been dropped because the per-scan context already scopes
-        the cache to one session (per the design's "Cache key conventions"
-        section).
+        Args:
+            region: AWS region name
 
         Returns:
-            Public access block configuration dictionary, or ``{}`` when no
-            regions are available, no account ID can be determined, or no
-            S3 client is available.
+            S3Client for the region or None if not available
         """
-        if not self.regions:
-            logger.warning("No regions specified")
-            return {}
+        return self._clients.get(region)
 
+    def get_public_access(self) -> Mapping[str, Any]:
+        """
+        Get the account-level public access block configuration, with caching.
+
+        The public access block is an account-wide setting, but the ``s3control``
+        endpoint is regional, so the first Region in the scan's list is used to
+        reach it. The cache key is the account ID alone for the same reason.
+
+        Returns:
+            The ``GetPublicAccessBlock`` response on success, i.e.
+            ``{"PublicAccessBlockConfiguration": {...}}``, or an error result.
+
+            The whole response, not the extracted sub-dict, so an account with
+            an empty configuration stays distinguishable from a failed call.
+        """
         account_id = self.account_id
-        if not account_id:
-            logger.warning("Could not determine account ID")
-            return {}
-
         cache_key = f"public_access:{account_id}"
         if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"Using cached public access block configuration for {cache_key}")
+            logger.debug(f"S3: Using cached public access block for {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
 
-        # Use any region to get public access block configuration. S3 is a
-        # global service, but the s3control endpoint is regional, so we
-        # arbitrarily use the first region in the scan's region list.
-        client = self._clients.get(self.regions[0])
-        if not client:
-            logger.warning("No S3 client available")
-            return {}
+        if not self.regions:
+            logger.warning("S3: No regions specified")
+            return no_client_result(service="S3", region="global")
 
-        # Get public access block configuration from client
-        public_access_config = client.get_public_access_block(account_id)
+        region = self.regions[0]
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(f"S3: No client available for region {region}")
+            return no_client_result(service="S3", region=region)
 
-        # Cache the result on the ScanContext
-        self._ctx._set(self.NAMESPACE, cache_key, public_access_config)
-        logger.debug(f"Cached public access block configuration for {cache_key}")
+        logger.debug(f"S3: Fetching public access block for {account_id}")
+        result = client.get_public_access_block(account_id)
 
-        return public_access_config
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
+
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result

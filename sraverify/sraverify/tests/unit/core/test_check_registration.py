@@ -940,3 +940,143 @@ def test_an_unrelated_class_attribute_is_fine(synthetic_service):
     importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
 
     assert "SRA-GUARDDUTY-01" in registry.all_checks()
+
+# --------------------------------------------------------------------------
+# Shape rule: the discriminator table belongs to the service (Requirement 4.4)
+#
+# NOT_CONFIGURED_ERRORS declares which (operation, code) pairs mean "the
+# control is not configured". Its whole purpose is that two checks reading the
+# same error result from the same operation cannot classify it differently, so a
+# check that declares its own has re-created the per-check classification the
+# client error contract removes -- invisibly, because shadowing a ClassVar is
+# legal Python and the check keeps working.
+# --------------------------------------------------------------------------
+
+
+def test_a_check_declaring_the_discriminator_table_raises(synthetic_service):
+    # The table is legal on a service base class and forbidden on a check. The
+    # value declared here is well-formed, which is the point: the defect is
+    # *where* it is declared, not what it says, so nothing else can catch it.
+    pkg = synthetic_service(
+        {
+            "checks/sra_guardduty_01.py": _check_src(
+                "SRA_GUARDDUTY_01",
+                check_id="SRA-GUARDDUTY-01",
+                class_attrs=(
+                    "NOT_CONFIGURED_ERRORS = {\n"
+                    '    "DescribeOrganizationConfiguration": {\n'
+                    '        "BadRequestException": NotConfigured(evidence="e"),\n'
+                    "    }\n"
+                    "}\n"
+                ),
+                extra="from sraverify.core.aws_errors import NotConfigured\n",
+            )
+        }
+    )
+
+    with pytest.raises(CheckIdentityError) as excinfo:
+        importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
+
+    rendered = str(excinfo.value)
+    assert "NOT_CONFIGURED_ERRORS" in rendered
+    assert "SRA_GUARDDUTY_01" in rendered
+    assert "service base class" in rendered
+    assert "SRA-GUARDDUTY-01" not in registry.all_checks()
+
+
+def test_an_empty_discriminator_table_on_a_check_still_raises(synthetic_service):
+    # An empty table changes no behaviour, and is still refused. The rule is
+    # about ownership of the declaration, not about its contents: admitting the
+    # empty case would leave "declare it empty, then fill it in later" open as a
+    # way past the rule, and the second edit would not re-trigger it.
+    pkg = synthetic_service(
+        {
+            "checks/sra_guardduty_01.py": _check_src(
+                "SRA_GUARDDUTY_01",
+                check_id="SRA-GUARDDUTY-01",
+                class_attrs="NOT_CONFIGURED_ERRORS = {}\n",
+            )
+        }
+    )
+
+    with pytest.raises(CheckIdentityError):
+        importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
+
+    assert "SRA-GUARDDUTY-01" not in registry.all_checks()
+
+
+def test_a_service_base_class_may_declare_the_discriminator_table(synthetic_service):
+    # The positive case, and the one that must keep working: every migrated
+    # service declares its table on base.py, which the eligibility rule skips in
+    # its own right. The check inherits it and registers cleanly.
+    pkg = synthetic_service(
+        {
+            "base.py": _check_src(
+                "GuardDutyCheck",
+                check_id=None,
+                class_attrs=(
+                    'NAMESPACE = "guardduty"\n'
+                    "NOT_CONFIGURED_ERRORS = {\n"
+                    '    "DescribeOrganizationConfiguration": {\n'
+                    '        "BadRequestException": NotConfigured(evidence="e"),\n'
+                    "    }\n"
+                    "}\n"
+                ),
+                extra="from sraverify.core.aws_errors import NotConfigured\n",
+            ),
+            "checks/sra_guardduty_01.py": _check_src(
+                "SRA_GUARDDUTY_01",
+                check_id="SRA-GUARDDUTY-01",
+                bases="GuardDutyCheck",
+                extra="from ..base import GuardDutyCheck\n",
+            ),
+        }
+    )
+
+    module = importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
+
+    assert "SRA-GUARDDUTY-01" in registry.all_checks()
+    # Inherited, not declared: the rule reads vars(cls), so inheritance is fine.
+    cls = module.SRA_GUARDDUTY_01
+    assert "NOT_CONFIGURED_ERRORS" not in vars(cls)
+    assert "DescribeOrganizationConfiguration" in cls.NOT_CONFIGURED_ERRORS
+
+
+def test_the_table_rule_is_checked_before_registration(synthetic_service):
+    # Same "register LAST" guarantee the other shape rules have: a module that
+    # fails this rule leaves the registry byte-identical, so a failed import
+    # contributes no partial catalog entry.
+    before = dict(registry.all_checks())
+
+    pkg = synthetic_service(
+        {
+            "checks/sra_guardduty_02.py": _check_src(
+                "SRA_GUARDDUTY_02",
+                check_id="SRA-GUARDDUTY-02",
+                class_attrs="NOT_CONFIGURED_ERRORS = {}\n",
+            )
+        }
+    )
+
+    with pytest.raises(CheckIdentityError):
+        importlib.import_module(f"{pkg}.checks.sra_guardduty_02")
+
+    assert dict(registry.all_checks()) == before
+
+
+def test_the_default_table_is_empty_and_shared(synthetic_service):
+    # SecurityCheck's default classifies nothing, so an unmigrated service's
+    # checks resolve every error to ERROR. That is the safe default, and it is
+    # what makes the migration incremental: a service with no table yet cannot
+    # emit a fabricated FAIL.
+    pkg = synthetic_service(
+        {
+            "checks/sra_guardduty_01.py": _check_src(
+                "SRA_GUARDDUTY_01", check_id="SRA-GUARDDUTY-01"
+            )
+        }
+    )
+
+    module = importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
+
+    assert module.SRA_GUARDDUTY_01.NOT_CONFIGURED_ERRORS == {}

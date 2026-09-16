@@ -57,15 +57,30 @@ class SRA_MACIE_02(MacieCheck):
             # Get findings publication configuration using the base class method with caching
             config = self.get_findings_publication_configuration(region)
 
-            # Check if the API call was successful
-            if not config:
-                yield self.failed(
-                    region=region,
-                    resource_id=f"macie2/{self.account_id}/{region}",
-                    checked_value="publishClassificationFindings: true",
-                    actual_value="Failed to retrieve Macie findings publication configuration",
-                    remediation="Ensure Macie is enabled and you have the necessary permissions to call the Macie GetFindingsPublicationConfiguration API"
-                )
+            # Test for the error result before reading any success-path key.
+            # "Failed to retrieve Macie findings publication configuration" used
+            # to be reported as a FAIL for a denied permission, an unreachable
+            # endpoint, and a Region where Macie is switched off alike.
+            if "Error" in config:
+                error = config['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="publishClassificationFindings: true",
+                        actual_value=f"Macie is not enabled in {region}, so no findings are published to Security Hub",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=f"macie2/{self.account_id}/{region}",
+                        checked_value="publishClassificationFindings: true",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
                 continue
 
             # Check if Security Hub configuration exists

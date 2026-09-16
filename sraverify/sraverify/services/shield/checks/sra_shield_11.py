@@ -59,8 +59,8 @@ class SRA_SHIELD_11(ShieldCheck):
         lambda_function = self.get_lambda_function(region, function_name)
 
         if "Error" in lambda_function:
-            error_code = lambda_function["Error"].get("Code", "")
-            if error_code == "ResourceNotFoundException":
+            error = lambda_function["Error"]
+            if self.is_not_configured(error):
                 yield self.failed(
                     region=region,
                     resource_id=None,
@@ -71,8 +71,11 @@ class SRA_SHIELD_11(ShieldCheck):
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=lambda_function["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for Lambda API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
         elif lambda_function.get("Configuration"):
             function_arn = lambda_function["Configuration"].get("FunctionArn", "")

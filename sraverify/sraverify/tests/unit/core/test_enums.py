@@ -185,7 +185,7 @@ def test_cli_account_type_choices_derive_from_the_members_plus_all():
 
 
 def test_all_is_not_an_account_type_member():
-    # "all" is the CLI's own sentinel, not an account role, so it must not be
+    # "all" is the CLI's own error_result, not an account role, so it must not be
     # reachable through the enum.
     assert "all" not in [t.value for t in AccountType]
     with pytest.raises(ValueError):

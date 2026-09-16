@@ -57,11 +57,15 @@ class SRA_WAF_03(WAFCheck):
             rest_apis_response = self.get_rest_apis(region)
 
             if "Error" in rest_apis_response:
+                error = rest_apis_response["Error"]
                 yield self.error(
                     region=region,
                     resource_id=None,
-                    actual_value=rest_apis_response["Error"].get("Message", "Unknown error"),
-                    remediation="Check IAM permissions for API Gateway and WAF API access"
+                    actual_value=(
+                        f"{error['Operation']} failed: {error['Code']}: "
+                        f"{error['Message']}"
+                    ),
+                    remediation=self._remediation_for(error),
                 )
                 continue
 
@@ -83,11 +87,15 @@ class SRA_WAF_03(WAFCheck):
                 stages_response = self.get_stages(region, api_id)
 
                 if "Error" in stages_response:
+                    error = stages_response["Error"]
                     yield self.error(
                         region=region,
                         resource_id=api_name or api_id,
-                        actual_value=stages_response["Error"].get("Message", "Unknown error"),
-                        remediation="Check IAM permissions for API Gateway access"
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
                     )
                     continue
 
@@ -110,27 +118,29 @@ class SRA_WAF_03(WAFCheck):
                     # Construct the API Gateway stage ARN for WAF association check
                     api_arn = f"arn:aws:apigateway:{region}::/restapis/{api_id}/stages/{stage_name}"
 
-                    client = self.get_client(region)
-                    if not client:
-                        continue
-
-                    web_acl_response = client.get_web_acl_for_resource(api_arn)
+                    web_acl_response = self.get_web_acl_for_resource(region, api_arn)
 
                     if "Error" in web_acl_response:
-                        error_code = web_acl_response["Error"].get("Code")
-                        if error_code == "AccessDeniedException":
-                            yield self.error(
-                                region=region,
-                                resource_id=resource_id,
-                                actual_value=web_acl_response["Error"].get("Message", "Access denied"),
-                                remediation="Check IAM permissions for wafv2:GetWebACLForResource"
-                            )
-                        else:
+                        error = web_acl_response["Error"]
+                        # WAFNonexistentItemException is the declared "this resource
+                        # has no associated Web ACL" answer, and the only code that
+                        # is; every other code is an inability to determine.
+                        if self.is_not_configured(error):
                             yield self.failed(
                                 region=region,
                                 resource_id=resource_id,
                                 actual_value="No WAF Web ACL associated",
                                 remediation="Associate a WAF Web ACL with this API Gateway stage using the AWS Console, CLI, or API"
+                            )
+                        else:
+                            yield self.error(
+                                region=region,
+                                resource_id=resource_id,
+                                actual_value=(
+                                    f"{error['Operation']} failed: {error['Code']}: "
+                                    f"{error['Message']}"
+                                ),
+                                remediation=self._remediation_for(error),
                             )
                         continue
 

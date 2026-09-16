@@ -497,11 +497,9 @@ def print_summary(findings: List[Finding], output_file: str) -> None:
     operator's signal that a usable CSV exists at ``output_file`` (Requirement
     9.14 suppresses it on a write failure).
 
-    ``f.status`` is a :class:`Status` member, compared against the enum rather
-    than against the string literals the pre-change code used with
-    ``f.get('Status')``. A ``Finding`` is a frozen dataclass with no ``get``,
-    so the old expression is now an ``AttributeError`` rather than a silent
-    zero -- which is the better failure, but it still has to be fixed here.
+    ``f.status`` is a :class:`Status` member and is compared against the enum, not
+    against a string literal. A ``Finding`` is a frozen dataclass with no ``get``,
+    so a dict-style read here would raise rather than silently tally zero.
 
     Args:
         findings: The findings just written, in output order.
@@ -657,10 +655,10 @@ def main():
     except (UnknownCheckError, NoChecksSelectedError) as exc:
         # Usage error. UnknownCheckError composes a sentence carrying the
         # unmatched ID and its near-miss suggestions; NoChecksSelectedError
-        # carries the three filter values as its args, which render as a tuple.
-        # Either way ``str(exc)`` holds everything 9.7 requires be logged, and
-        # the phrasing belongs to the exception rather than to the CLI so a
-        # library caller sees the same text.
+        # renders the three filter values through __str__ while keeping them as
+        # its args for a library caller. Either way ``str(exc)`` holds everything
+        # 9.7 requires be logged, and the phrasing belongs to the exception rather
+        # than to the CLI so a library caller sees the same text.
         logger.error(str(exc))
         # No file is created at output_file: nothing has touched it yet, and
         # write_csv_output is not reached. This replaces the pre-change

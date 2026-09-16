@@ -56,7 +56,7 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
         # Check each region separately
         for region in self.regions:
             # Get delegated administrators for Security Hub
-            delegated_admins = self.get_delegated_administrators(region)
+            delegated_response = self.get_delegated_administrators(region)
 
             resource_id = f"delegated-admin/{self.account_id}"
 
@@ -73,6 +73,30 @@ class SRA_SECURITYHUB_07(SecurityHubCheck):
 
             # Use the first audit account in the list
             audit_account_id = self.audit_accounts[0]
+
+            if "Error" in delegated_response:
+                error = delegated_response['Error']
+                if self.is_not_configured(error):
+                    yield self.failed(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value=f"Delegated administrator is audit account {audit_account_id}",
+                        actual_value="No AWS Organization exists, so Security Hub can have no delegated administrator",
+                    )
+                else:
+                    yield self.error(
+                        region=region,
+                        resource_id=resource_id,
+                        checked_value=f"Delegated administrator is audit account {audit_account_id}",
+                        actual_value=(
+                            f"{error['Operation']} failed: {error['Code']}: "
+                            f"{error['Message']}"
+                        ),
+                        remediation=self._remediation_for(error),
+                    )
+                continue
+
+            delegated_admins = delegated_response.get('DelegatedAdministrators', [])
 
             # Check if there are any delegated administrators
             if not delegated_admins:

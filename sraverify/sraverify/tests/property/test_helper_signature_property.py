@@ -39,7 +39,7 @@ The five statements asserted, quantified over all three helpers:
       naming the check ID (7.6).
 
 Each negative case also asserts that **no Finding was returned**, via a
-sentinel that the call would have to overwrite to have produced one. That is
+error result that the call would have to overwrite to have produced one. That is
 the second half of Requirement 7.11 and it is not implied by the exception
 type alone.
 
@@ -93,7 +93,7 @@ HELPER_STATUS: Dict[str, Status] = {
     "error": Status.ERROR,
 }
 
-#: A sentinel the call under test would have to return over. ``is`` identity
+#: An error result the call under test would have to return over. ``is`` identity
 #: against this after a raised exception is how "SHALL return no Finding" gets
 #: asserted rather than assumed.
 _NO_RESULT = object()

@@ -1,51 +1,65 @@
-from typing import Dict, Any
-from botocore.exceptions import ClientError
-from sraverify.core.logging import logger
+"""
+Firewall Manager client.
+
+Every method returns a dict: the boto3 response on success, or the error result
+built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+and hands the exception over; anything else raised is a programming defect and
+propagates to the orchestrator's guard.
+
+``ResourceNotFoundException`` from ``GetAdminAccount`` means no administrator
+account has been set for the organization. That is declared in
+``FirewallManagerCheck.NOT_CONFIGURED_ERRORS`` rather than translated into prose
+here: classifying an error is the check's decision, and it needs the operation
+context to make it.
+"""
+from typing import Any, Mapping
+
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
 from sraverify.core.scan_context import ScanContext
 
 
-class FirewallManagerClient:
+class FirewallManagerClient(AWSClient):
+    """Client for interacting with AWS Firewall Manager."""
+
     def __init__(self, region: str, ctx: ScanContext):
         """
         Initialize Firewall Manager client for a specific region.
 
         Args:
-            region: AWS region name. The Firewall Manager admin APIs are
-                global and only respond in ``us-east-1``; regional policy
-                APIs accept any enabled region.
-            ctx: Per-scan ``ScanContext`` whose bounded ``Client_Config`` and
-                cached ``(service, region)`` boto3 clients back this wrapper.
+            region: AWS region name
+            ctx: ScanContext for the current scan.
         """
-        self.region = region
-        self.ctx = ctx
+        super().__init__(region, ctx)
         self.client = ctx.get_client('fms', region=region)
 
-    def get_admin_account(self) -> Dict[str, Any]:
+    def get_admin_account(self) -> Mapping[str, Any]:
+        """
+        Get the Firewall Manager administrator account.
+
+        Returns:
+            The ``GetAdminAccount`` response on success, or the error result.
+
+            ``ResourceNotFoundException`` means no administrator account is
+            configured. That is a real answer, and it is declared in the
+            discriminator table rather than translated into prose here.
+        """
         try:
             return self.client.get_admin_account()
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code == 'ResourceNotFoundException':
-                return {"Error": {"Message": "No Firewall Manager administrator account configured"}}
-            logger.error(f"Error getting Firewall Manager admin account: {e}")
-            return {"Error": {"Message": str(e)}}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
 
-    def list_policies(self) -> Dict[str, Any]:
+    def list_policies(self) -> Mapping[str, Any]:
+        """
+        List the Firewall Manager policies.
+
+        Returns:
+            ``{"PolicyList": [...]}`` with every page merged, on success, or the
+            error result.
+        """
         try:
             policies = []
-            next_token = None
-            while True:
-                if next_token:
-                    response = self.client.list_policies(NextToken=next_token, MaxResults=100)
-                else:
-                    response = self.client.list_policies(MaxResults=100)
-
-                policies.extend(response.get('PolicyList', []))
-                next_token = response.get('NextToken')
-                if not next_token:
-                    break
-
+            for page in self.client.get_paginator('list_policies').paginate():
+                policies.extend(page.get('PolicyList', []))
             return {"PolicyList": policies}
-        except ClientError as e:
-            logger.error(f"Error listing Firewall Manager policies in {self.region}: {e}")
-            return {"Error": {"Message": str(e)}}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)

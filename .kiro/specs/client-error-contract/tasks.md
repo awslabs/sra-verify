@@ -1,5 +1,18 @@
 # Implementation Plan: Client Error Contract
 
+> **Post-implementation note.** The acceptance gate described throughout this plan
+> — `util/gate.py`, `util/local_scan.py`, `tests/unit/util/test_gate.py`, the
+> `docs/gate/` digests, and the `check_done` stderr marker `run_checks` emitted at
+> `debug` — was development tooling for this migration and was removed once it
+> completed. It did its job: it is what caught the Shield `NOT_CONFIGURED_ERRORS`
+> omission (ten checks moving FAIL to ERROR) and what held each batch to a
+> reconciled CSV comparison. It is recoverable from git history if a future
+> verdict-moving change wants it.
+>
+> References to it below are a record of how the work was done, not a description
+> of the current tree. Still current: `aws_call_failed`, which remains at `error`
+> on stderr and is the evidence behind every ERROR row.
+
 ## Overview
 
 Eight phases, in the order the design's Migration Order section establishes: Phase 0 scaffolding and gate infrastructure, six service batches, then close. Implementation language is Python 3.11.
@@ -98,7 +111,7 @@ No client, base, or check module is edited in this phase. Every task here is beh
     - **Validates: Requirement 3.2**
 
 - [x] 7. `main.py` — the `check_done` marker
-  - [x] 7.1 Add `logger.info(f"check_done check_id={selected_id} rows={len(findings)}")` after the per-check `list()` inside the guard's success path, and `logger.info(f"check_done check_id={selected_id} rows=synthetic")` in the `except`. No other change to `main.py`
+  - [x] 7.1 Add `logger.debug(f"check_done check_id={selected_id} rows={len(findings)}")` after the per-check `list()` inside the guard's success path, and `logger.debug(f"check_done check_id={selected_id} rows=synthetic")` in the `except`. (Landed at `info`; demoted to `debug` after a production run showed 914 marker lines dominating an operator's stderr.) No other change to `main.py`
     - _Requirements: 6.3_
 
   - [x] 7.2 Extend `tests/unit/cli/test_exit_codes_scan.py` with one test over the `probe_scan` fixture asserting exactly one `check_done` record per probe, in execution order, with `rows=synthetic` for the raising probe

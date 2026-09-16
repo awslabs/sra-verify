@@ -455,8 +455,8 @@ def test_a_declared_semantic_error_result_reaches_failed(
     reads as protection.
 
     Asserts only that a FAIL is reached and that nothing PASSes -- not the FAIL's
-    wording, which is a per-check judgement the acceptance gate reviews against a
-    live scan.
+    wording, which is a per-check judgement and is reviewed against a live scan
+    rather than pinned here.
 
     **Skipped where the check's verdict is settled before the declared operation
     is reached.** The harness makes *every* accessor return the error result, so a

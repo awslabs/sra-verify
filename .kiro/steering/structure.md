@@ -40,8 +40,6 @@ sra-verify/
 ├── generated_sraverify_iam_policy.json # output of util/generate_iam_policy.py
 ├── generated_sraverify_cf_policy.yaml
 ├── util/generate_iam_policy.py         # derives the least-privilege member policy
-├── util/gate.py                        # acceptance gate: two scans in, a verdict out
-├── util/local_scan.py                  # fans one scan across four account types locally
 ├── sratester/prompt.md                 # agent prompt for manual validation (see below)
 └── sraverify/                          # pip project root (setup.py lives here)
     ├── setup.py, requirements.txt
@@ -443,7 +441,7 @@ can be typed wrong. Three rules make it work:
   completed a request and so has no operation to claim. It logs exactly one
   `aws_call_failed operation=… region=… code=… message=…` record, `message`
   JSON-encoded so an AWS message with a newline cannot break the one-line promise
-  the acceptance gate's parser depends on.
+  makes the log greppable: one failure is one line, always.
 - **Acquisition is constructor-only.** `ctx.get_client` reads bundled endpoint data
   and issues no network call, so its failure is a deterministic defect, not an AWS
   outcome. Inside a `try` it would be caught as a `BotoCoreError` and turned into
@@ -488,12 +486,6 @@ that erases the error or forgets `BotoCoreError` fails a test rather than a scan
    well as its message. A broken check degrades one row, not the whole scan.
    `except Exception`, deliberately not `BaseException`: a Ctrl-C must not
    produce a full-looking report from an aborted scan.
-
-   `run_checks` also emits one `check_done check_id=… rows=…` line to stderr per
-   check, and `rows=synthetic` on the guard's path. That marker is what lets the
-   acceptance gate tell "this check ran and produced no rows" from "this check
-   never ran", without which a missing row and a missing invocation look the same
-   in a consolidated CSV.
 
    **After this feature a synthetic ERROR row means a programming defect.** A
    client returns normally for every `ClientError` and every `BotoCoreError`, so
@@ -587,7 +579,6 @@ The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collect
   covering metadata validation, `Finding` immutability / value types / row
   contract, CSV round-trip, helper signatures, the accumulator ban, context
   isolation, registry bijection, and selection
-- `tests/unit/util/` — `test_gate.py`, over the acceptance gate itself
 
 The client-error-contract modules are the largest block and are worth knowing by
 name, because between them they hold the whole contract:
@@ -638,7 +629,8 @@ pytest config file.
   `_discover_memberships` per scan under a module-level `_CACHE_NAMESPACE` rather
   than a `ListMemberships` sweep per call — but the labelling defect stays.
   Deferred deliberately: relabelling moves the `Region` cell on genuine PASS and
-  FAIL rows, which the acceptance gate reads as a regression it cannot attribute.
+  FAIL rows, which makes the change impossible to separate from a regression when
+  reviewing two scans of the same organization.
   `test_securityincidentresponse_declares_no_namespace` asserts the absence so the
   deferral cannot be undone by accident.
 - `sra_firewallmanager_01` hardcodes `region = "us-east-1"` and has no Region loop.
@@ -646,7 +638,8 @@ pytest config file.
   `--regions` has no effect on that row's `Region` cell. Same deferral.
 - `ShieldClient.list_protections` reads the **first page only**. Paginating would
   change which resources the per-resource fan-out covers, and a row-count change
-  is exactly what the acceptance gate cannot attribute to a verdict fix.
+  is exactly what cannot be separated from a verdict change when reviewing two
+  scans.
 - `IAMCheck._validate_metadata` is dead and unusable: it validates `check_name`,
   which no longer exists on any check.
 - The version lives in two hand-maintained places, `setup.py` and

@@ -8,8 +8,8 @@ or an error result, and none caches a failure.
 This base is the one in the tree that declares **no** ``NAMESPACE``, and three of
 its accessors pin ``self.regions[0]`` while the sibling ``discover_sir_region``
 resolves the Region correctly. That is a known defect, deliberately left alone:
-relabelling moves the ``Region`` cell on genuine PASS and FAIL rows, which the
-acceptance gate reads as a regression it cannot attribute.
+relabelling moves the ``Region`` cell on genuine PASS and FAIL rows, which cannot
+be separated from a regression when diffing two scans.
 ``tests/property/test_accessor_cache_property.py`` asserts the absence, so the
 deferral cannot be undone by accident.
 

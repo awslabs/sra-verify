@@ -1531,11 +1531,11 @@ def test_securityincidentresponse_declares_no_namespace() -> None:
     This base declares no ``NAMESPACE``, its accessors do no caching, and three of
     them pin ``self.regions[0]`` while the sibling ``discover_sir_region``
     resolves the Region correctly. Non-Goal 6 defers all of it: folding a
-    Region-labelling change into a verdict-correctness change would make the
-    acceptance gate unreadable.
+    Region-labelling change into a verdict-correctness change would make a diff of
+    two scans impossible to read, because both the ``Region`` and ``Status`` cells
+    would move at once.
 
-    If this test ever fails, someone has started that work, and the gate notes
-    need to say so.
+    If this test ever fails, someone has started that work deliberately.
     """
     cls = _base_class("securityincidentresponse")
 

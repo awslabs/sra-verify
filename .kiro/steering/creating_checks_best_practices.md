@@ -353,10 +353,10 @@ missing client, `logger.error` for an API failure.
 This is a contract, not a convention, and it is asserted:
 `tests/property/test_stdout_contract_property.py` holds that nothing in the package
 writes to stdout. Two consumers depend on it. The MCP server speaks JSON-RPC over
-stdout, so one stray `print` corrupts the protocol. And the acceptance gate parses
-`aws_call_failed` and `check_done` records out of the CodeBuild `stderr/` artefact,
-which is only separable from the report because the report goes to a file and the
-diagnostics go to stderr.
+stdout, so one stray `print` corrupts the protocol. And a scan's diagnostics are
+only separable from its report because the report goes to a file and the
+diagnostics go to stderr — which is what lets you redirect one without losing the
+other.
 
 `AWSClient.aws_error` emits exactly one record per failure, in one line:
 
@@ -483,8 +483,10 @@ nothing. `shield` shipped a table that omitted `ListProtections` and
 `DescribeDRTAccess` on the reasoning that "no protections" arrives as a successful
 empty list — true of a subscribed account, false of an unsubscribed one, where both
 calls fail with `ResourceNotFoundException: The subscription does not exist.` Ten
-controls would have stopped being reported as findings. Only the acceptance gate,
-reading real `aws_call_failed` records against real verdict movements, caught it.
+controls would have stopped being reported as findings. What caught it was running
+a full organization scan and diffing the verdicts against the previous run — which
+is the only thing that can, and is worth doing for any change that can move a
+`Status` cell.
 
 `WARN` was never a legal `Status`. `Status` has exactly `PASS`, `FAIL`, `ERROR`. The three former `status="WARN"` sites — two in `sra_config_07`, one in `sra_config_08` — are now `failed()`, per the product principle that a partially configured control is a failure.
 
@@ -521,8 +523,8 @@ Each of these is real and deliberately still here. The "why" matters, so nobody 
 - **`sra_firewallmanager_01` hardcodes `region = "us-east-1"` and has no region loop at all.** Firewall Manager's admin API is genuinely single-region, but the literal means `--regions` has no effect on the row's `Region` cell.
 - **`sra_securityincidentresponse_01` labels its four real rows with `self.regions[0]`** (falling back to `us-east-1`), so the same org-wide fact gets a different `Region` depending on `--regions` ordering — an **unstable row key**. Only its missing-input row is `global`. Deferred because relabelling moves the `Region` cell on genuine verdicts, which changes rows a consumer may already be diffing.
 - **`sra_macie_07` builds its `ActualValue` by joining a `set`** (`missing_accounts` is a set difference), so the cell's ordering is non-deterministic across runs and undiffable.
-- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_delegated_administrators()`, `get_organization_accounts()` and `get_role()` all pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which the acceptance gate reads as a regression it cannot attribute.
-- **`ShieldClient.list_protections` reads the first page only.** Paginating would change which resources the per-resource fan-out covers, and a row-count change is what the acceptance gate cannot attribute to a verdict fix.
+- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_delegated_administrators()`, `get_organization_accounts()` and `get_role()` all pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which makes the change impossible to separate from a regression when diffing two scans.
+- **`ShieldClient.list_protections` reads the first page only.** Paginating would change which resources the per-resource fan-out covers, and a row-count change cannot be separated from a verdict change when diffing two scans.
 - **`IAMCheck._validate_metadata` is dead and unusable.** It validates `check_name`, `description`, and `check_logic` as instance attributes; `check_name` no longer exists on a check at all, and the other two live on `meta`. Nothing calls it.
 - **`SRA-CONFIG-08`'s ex-WARN branch is reachable but has never been observed.** It fires when the audit account is the Config delegated administrator for exactly one of `config.amazonaws.com` and `config-multiaccountsetup.amazonaws.com`. Exercising it needs an org configured that way.
 

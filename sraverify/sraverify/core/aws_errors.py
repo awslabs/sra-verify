@@ -109,9 +109,8 @@ NO_CLIENT_CODE: Final = "NoClient"
 #: ``Request failed: EndpointConnectionError: Could not connect to ...``.
 #:
 #: Nothing downstream needs more. Neither condition's code is ever semantic, so
-#: the discriminator does not consult the operation; the message names the
-#: endpoint or the Region; and the acceptance gate treats a record carrying this
-#: value as explaining any ERROR for the service in that Region.
+#: the discriminator does not consult the operation, and the message names the
+#: endpoint or the Region.
 UNKNOWN_OPERATION: Final = "Request"
 
 #: The three keys :func:`is_error` requires, in the order the error result declares

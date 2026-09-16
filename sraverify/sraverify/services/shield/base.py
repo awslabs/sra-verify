@@ -52,9 +52,9 @@ class ShieldCheck(SecurityCheck):
     #: response with an empty ``Protections`` list. That reasoning is right about an
     #: account that *has* a subscription and wrong about one that does not: in an
     #: unsubscribed account both calls fail outright with
-    #: ``ResourceNotFoundException: The subscription does not exist.`` The
-    #: acceptance gate caught the omission as ten checks moving FAIL to ERROR
-    #: against records it could see were semantic.
+    #: ``ResourceNotFoundException: The subscription does not exist.`` A live
+    #: organization scan caught the omission: ten checks moved FAIL to ERROR
+    #: against records that were plainly semantic.
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
         "DescribeSubscription": {
             "ResourceNotFoundException": NotConfigured(

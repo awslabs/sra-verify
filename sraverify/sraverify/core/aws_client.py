@@ -42,9 +42,7 @@ botocore has it, and is a placeholder where it does not:
   no operation, because none was processed. The error result's ``Operation`` is
   :data:`~sraverify.core.aws_errors.UNKNOWN_OPERATION` and nothing downstream
   needs more: such a code is never semantic, so the discriminator does not
-  consult the operation; the message already names the endpoint; and the
-  acceptance gate treats a transport failure as explaining any ERROR for that
-  service in that Region.
+  consult the operation, and the message already names the endpoint.
 """
 from __future__ import annotations
 
@@ -104,7 +102,7 @@ class AWSClient:
 
         ``message`` is last and ``json.dumps``-encoded -- quoted, with embedded
         newlines and quotes escaped -- so an AWS message containing a newline
-        cannot break the one-line promise the acceptance gate's parser depends on.
+        cannot break the one-line promise: one failed call is always one line.
 
         Args:
             e: The caught exception. Must be a ``ClientError`` or ``BotoCoreError``.

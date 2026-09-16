@@ -440,21 +440,6 @@ class SRAVerify:
                             f"Check {selected_id} completed with "
                             f"{len(findings)} findings"
                         )
-                        # Gate attribution marker (Requirement 6.3). Execution
-                        # within one invocation is single-threaded, so every
-                        # ``aws_call_failed`` line emitted since the previous
-                        # marker belongs to this check -- which is what lets the
-                        # acceptance gate decide whether a FAIL-to-ERROR
-                        # transition has evidence behind it.
-                        #
-                        # ``info``, not ``debug``, on purpose: the buildspec must
-                        # not pass ``--debug`` (it would bury the markers under
-                        # every boto3 detail), and the ``sraverify`` logger's
-                        # default level is INFO, so this is visible as shipped.
-                        logger.info(
-                            f"check_done check_id={selected_id} "
-                            f"rows={len(findings)}"
-                        )
                     except Exception as exc:
                         logger.error(
                             f"Error running check {selected_id}: {exc}",
@@ -481,22 +466,6 @@ class SRAVerify:
                                 f"{selected_id}",
                                 exc_info=True,
                             )
-
-                        # One marker per check on the degraded path too, so the
-                        # gate's windows stay aligned: a check that emitted no
-                        # marker would fold its diagnostics into the *next*
-                        # check's window and mis-attribute them. ``synthetic``
-                        # rather than a count, because the row this path
-                        # contributes is the orchestrator's, not the check's,
-                        # and Requirement 6.7 admits an added row in the
-                        # candidate scan only where the reference scan shows
-                        # exactly this condition.
-                        #
-                        # Emitted after the inner guard, so it is reached whether
-                        # or not the synthetic row could be built.
-                        logger.info(
-                            f"check_done check_id={selected_id} rows=synthetic"
-                        )
 
                     # Outside the ``except``, so a broken check advances the
                     # indicator exactly once, same as a healthy one (10.2).

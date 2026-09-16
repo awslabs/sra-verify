@@ -828,17 +828,16 @@ Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes,
 
 **stdout being empty is a contract**, asserted by
 `tests/property/test_stdout_contract_property.py`. The MCP server speaks JSON-RPC over
-stdout, so one stray `print` corrupts the protocol. And two structured records on stderr are
-parsed by the acceptance gate: `AWSClient.aws_error` emits exactly one
+stdout, so one stray `print` corrupts the protocol. And one structured record on stderr
+keeps a scan's failures greppable — `AWSClient.aws_error` emits exactly one
 
 ```
 aws_call_failed operation=<Op> region=<Region> code=<Code> message=<JSON>
 ```
 
-per failed call, with `message` last and `json.dumps`-encoded so an AWS message containing a
-newline cannot break the one-line promise; and `run_checks` emits one
-`check_done check_id=<id> rows=<n>` per check, which is what lets the gate tell "this check
-ran and produced no rows" from "this check never ran".
+per failed call, with `message` last and `json.dumps`-encoded so an AWS message containing
+an embedded newline cannot break the one-line promise. One failed call is one line, so
+`grep -c aws_call_failed` answers "how many calls failed" on any scan log.
 
 ## Library usage
 
@@ -958,7 +957,6 @@ PYTHONPATH=sraverify python -m pytest sraverify/sraverify/tests/ -q
 - `tests/unit/core/` — registration, enums, `Finding`, `CheckMeta`, registry, selection,
   the error result, `AWSClient.aws_error`, `_remediation_for`, the availability lookup
 - `tests/unit/cli/` — exit codes, including the scan paths
-- `tests/unit/util/` — the acceptance gate
 - `tests/property/` — hypothesis and reflection modules covering metadata validation,
   `Finding` immutability and value types, the row contract, CSV round-trip, helper
   signatures, the accumulator ban, context isolation, registry bijection, and selection

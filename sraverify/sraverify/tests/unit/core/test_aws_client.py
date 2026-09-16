@@ -64,8 +64,8 @@ from sraverify.core.scan_context import ScanContext
 
 _REGION = "us-west-1"
 
-#: The one record a client emits on failure, as the acceptance gate parses it:
-#: three whitespace-free fields then a JSON-encoded message, in that order.
+#: The one record a client emits on failure: three whitespace-free fields then a
+#: JSON-encoded message, in that order.
 _LOG_RE = re.compile(
     r"^aws_call_failed operation=(?P<op>\S+) region=(?P<region>\S+) "
     r"code=(?P<code>\S+) message=(?P<message>.*)$",
@@ -453,8 +453,8 @@ def test_a_programming_defect_propagates_through_the_pattern(
         client.describe_thing()
 
     assert _errors(guard_log) == [], (
-        "a propagating defect must not emit aws_call_failed; the acceptance gate "
-        "would read it as an AWS outcome for that Region"
+        "a propagating defect must not emit aws_call_failed; a reader of the log "
+        "would take it for an AWS outcome in that Region"
     )
 
 

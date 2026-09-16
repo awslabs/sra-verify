@@ -5,9 +5,11 @@ Per-scan cached AWS responses live on the attached :class:`ScanContext` under th
 ``"auditmanager"`` namespace. Every accessor returns the client's response dict unchanged,
 or an error result, and none caches a failure.
 
-:data:`AuditManagerCheck.NOT_CONFIGURED_ERRORS` is empty, and the comment on it
-says why: the one candidate code has not been observed against a not-yet-set-up
-account, and an undeclared code resolves to an honest ERROR.
+:data:`AuditManagerCheck.NOT_CONFIGURED_ERRORS` declares one pair, and it is the
+only entry in the tree that *requires* its message needle to be correct rather
+than merely more precise: ``GetOrganizationAdminAccount`` returns
+``AccessDeniedException`` both for an account that has not completed Audit Manager
+setup and for a caller that lacks the permission.
 """
 from typing import ClassVar, Dict, Any
 from sraverify.core.aws_errors import (
@@ -27,15 +29,32 @@ class AuditManagerCheck(SecurityCheck):
     #: (Requirement 5.12).
     NAMESPACE = "auditmanager"
 
-    #: Empty, and deliberately so, pending confirmation.
+    #: The one pair that means "the control is not configured".
     #:
-    #: ``GetOrganizationAdminAccount`` answers ``AccessDeniedException`` both for a
-    #: genuine permission failure and -- reportedly -- with a "Please complete AWS
-    #: Audit Manager setup" message when the account has not been set up. The
-    #: second has never been observed against such an account, so it is not
-    #: declared: an undeclared code yields an honest ERROR, whereas declaring it
-    #: unconfirmed would risk fabricating a FAIL.
-    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
+    #: ``GetOrganizationAdminAccount`` answers ``AccessDeniedException`` for two
+    #: unrelated conditions, so the **message needle is mandatory**: an account
+    #: that has not completed Audit Manager setup, which is the control being
+    #: absent, and a genuine permission failure, which is an inability to
+    #: determine. Without the needle every denied call in the organization would
+    #: become a fabricated finding.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetOrganizationAdminAccount": {
+            "AccessDeniedException": NotConfigured(
+                message="Please complete AWS Audit Manager setup",
+                evidence=(
+                    "Observed 2026-09-16 in a controlled management account with "
+                    "Audit Manager not set up: aws_call_failed "
+                    "operation=GetOrganizationAdminAccount "
+                    "code=AccessDeniedException message=\"Please complete AWS "
+                    "Audit Manager setup from home page to enable this action in "
+                    "this account.\" The message states the condition outright -- "
+                    "setup has not been completed -- which is what "
+                    "SRA-AUDITMANAGER-02 asks about, so it is the control being "
+                    "absent and not a permission problem."
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up Audit Manager clients for each region.

@@ -78,11 +78,16 @@ class SRA_GUARDDUTY_10(GuardDutyCheck):
             detector_id = self.detector_id_of(detectors)
 
             if not detector_id:
-                yield self.error(
+                # Reached only after the error test above passed, so ListDetectors
+                # succeeded and named no detector: GuardDuty is not enabled in this
+                # Region. AWS answered, and the answer is that the control is absent,
+                # which is a FAIL. Reporting it as ERROR asserted an inability to
+                # determine something we had in fact determined.
+                yield self.failed(
                     region=region,
                     resource_id=f"guardduty:{region}",
-                    actual_value="Unable to access GuardDuty in this region",
-                    remediation="Check permissions or if GuardDuty is supported in this region",
+                    actual_value="No GuardDuty detector in this Region",
+                    remediation=f"Enable GuardDuty in {region}",
                 )
                 continue
 

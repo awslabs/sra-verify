@@ -77,11 +77,15 @@ class SRA_AUDITMANAGER_02(AuditManagerCheck):
                 error = admin_response["Error"]
 
                 if self.is_not_configured(error):
+                    # The one declared pair for this operation is the
+                    # setup-not-completed condition, so that is what this branch
+                    # reports. A denied call with any other message is undeclared
+                    # and reaches the ERROR branch below.
                     yield self.failed(
                         region=region,
                         resource_id=None,
-                        actual_value="No delegated administrator configured",
-                        remediation=f"Configure a delegated administrator for Audit Manager in {region} using RegisterOrganizationAdminAccount API"
+                        actual_value="Audit Manager is not set up in this account, so no delegated administrator is configured",
+                        remediation=f"Complete Audit Manager setup from the Audit Manager console in {region}, then register the audit account as delegated administrator using RegisterOrganizationAdminAccount"
                     )
                 else:
                     yield self.error(

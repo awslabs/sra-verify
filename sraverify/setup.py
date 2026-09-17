@@ -23,7 +23,7 @@ setup(
     ],
     python_requires=">=3.11",
     install_requires=[
-        "boto3>=1.26.0",
+        "boto3>=1.43.96",
         "colorama>=0.4.4"
     ],
     extras_require={

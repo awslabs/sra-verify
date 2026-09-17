@@ -118,6 +118,7 @@ Resources:
             Effect: Allow
             Action:
               - cloudtrail:DescribeTrails
+              - cloudtrail:GetEventSelectors
               - cloudtrail:GetTrailStatus
             Resource: '*'
           - Sid: CloudwatchPermissions
@@ -197,6 +198,7 @@ Resources:
           - Sid: OrganizationsPermissions
             Effect: Allow
             Action:
+              - organizations:DescribeEffectivePolicy
               - organizations:DescribeOrganization
               - organizations:ListAccounts
               - organizations:ListDelegatedAdministrators
@@ -223,9 +225,13 @@ Resources:
             Effect: Allow
             Action:
               - securityhub:DescribeOrganizationConfiguration
+              - securityhub:DescribeSecurityHubV2
               - securityhub:GetAdministratorAccount
+              - securityhub:GetConfigurationPolicy
               - securityhub:GetEnabledStandards
+              - securityhub:ListConfigurationPolicies
               - securityhub:ListEnabledProductsForImport
+              - securityhub:ListFindingAggregators
               - securityhub:ListMembers
               - securityhub:ListOrganizationAdminAccounts
             Resource: '*'

@@ -128,7 +128,7 @@ _CATALOG: dict[str, type[SecurityCheck]] = dict(all_checks())
 #: The catalog size this change ships with. Cross-checked against the file count
 #: on disk in ``test_catalog_is_populated``, so bumping this literal alone does
 #: not make a lost check pass.
-EXPECTED_CHECK_COUNT = 158
+EXPECTED_CHECK_COUNT = 167
 
 #: ``sraverify/services``, located from this test module rather than from a
 #: hard-coded path: ``tests/property/`` -> ``tests/`` -> the package root.

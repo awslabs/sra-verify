@@ -120,6 +120,41 @@ class SecurityHubCheck(SecurityCheck):
                 message="not subscribed to aws security hub",
             ),
         },
+        "DescribeSecurityHubV2": {
+            "ResourceNotFoundException": NotConfigured(
+                evidence=(
+                    "Observed 2026-09-16 in account 195249513278 as "
+                    "'ResourceNotFoundException: You are not subscribed to HubV2', "
+                    "identically in us-east-1, us-west-2 and eu-west-1, while the "
+                    "same account answered DescribeHub successfully -- so the "
+                    "missing resource is the V2 hub itself and the control is "
+                    "absent rather than undetermined. The needle is required "
+                    "because the API reference documents ResourceNotFoundException "
+                    "generically as 'we can't find the specified resource'. "
+                    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_DescribeSecurityHubV2.html"
+                ),
+                message="not subscribed to hubv2",
+            ),
+        },
+        "ListConfigurationPolicies": {
+            "AccessDeniedException": NotConfigured(
+                evidence=(
+                    "Observed 2026-09-16: a non-delegated-administrator account "
+                    "answers 'AccessDeniedException: Must be a Security Hub "
+                    "delegated administrator with Central Configuration enabled', "
+                    "which states central configuration is not in use -- the "
+                    "control is absent. The needle is essential: the *same code* "
+                    "arrives from the delegated administrator in a non-home Region "
+                    "as 'Central Configuration APIs can only be called from the "
+                    "aggregation region', which is a fact about where we asked and "
+                    "must stay an ERROR, and a plain IAM denial must too. "
+                    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_ListConfigurationPolicies.html"
+                ),
+                message="with central configuration enabled",
+            ),
+        },
     }
 
     # The shared cross-service cache slot for organizations:DescribeOrganization.
@@ -207,6 +242,121 @@ class SecurityHubCheck(SecurityCheck):
         return self._cached_call(
             region, f"enabled_standards:{region}", "get_enabled_standards"
         )
+
+    def get_security_hub_v2(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Security Hub V2 resource for a Region, with caching.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            The ``DescribeSecurityHubV2`` response on success, or an error
+            result. "V2 is not enabled here" arrives as a
+            ``ResourceNotFoundException`` that ``self.is_not_configured(error)``
+            recognizes by its message.
+        """
+        return self._cached_call(
+            region, f"security_hub_v2:{region}", "describe_security_hub_v2"
+        )
+
+    def get_finding_aggregators(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the finding aggregators visible from a Region, with caching.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            ``{"FindingAggregators": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(
+            region, f"finding_aggregators:{region}", "list_finding_aggregators"
+        )
+
+    def get_configuration_policies(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the central configuration policy summaries, with caching.
+
+        Args:
+            region: AWS region name. Must be the home Region.
+
+        Returns:
+            ``{"ConfigurationPolicySummaries": [...]}`` on success, or an error
+            result.
+        """
+        return self._cached_call(
+            region, f"configuration_policies:{region}", "list_configuration_policies"
+        )
+
+    def get_configuration_policy(
+        self, region: str, identifier: str
+    ) -> Mapping[str, Any]:
+        """
+        Get one central configuration policy, with caching.
+
+        Args:
+            region: AWS region name. Must be the home Region.
+            identifier: The configuration policy ARN or UUID.
+
+        Returns:
+            The ``GetConfigurationPolicy`` response on success, or an error
+            result.
+        """
+        return self._cached_call(
+            region,
+            f"configuration_policy:{region}:{identifier}",
+            "get_configuration_policy",
+            identifier,
+        )
+
+    @staticmethod
+    def standard_name_of(standards_arn: str) -> str:
+        """
+        Reduce a standards ARN to its Region-independent name.
+
+        The separator before ``standards`` is ``::``, not ``/`` -- a standards ARN
+        reads ``arn:aws:securityhub:us-west-2::standards/<name>/v/<version>`` --
+        so splitting on ``"/standards/"`` never matches and silently reports whole
+        ARNs. Verified against live data on 2026-09-16.
+
+        Args:
+            standards_arn: A ``StandardsArn`` or ``EnabledStandardIdentifiers``
+                value.
+
+        Returns:
+            e.g. ``"ai-security-best-practices/v/1.0.0"``, or the input unchanged
+            when it is not in the expected shape.
+        """
+        _, _, name = standards_arn.partition("standards/")
+        return name or standards_arn
+
+    @staticmethod
+    def home_region_of(response: Mapping[str, Any]) -> Optional[str]:
+        """
+        Read the central-configuration home Region from a finding aggregator.
+
+        The home Region is the aggregation Region, and it is the only Region the
+        configuration-policy operations may be called from. It is not returned as
+        a field: it is the Region segment of the aggregator ARN, which is why this
+        parse exists rather than a second ``GetFindingAggregator`` call.
+
+        Args:
+            response: A successful ``ListFindingAggregators`` response.
+
+        Returns:
+            The home Region, or ``None`` when no aggregator exists or its ARN is
+            not in the expected shape. ``None`` means cross-Region aggregation is
+            not configured, so central configuration cannot be in use.
+        """
+        aggregators = response.get("FindingAggregators") or []
+        for aggregator in aggregators:
+            arn = aggregator.get("FindingAggregatorArn") or ""
+            # arn:aws:securityhub:<region>:<account>:finding-aggregator/<uuid>
+            parts = arn.split(":")
+            if len(parts) > 3 and parts[3]:
+                return parts[3]
+        return None
 
     def get_administrator_account(self, region: str) -> Mapping[str, Any]:
         """

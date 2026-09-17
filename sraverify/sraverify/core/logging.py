@@ -32,8 +32,23 @@ console_handler.setFormatter(console_formatter)
 # Add handlers to logger
 logger.addHandler(console_handler)
 
-# Set default level
-logger.setLevel(logging.INFO)
+# Set default level.
+#
+# ERROR, not INFO. ``logger.error`` is reserved for something that produced an
+# ERROR row in the report -- ``test_no_error_level_records_without_error_rows``
+# holds that correspondence -- so at this level every line on stderr maps to a
+# row an operator can find in the CSV, and a clean scan prints nothing.
+#
+# The package makes no ``logger.info`` calls at all, so the only thing this level
+# suppresses relative to INFO is WARNING: 61 sites, almost all "no client
+# available for region X", which is a diagnostic about how the scan was set up
+# rather than a finding. The verdict is the report's job -- a missing client
+# already reaches the report as a NoClient ERROR row -- and ``--debug`` still
+# shows warnings alongside the one-line ``aws_call_failed`` records.
+#
+# The banner, progress bar and summary do not travel through this logger, so
+# they are unaffected.
+logger.setLevel(logging.ERROR)
 
 # Prevent sraverify logger from propagating to root (we handle it ourselves)
 logger.propagate = False
@@ -59,7 +74,11 @@ def configure_logging(debug=False):
     Configure logging level based on debug flag.
 
     Args:
-        debug: If True, set logging level to DEBUG, otherwise INFO
+        debug: If True, set logging level to DEBUG, otherwise ERROR.
+
+    Without ``--debug`` a scan is silent on stderr unless a line corresponds to
+    an ERROR row in the report. With it, warnings and the per-failure
+    ``aws_call_failed`` records appear.
     """
     if debug:
         logger.setLevel(logging.DEBUG)
@@ -68,4 +87,4 @@ def configure_logging(debug=False):
         # boto_logger.setLevel(logging.DEBUG)
         # botocore_logger.setLevel(logging.DEBUG)
     else:
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.ERROR)

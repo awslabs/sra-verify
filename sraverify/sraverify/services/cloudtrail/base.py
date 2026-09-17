@@ -48,6 +48,20 @@ class CloudTrailCheck(SecurityCheck):
                 ),
             ),
         },
+        "GetEventSelectors": {
+            "TrailNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/"
+                    "API_GetEventSelectors.html -- TrailNotFoundException is "
+                    "returned when the trail named in the request does not exist, "
+                    "the same reasoning as GetTrailStatus above: the trail whose "
+                    "selectors are being read is the resource in question, so its "
+                    "absence is the control being absent. Verified 2026-09-16 that "
+                    "the full owner ARN avoids the other route to this code -- a "
+                    "bare trail name resolves against the calling account."
+                ),
+            ),
+        },
     }
 
     def _setup_clients(self):
@@ -193,6 +207,35 @@ class CloudTrailCheck(SecurityCheck):
 
         result = client.get_trail_status(trail_arn)
         if is_error(result):
+            return result
+
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
+
+    def get_event_selectors(self, region: str, trail_arn: str) -> Mapping[str, Any]:
+        """
+        Get a trail's event selectors, with caching.
+
+        Args:
+            region: AWS region name. Pass the trail's ``HomeRegion``.
+            trail_arn: The trail ARN, not a bare name.
+
+        Returns:
+            The ``GetEventSelectors`` response, or an error result.
+        """
+        cache_key = f"event_selectors:{trail_arn}:{region}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug(f"CloudTrail: Using cached {cache_key}")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(f"CloudTrail: No client available for region {region}")
+            return no_client_result(service="CloudTrail", region=region)
+
+        result = client.get_event_selectors(trail_arn)
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
             return result
 
         self._ctx._set(self.NAMESPACE, cache_key, result)

@@ -10,6 +10,7 @@ pinned to ``us-east-1`` inside the client itself -- is constructed per check
 instance and ``self._clients`` is cleared. Cache keys carry no account prefix
 because the context is already scoped to one account scan.
 """
+import json
 from typing import ClassVar, Any, Dict
 
 from sraverify.core.aws_errors import (
@@ -65,6 +66,23 @@ class OrganizationsCheck(SecurityCheck):
                     "API_ListPolicies.html -- returned when the requested policy "
                     "type is not enabled for the organization, which is exactly "
                     "what a check asking whether SCPs are enabled is testing for."
+                ),
+            ),
+        },
+        "DescribeEffectivePolicy": {
+            "EffectivePolicyNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
+                    "API_DescribeEffectivePolicy.html -- returned when no policy of "
+                    "the requested type is in effect for the target. Observed "
+                    "2026-09-16 in organization o-svvpsun36e for every active "
+                    "account as 'EffectivePolicyNotFoundException: The specified "
+                    "policy type is not enabled. Enable that policy type on your "
+                    "organization root and then retry.' -- AWS answered, and the "
+                    "answer is that no policy reaches the account. "
+                    "InvalidInputException (an unsupported root or OU target) is "
+                    "deliberately NOT declared: that is a defect in the caller, not "
+                    "a fact about the organization."
                 ),
             ),
         },
@@ -246,3 +264,121 @@ class OrganizationsCheck(SecurityCheck):
         logger.debug(f"Organizations: Cached accounts for parent {parent_id}")
 
         return response
+
+    def get_accounts(self) -> Dict[str, Any]:
+        """
+        Get every account in the organization, with caching.
+
+        Returns:
+            Dictionary with Accounts key containing every account,
+            or Error key if failed.
+        """
+        cache_key = "all_accounts"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug("Organizations: Using cached organization accounts")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        logger.debug("Organizations: Fetching organization accounts")
+        if self._org_client is None:
+            logger.warning("Organizations: No client available")
+            return no_client_result(service="Organizations", region="global")
+
+        response = self._org_client.list_accounts()
+
+        if is_error(response):
+            # Never cached: a retry has to be able to re-issue the call.
+            return response
+
+        self._ctx._set(self.NAMESPACE, cache_key, response)
+        logger.debug("Organizations: Cached organization accounts")
+
+        return response
+
+    def get_effective_policy(
+        self, policy_type: str, target_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get the effective management policy for one account, with caching.
+
+        Args:
+            policy_type: A management policy type, e.g. ``"BEDROCK_POLICY"``.
+            target_id: An account ID. A root or OU is not a supported target.
+
+        Returns:
+            Dictionary with EffectivePolicy key, or Error key if failed.
+        """
+        cache_key = f"effective_policy:{policy_type}:{target_id}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug(f"Organizations: Using cached {cache_key}")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        logger.debug(
+            f"Organizations: Fetching effective {policy_type} for {target_id}"
+        )
+        if self._org_client is None:
+            logger.warning("Organizations: No client available")
+            return no_client_result(service="Organizations", region="global")
+
+        response = self._org_client.describe_effective_policy(policy_type, target_id)
+
+        if is_error(response):
+            # Never cached: a retry has to be able to re-issue the call.
+            return response
+
+        self._ctx._set(self.NAMESPACE, cache_key, response)
+        logger.debug(f"Organizations: Cached {cache_key}")
+
+        return response
+
+    @staticmethod
+    def guardrail_identifiers_of(response: Dict[str, Any]) -> tuple:
+        """
+        Collect the Guardrail identifiers named by an effective Bedrock policy.
+
+        ``EffectivePolicy.PolicyContent`` is a JSON *string*, and the Guardrails
+        sit at ``bedrock.guardrail_inference.<region>.<config>.identifier``. The
+        parse lives here rather than in the check because ``execute()`` may not
+        contain a ``try``, and malformed or unexpected content has to resolve to
+        "named no Guardrail" rather than raising.
+
+        Args:
+            response: A successful ``DescribeEffectivePolicy`` response.
+
+        Returns:
+            The identifiers, sorted and de-duplicated, so the reported cell is
+            deterministic across runs.
+        """
+        content = (response.get("EffectivePolicy") or {}).get("PolicyContent")
+        if not isinstance(content, str):
+            return ()
+
+        try:
+            document = json.loads(content)
+        except (ValueError, TypeError):
+            logger.debug(
+                "Organizations: effective Bedrock policy content is not valid JSON"
+            )
+            return ()
+
+        if not isinstance(document, dict):
+            return ()
+
+        identifiers = set()
+        guardrail_inference = (document.get("bedrock") or {}).get(
+            "guardrail_inference"
+        )
+        if not isinstance(guardrail_inference, dict):
+            return ()
+
+        # Keyed by Region, then by an opaque configuration name.
+        for per_region in guardrail_inference.values():
+            if not isinstance(per_region, dict):
+                continue
+            for config in per_region.values():
+                if not isinstance(config, dict):
+                    continue
+                identifier = config.get("identifier")
+                if isinstance(identifier, str) and identifier.strip():
+                    identifiers.add(identifier.strip())
+
+        return tuple(sorted(identifiers))

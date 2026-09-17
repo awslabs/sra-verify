@@ -112,7 +112,7 @@ decorator.
 - `services/<svc>/__init__.py` is three lines: a docstring, an import of
   `import_check_modules`, and `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is the aggregator: `import_service_packages(__name__)`.
-  `import sraverify.services` therefore registers all 158 checks. `main.py`
+  `import sraverify.services` therefore registers all 167 checks. `main.py`
   carries that import purely for its side effect — drop it and every scan
   selects nothing.
 - Discovery picks up only modules whose name starts with `sra_`, sorted
@@ -239,7 +239,7 @@ accepted and ignored. `get_client(region)` can return `None`. Always handle it.
 The file stem, the check ID, the class name, and the containing service package
 are all derivable from one another and are cross-checked at import. `CHECK_ID_RE`
 lives in `core/metadata.py`; `CHECK_MODULE_RE` in `core/check.py`. The `01`–`99`
-range caps one service at 99 checks (largest today: GuardDuty at 25).
+range caps one service at 99 checks (largest today: GuardDuty at 26).
 
 Legal values are enum members, not strings (`core/enums.py`, all `StrEnum`):
 
@@ -426,7 +426,7 @@ class OrganizationsClient(AWSClient):
             return self.aws_error(e)
 ```
 
-That `except` clause is byte-identical in all 92 client methods. There is nothing
+That `except` clause is byte-identical in all 98 client methods. There is nothing
 to type per call site — no operation name, no Region — and therefore nothing that
 can be typed wrong. Three rules make it work:
 
@@ -572,7 +572,7 @@ order ascending and reproducible.
 ## Tests
 
 The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collects
-**7867 tests**, with 410 skips and no xfails. It is no longer thin.
+**8715 tests**, with 493 skips and no xfails. It is no longer thin.
 
 - `tests/unit/core/` — `test_check_registration.py`, `test_enums.py`,
   `test_finding.py`, `test_metadata.py`, `test_registry.py`, `test_select.py`
@@ -587,11 +587,11 @@ name, because between them they hold the whole contract:
 
 | Module                                  | What it holds                                                                                                                                                                                                                                                             |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_client_contract_property.py`      | All 92 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return |
+| `test_client_contract_property.py`      | All 98 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return |
 | `test_accessor_cache_property.py`       | Every public base method classified as `accessor`, `accessor_uncached`, `helper`, `client_lookup` or `derived`, proven total and exact against the real classes; then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                   |
-| `test_check_classification_property.py` | Catalog-wide over all 158 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                            |
+| `test_check_classification_property.py` | Catalog-wide over all 167 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                            |
 | `test_discriminator_property.py`        | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, and `is_not_configured` conservative on anything undeclared                                                                                                                              |
-| `test_no_confessing_fail_property.py`   | Static, by AST, over all 158 check modules: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                        |
+| `test_no_confessing_fail_property.py`   | Static, by AST, over all 167 check modules: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                        |
 | `test_availability_property.py`         | `service_available_in_region` is offline, cached, and fails open                                                                                                                                                                                                          |
 | `test_stdout_contract_property.py`      | Nothing in the package writes to stdout                                                                                                                                                                                                                                   |
 
@@ -605,7 +605,7 @@ table or `test_the_adapter_table_is_complete_and_exact` /
 deliberate: the tables are how the suite knows what to drive, so an unlisted
 method would be silently untested.
 
-Several property modules are **catalog-wide**: they enumerate the real 158
+Several property modules are **catalog-wide**: they enumerate the real 167
 registered checks with `pytest.mark.parametrize` rather than sampling, so a
 failure names the offending check ID in the test ID. None of them needs
 credentials or issues an AWS call.
@@ -645,9 +645,20 @@ pytest config file.
 - `IAMCheck._validate_metadata` is dead and unusable: it validates `check_name`,
   which no longer exists on any check.
 - The version lives in two hand-maintained places, `setup.py` and
-  `sraverify/__init__.py` (`__version__`), both `0.2.0`. Nothing single-sources
+  `sraverify/__init__.py` (`__version__`), both `0.3.0`. Nothing single-sources
   it and they have drifted once already, so change both together.
-- `requirements.txt` pins boto3 differently from `setup.py`.
+- `requirements.txt` and `setup.py` now agree on `boto3>=1.43.96`; see `tech.md`
+  for why that floor is load-bearing rather than cosmetic.
+- **`sra_securityhub_01` reduces a standards ARN by splitting on `"/standards/"`,
+  which never matches.** A standards ARN reads
+  `arn:aws:securityhub:us-west-2::standards/<name>/v/<version>` — the separator
+  before `standards` is `::`, not `/` — so the branch is dead and every row
+  reports whole ARNs in its `ActualValue`. `SecurityHubCheck.standard_name_of`
+  does it correctly and the three-way membership test in `SRA-SECURITYHUB-12`
+  uses `endswith`, which is unaffected. Not fixed in `_01` deliberately:
+  correcting it rewrites the `ActualValue` cell on rows a consumer may already be
+  diffing, which is exactly the class of change the Region-labelling deferrals
+  above are held back for.
 - `build/`, `dist/`, and `*.egg-info/` are checked into the working tree.
 
 For the current check-authoring anti-pattern list, see

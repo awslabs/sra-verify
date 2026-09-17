@@ -19,11 +19,11 @@ There is no `pyproject.toml`, no Makefile, no tox/nox, no pytest config file, an
 ### Known inconsistencies (do not "fix" without asking)
 
 - `sra-verify-mcp/pyproject.toml` declares `requires-python = ">=3.10"`, which cannot satisfy the scanner's 3.11 floor. The MCP repo's declared floor and its dependency are in conflict.
-- `requirements.txt` pins `boto3>=1.40.5`; `setup.py` says `boto3>=1.26.0`.
+- ~~`requirements.txt` pins `boto3>=1.40.5`; `setup.py` says `boto3>=1.26.0`.~~ **Fixed.** Both now pin `boto3>=1.43.96`, and the floor is load-bearing rather than cosmetic: the AI-coverage checks call `securityhub:DescribeSecurityHubV2`, `securityhub:ListConfigurationPolicies`, `securityhub:GetConfigurationPolicy` and `organizations:DescribeEffectivePolicy` with `BEDROCK_POLICY`. A missing *operation* on an older botocore raises `AttributeError`, which is outside `AWS_EXCEPTIONS`, escapes the client, and reaches the orchestrator as a synthetic ERROR row — the metric whose expected value is zero. A missing enum *value* would have been free; an operation is not.
 - **Several client methods read the first page only, and the deferral is deliberate.** `ShieldClient.list_protections` is the clearest case: `shield` publishes a `list_protections` paginator, and the method does not use it. Most of `WAFClient`'s enumeration calls are the same shape, and `wafv2:ListWebACLs` has no botocore paginator at all — it takes a `NextMarker`/`Limit` pair that would have to be looped by hand. Fixing any of them changes *which resources* the per-resource fan-out covers, and a row-count change cannot be separated from a verdict change when reviewing two scans of the same organization, so all of them were held back rather than folded into the client-error-contract work. Where a call *does* paginate, the whole paginator loop belongs inside the `try`: a failure on page three has to arrive as an error result, because a short list is indistinguishable from a smaller organization.
 - `build/`, `dist/`, and `*.egg-info/` are present in the working tree as stale artifacts. They are gitignored and untracked, so they are local debris rather than committed content — but they shadow a fresh build if you read from them.
 
-The version is `0.2.0` in **two** places that must be kept in step by hand — `setup.py` and `sraverify/__init__.py` (`__version__`). Nothing single-sources it, and they have already drifted once (`0.1.4` vs `0.1.0`), so change both together. `sra-verify-mcp/pyproject.toml` pins `sraverify>=0.1.4` and is a third copy, in the other repo.
+The version is `0.3.0` in **two** places that must be kept in step by hand — `setup.py` and `sraverify/__init__.py` (`__version__`). Nothing single-sources it, and they have already drifted once (`0.1.4` vs `0.1.0`), so change both together. `sra-verify-mcp/pyproject.toml` pins `sraverify>=0.1.4` and is a third copy, in the other repo.
 
 `sra-verify/sraverify/README.md` is the developer guide and is current as of the check-contract branch: it documents `ScanContext`, automatic registration and the four-way identity cross-check, `CheckMeta`, the three keyword-only finding helpers, FAIL-vs-ERROR, and `Finding.FIELDS`. It agrees with this file and with `creating_checks_best_practices.md`; if the three ever disagree, the steering files win and the README is the one to correct.
 
@@ -65,7 +65,7 @@ Bare `pytest` from the pip project root reaches the same tests and needs no `PYT
 cd sra-verify/sraverify && pytest -q
 ```
 
-Both report **7854 passed, 411 skipped**, and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (~26 hypothesis and reflection modules, including catalog-wide properties that iterate the real 158 registered checks and the 92 real client methods) plus `tests/unit/{core,cli,util}/`. `tests/unit/mcp/` and `tests/unit/services/` hold only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees and nothing else.
+Both report **8222 passed, 493 skipped**, and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (~26 hypothesis and reflection modules, including catalog-wide properties that iterate the real 167 registered checks and the 98 real client methods) plus `tests/unit/{core,cli,util}/`. `tests/unit/mcp/` and `tests/unit/services/` hold only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees and nothing else.
 
 Add `-p no:logging` when you want readable output: several modules assert on log records, and pytest's live-log capture floods the terminal otherwise.
 
@@ -73,7 +73,7 @@ Add `-p no:logging` when you want readable output: several modules assert on log
 PYTHONPATH=sra-verify/sraverify sra-verify/.venv/bin/python -m pytest sra-verify/sraverify/sraverify/tests/ -q --tb=line -p no:logging
 ```
 
-The 410 skips are almost all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
+The 493 skips are almost all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
 
 ### Regenerating `docs/checks.txt`
 
@@ -149,6 +149,12 @@ from sraverify.core.logging import logger
 `core/logging.py` strips the root logger's handlers at import time and installs a **stderr-only** handler. `logger.propagate = False`; boto3/botocore/urllib3 are forced to WARNING and propagate to the stderr root handler.
 
 Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes, `logger.warning` for a missing client, and `logger.debug` for a failed AWS call.
+
+**The default level is `ERROR`, so a scan without `--debug` writes nothing to stderr.** That is deliberate and it is what the operator asked for: the report is the artefact, and a clean run should be silent. Three facts make it safe rather than lossy — the package makes **zero** `logger.info` calls, so the only thing this suppresses relative to `INFO` is `WARNING`; every condition a warning describes already reaches the report as a row (a missing client becomes a `NoClient` ERROR row, a failed call becomes an ERROR or a FAIL); and the banner, progress bar and summary do not travel through this logger, so they are unaffected.
+
+`--debug` restores everything, including the one-line `aws_call_failed` records, and that is the switch to reach for when diagnosing. Do not raise a call site's level to make it visible by default — `logger.error` still means "this produced an ERROR row", and `test_no_error_level_records_without_error_rows` holds that correspondence.
+
+The warning that prompted the change was `SecurityHub: No client available for region us-west-2`, emitted because `SRA-SECURITYHUB-13` resolved a central-configuration home Region the scan had not been asked to cover. Lowering the level hid the noise; the *defect* was fixed separately, in the check, by deciding that case before any call is issued. Both halves were needed — a quieter logger alone would have left a `Request failed: NoClient` row in the report saying nothing about why.
 
 **`logger.error` is reserved for something that produced an ERROR row.** A failed AWS call is not one: `AccessDeniedException: Macie is not enabled` is a normal observation the check tier turns into a FAIL. The client tier cannot tell that from a broken scan — only `is_not_configured` can — so a client that logged at `error` would be classifying one tier before the information exists. An audit-account scan did exactly that: five ERROR lines, then `Error: 0` in the summary. `test_no_error_level_records_without_error_rows` holds the correspondence.
 

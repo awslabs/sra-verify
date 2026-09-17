@@ -112,6 +112,104 @@ class SecurityHubClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
+    def describe_security_hub_v2(self) -> Mapping[str, Any]:
+        """
+        Describe the Security Hub V2 resource for this account and Region.
+
+        Returns:
+            The ``DescribeSecurityHubV2`` response on success -- ``HubV2Arn`` and
+            ``SubscribedAt`` -- or the error result.
+
+            An account without V2 answers ``ResourceNotFoundException: You are
+            not subscribed to HubV2`` (observed 2026-09-16), which is a real
+            answer and is declared in
+            ``SecurityHubCheck.NOT_CONFIGURED_ERRORS``. V2 is independent of
+            CSPM: the same probe found V2 enabled in a Region where CSPM was not
+            subscribed.
+        """
+        try:
+            return self.client.describe_security_hub_v2()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_finding_aggregators(self) -> Mapping[str, Any]:
+        """
+        List the finding aggregators visible from this Region.
+
+        Returns:
+            ``{"FindingAggregators": [...]}`` with every page merged, on success,
+            or the error result.
+
+            The aggregator ARN embeds the home Region, which is the only way to
+            learn it without a second call: ``GetFindingAggregator`` needs the ARN
+            this call returns. Callable from any subscribed Region, unlike the
+            central-configuration operations.
+        """
+        try:
+            aggregators = []
+            next_token = None
+            while True:
+                params: dict[str, Any] = {}
+                if next_token:
+                    params['NextToken'] = next_token
+                response = self.client.list_finding_aggregators(**params)
+                aggregators.extend(response.get('FindingAggregators', []))
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+            return {"FindingAggregators": aggregators}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_configuration_policies(self) -> Mapping[str, Any]:
+        """
+        List the Security Hub central configuration policies.
+
+        Returns:
+            ``{"ConfigurationPolicySummaries": [...]}`` with every page merged,
+            on success, or the error result.
+
+            Only the delegated administrator may call this, and only from the
+            home Region. From elsewhere it answers ``AccessDeniedException``; the
+            two messages differ ("Must be a Security Hub delegated administrator
+            with Central Configuration enabled" versus "Central Configuration
+            APIs can only be called from the aggregation region"), which is what
+            lets the discriminator classify one and not the other.
+        """
+        try:
+            summaries = []
+            next_token = None
+            while True:
+                params: dict[str, Any] = {}
+                if next_token:
+                    params['NextToken'] = next_token
+                response = self.client.list_configuration_policies(**params)
+                summaries.extend(response.get('ConfigurationPolicySummaries', []))
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+            return {"ConfigurationPolicySummaries": summaries}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def get_configuration_policy(self, identifier: str) -> Mapping[str, Any]:
+        """
+        Get one Security Hub configuration policy.
+
+        Args:
+            identifier: The configuration policy ARN or UUID.
+
+        Returns:
+            The ``GetConfigurationPolicy`` response on success, or the error
+            result. The summary from ``ListConfigurationPolicies`` carries
+            ``ServiceEnabled`` but not the enabled standards, so this second call
+            is the only way to read ``EnabledStandardIdentifiers``.
+        """
+        try:
+            return self.client.get_configuration_policy(Identifier=identifier)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
     def list_enabled_products_for_import(self) -> Mapping[str, Any]:
         """
         List enabled products for import into Security Hub.

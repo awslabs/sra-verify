@@ -184,6 +184,8 @@ The inline buildspec is the canonical execution model, and it explains what `--a
 4. `--account-type application` for every ACTIVE org account, fanned out with GNU `parallel -j ${PARALLEL_ACCOUNTS:-5}`
 5. Consolidate all `sraverify*.csv` files with a pandas step; results land in S3 under `sraverify/reports/{raw,consolidated}/`, alongside a copy of `sra-verify-dashboard.html`
 
+**Deploy `1-sraverify-member-roles.yaml` before the CodeBuild project when a change adds an AWS call, and expect one transitional run of ERROR rows if you don't.** Observed on the 2026-09-16 deploy of the AI-coverage checks: the 02:09 build ran the new checks against an `SRAMemberRole` that did not yet grant the six new actions, and returned `DescribeSecurityHubV2 failed: AccessDeniedException`, `DescribeEffectivePolicy failed: AccessDeniedException` and so on — 68 ERROR rows. The 02:16 build, after the StackSet propagated, returned 98 PASS and 79 FAIL with **zero** ERROR rows from those checks. Nothing was wrong with either run: that is the FAIL-vs-ERROR contract working, and it is why a permission gap must never be allowed to read as a FAIL. The signal to look for is a whole check flipping ERROR→PASS/FAIL between two runs minutes apart; the cause is propagation, not flakiness.
+
 The buildspec does **not** capture stderr per account. Under `parallel -j5` five
 processes interleave into one CloudWatch stream, so a diagnostic cannot be
 attributed to an account from the merged log alone. A buildspec edit to write one

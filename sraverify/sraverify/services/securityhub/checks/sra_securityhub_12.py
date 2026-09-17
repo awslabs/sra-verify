@@ -16,7 +16,21 @@ from sraverify.services.securityhub.base import SecurityHubCheck
 #: cannot match.
 AI_STANDARD_SUFFIX = "standards/ai-security-best-practices/v/1.0.0"
 
+#: The only ``StandardsStatus`` in which the standard is actually evaluating.
+#: The full enum is ``PENDING``, ``READY``, ``FAILED``, ``DELETING`` and
+#: ``INCOMPLETE``, and every one of the other four carries the standard's ARN in
+#: ``StandardsSubscriptions`` while the standard is not running -- ``FAILED`` can
+#: sit there indefinitely, and ``INCOMPLETE`` means only some of the standard's
+#: controls came up. Testing the ARN alone therefore reported a control that
+#: evaluates nothing as PASS.
+AI_STANDARD_READY = "READY"
 
+#: Statuses a subscription passes *through* rather than settles in. They earn
+#: different remediation wording: telling someone to re-enable a standard that is
+#: mid-propagation is wrong advice, and a live run showed a policy-driven
+#: subscription sitting at ``PENDING`` for well under two minutes before reaching
+#: ``READY``.
+TRANSIENT_STANDARD_STATUSES = frozenset({"PENDING", "DELETING"})
 
 
 class SRA_SECURITYHUB_12(SecurityHubCheck):
@@ -31,13 +45,17 @@ class SRA_SECURITYHUB_12(SecurityHubCheck):
             "standards in each Region. The standard evaluates Amazon Bedrock, Bedrock "
             "AgentCore and SageMaker AI resources for encryption, network isolation and "
             "access configuration. It is never enabled automatically, so an account passes "
-            "SRA-SECURITYHUB-01 with any standard while leaving AI resources unevaluated."
+            "SRA-SECURITYHUB-01 with any standard while leaving AI resources unevaluated. "
+            "The subscription must also be READY: a subscription in FAILED or INCOMPLETE "
+            "carries the standard's ARN while evaluating nothing, or only part of the "
+            "standard."
         ),
         check_logic=(
             "Call securityhub:GetEnabledStandards in each Region and read "
-            "StandardsSubscriptions[].StandardsArn. Check passes if one ARN ends with "
-            "standards/ai-security-best-practices/v/1.0.0. Fails otherwise, or if Security Hub "
-            "is not enabled in the Region."
+            "StandardsSubscriptions[]. Check passes if a subscription's StandardsArn ends "
+            "with standards/ai-security-best-practices/v/1.0.0 and its StandardsStatus is "
+            "READY. Fails if that subscription is absent, if its status is anything else, "
+            "or if Security Hub is not enabled in the Region."
         ),
         severity=Severity.HIGH,
         account_type=AccountType.APPLICATION,
@@ -72,7 +90,7 @@ class SRA_SECURITYHUB_12(SecurityHubCheck):
         Yields:
             One Finding per Region.
         """
-        checked_value = "AI Security Best Practices standard is enabled"
+        checked_value = "AI Security Best Practices standard is enabled and READY"
 
         if not self._clients:
             yield self.failed(
@@ -120,28 +138,19 @@ class SRA_SECURITYHUB_12(SecurityHubCheck):
 
             enabled_standards = standards_response.get('StandardsSubscriptions', [])
 
-            ai_standard_enabled = False
+            # Keep the whole subscription, not just a boolean: its StandardsStatus
+            # decides the verdict as much as its presence does.
+            ai_subscription = None
             standard_names = []
             for standard in enabled_standards:
                 standard_arn = standard.get('StandardsArn', '')
                 if standard_arn.endswith(AI_STANDARD_SUFFIX):
-                    ai_standard_enabled = True
+                    ai_subscription = standard
                 standard_names.append(self.standard_name_of(standard_arn))
 
             standards_list = ', '.join(sorted(standard_names)) if standard_names else "None"
 
-            if ai_standard_enabled:
-                yield self.passed(
-                    region=region,
-                    resource_id=f"securityhub:standards/{self.account_id}",
-                    checked_value=checked_value,
-                    actual_value=(
-                        f"Account {self.account_id} region {region} has the AI Security "
-                        f"Best Practices standard enabled. Enabled standards: "
-                        f"{standards_list}"
-                    ),
-                )
-            else:
+            if ai_subscription is None:
                 yield self.failed(
                     region=region,
                     resource_id=f"securityhub:standards/{self.account_id}",
@@ -159,3 +168,57 @@ class SRA_SECURITYHUB_12(SecurityHubCheck):
                         f"standards/ai-security-best-practices/v/1.0.0' --region {region}"
                     ),
                 )
+                continue
+
+            status = ai_subscription.get('StandardsStatus') or 'UNKNOWN'
+
+            if status == AI_STANDARD_READY:
+                yield self.passed(
+                    region=region,
+                    resource_id=f"securityhub:standards/{self.account_id}",
+                    checked_value=checked_value,
+                    actual_value=(
+                        f"Account {self.account_id} region {region} has the AI Security "
+                        f"Best Practices standard enabled and READY. Enabled standards: "
+                        f"{standards_list}"
+                    ),
+                )
+                continue
+
+            # AWS answered, and the answer is that the standard is subscribed but
+            # not evaluating, which is a FAIL rather than an inability to
+            # determine. The reason code is what makes it triageable -- an
+            # absent configuration recorder and an exceeded Config rule quota are
+            # different problems that both surface as FAILED.
+            reason_code = (
+                ai_subscription.get('StandardsStatusReason') or {}
+            ).get('StatusReasonCode')
+            reason = f", reason {reason_code}" if reason_code else ""
+
+            if status in TRANSIENT_STANDARD_STATUSES:
+                remediation = (
+                    f"The AI Security Best Practices subscription in {region} is "
+                    f"{status}; re-run the check once it settles, and if it does not "
+                    f"reach READY, re-enable the standard"
+                )
+            else:
+                remediation = (
+                    f"Investigate the AI Security Best Practices subscription in "
+                    f"{region} (status {status}{reason}), then re-enable the standard: "
+                    f"aws securityhub batch-enable-standards "
+                    f"--standards-subscription-requests "
+                    f"'StandardsArn=arn:aws:securityhub:{region}::"
+                    f"standards/ai-security-best-practices/v/1.0.0' --region {region}"
+                )
+
+            yield self.failed(
+                region=region,
+                resource_id=f"securityhub:standards/{self.account_id}",
+                checked_value=checked_value,
+                actual_value=(
+                    f"Account {self.account_id} region {region} has the AI Security "
+                    f"Best Practices standard subscribed but its status is {status}, "
+                    f"not READY{reason}, so the standard is not evaluating"
+                ),
+                remediation=remediation,
+            )

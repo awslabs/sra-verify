@@ -14,7 +14,16 @@ from sraverify.services.cloudtrail.base import CloudTrailCheck
 #: order, so the FAIL cell listing what is missing is deterministic and diffable.
 #:
 #: Note ``AWS::Bedrock::PromptVersion`` rather than ``AWS::Bedrock::Prompt`` --
-#: the table spells the prompt type with the version suffix.
+#: the table spells the prompt type with the version suffix. Likewise
+#: ``AWS::BedrockAgentCore::OAuth2CredentialProvider`` and not
+#: ``AWS::BedrockAgentCore::OAuth``: every one of these literals was put through
+#: ``cloudtrail:PutEventSelectors`` against a real organization trail, and that
+#: is the only one of the 32 the API refuses, with
+#: ``InvalidEventSelectorsException: The resources.type field value is not
+#: valid``. A value CloudTrail will not accept can never be selected, so leaving
+#: it here made the PASS branch unreachable and reported a fully covered trail as
+#: FAIL against a remediation AWS rejects. The accepted spelling parallels
+#: ``AWS::BedrockAgentCore::APIKeyCredentialProvider`` above it.
 AI_DATA_EVENT_RESOURCE_TYPES = (
     "AWS::Bedrock::AdvancedOptimizePromptJob",
     "AWS::Bedrock::AgentAlias",
@@ -42,7 +51,7 @@ AI_DATA_EVENT_RESOURCE_TYPES = (
     "AWS::BedrockAgentCore::Evaluator",
     "AWS::BedrockAgentCore::Gateway",
     "AWS::BedrockAgentCore::Memory",
-    "AWS::BedrockAgentCore::OAuth",
+    "AWS::BedrockAgentCore::OAuth2CredentialProvider",
     "AWS::BedrockAgentCore::Runtime",
     "AWS::BedrockAgentCore::RuntimeEndpoint",
     "AWS::BedrockAgentCore::TokenVault",
@@ -201,18 +210,27 @@ class SRA_CLOUDTRAIL_14(CloudTrailCheck):
 
             # Inside the per-trail loop, so one undetermined trail costs one row
             # rather than the whole check's output.
+            #
+            # region="global", matching the verdict rows below rather than
+            # `home_region`. An organization trail is one org-wide fact, so
+            # (Region, ResourceId) must not move when the same trail's row changes
+            # status: the first deployed run reported this trail as ERROR in
+            # us-east-1 for want of cloudtrail:GetEventSelectors and the next as
+            # FAIL in "global", which reads as two different rows. The Region the
+            # call was issued in is not lost -- the ERROR's ActualValue carries the
+            # operation, code and message verbatim.
             if "Error" in selectors_response:
                 error = selectors_response['Error']
                 if self.is_not_configured(error):
                     yield self.failed(
-                        region=home_region,
+                        region="global",
                         resource_id=trail_arn,
                         actual_value=f"Trail {trail_arn} does not exist",
                         checked_value=checked_value,
                     )
                 else:
                     yield self.error(
-                        region=home_region,
+                        region="global",
                         resource_id=trail_arn,
                         actual_value=(
                             f"{error['Operation']} failed: {error['Code']}: "

@@ -265,6 +265,25 @@ _CLOUDTRAIL = (
         success={"Account": _TEST_ACCOUNT},
     ),
     ClientAdapter(
+        method="get_event_selectors",
+        boto_service="cloudtrail",
+        boto_method="get_event_selectors",
+        operation="GetEventSelectors",
+        args=(f"arn:aws:cloudtrail:us-east-1:{_TEST_ACCOUNT}:trail/org-trail",),
+        success={
+            "TrailARN": f"arn:aws:cloudtrail:us-east-1:{_TEST_ACCOUNT}:trail/org-trail",
+            "AdvancedEventSelectors": [
+                {
+                    "Name": "Bedrock model data events",
+                    "FieldSelectors": [
+                        {"Field": "eventCategory", "Equals": ["Data"]},
+                        {"Field": "resources.type", "Equals": ["AWS::Bedrock::Model"]},
+                    ],
+                }
+            ],
+        },
+    ),
+    ClientAdapter(
         method="get_trail_status",
         boto_service="cloudtrail",
         boto_method="get_trail_status",
@@ -601,6 +620,28 @@ _ORGANIZATIONS = (
         paginated=True,
     ),
     ClientAdapter(
+        method="list_accounts",
+        boto_service="organizations",
+        boto_method="list_accounts",
+        operation="ListAccounts",
+        success=({"Accounts": [{"Id": _TEST_ACCOUNT, "Status": "ACTIVE"}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="describe_effective_policy",
+        boto_service="organizations",
+        boto_method="describe_effective_policy",
+        operation="DescribeEffectivePolicy",
+        args=("BEDROCK_POLICY", _TEST_ACCOUNT),
+        success={
+            "EffectivePolicy": {
+                "PolicyType": "BEDROCK_POLICY",
+                "TargetId": _TEST_ACCOUNT,
+                "PolicyContent": "{}",
+            }
+        },
+    ),
+    ClientAdapter(
         method="list_roots",
         boto_service="organizations",
         boto_method="list_roots",
@@ -668,11 +709,80 @@ _SECURITYHUB = (
         success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
     ),
     ClientAdapter(
+        method="describe_security_hub_v2",
+        boto_service="securityhub",
+        boto_method="describe_security_hub_v2",
+        operation="DescribeSecurityHubV2",
+        success={
+            "HubV2Arn": f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:hubv2/abc",
+            "SubscribedAt": "2026-01-26T17:55:47.684Z",
+        },
+    ),
+    ClientAdapter(
+        method="get_configuration_policy",
+        boto_service="securityhub",
+        boto_method="get_configuration_policy",
+        operation="GetConfigurationPolicy",
+        args=(
+            f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:configuration-policy/abc",
+        ),
+        success={
+            "Arn": (
+                f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:"
+                "configuration-policy/abc"
+            ),
+            "Name": "configuration-policy-01",
+            "ConfigurationPolicy": {
+                "SecurityHub": {
+                    "ServiceEnabled": True,
+                    "EnabledStandardIdentifiers": [
+                        "arn:aws:securityhub:us-east-1::standards/"
+                        "ai-security-best-practices/v/1.0.0"
+                    ],
+                }
+            },
+        },
+    ),
+    ClientAdapter(
+        method="list_configuration_policies",
+        boto_service="securityhub",
+        boto_method="list_configuration_policies",
+        operation="ListConfigurationPolicies",
+        success={
+            "ConfigurationPolicySummaries": [
+                {
+                    "Arn": (
+                        f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:"
+                        "configuration-policy/abc"
+                    ),
+                    "Name": "configuration-policy-01",
+                    "ServiceEnabled": True,
+                }
+            ]
+        },
+    ),
+    ClientAdapter(
         method="list_enabled_products_for_import",
         boto_service="securityhub",
         boto_method="list_enabled_products_for_import",
         operation="ListEnabledProductsForImport",
         success={"ProductSubscriptions": ["arn:aws:securityhub:us-east-1::product/aws/guardduty"]},
+    ),
+    ClientAdapter(
+        method="list_finding_aggregators",
+        boto_service="securityhub",
+        boto_method="list_finding_aggregators",
+        operation="ListFindingAggregators",
+        success={
+            "FindingAggregators": [
+                {
+                    "FindingAggregatorArn": (
+                        f"arn:aws:securityhub:us-west-2:{_TEST_ACCOUNT}:"
+                        "finding-aggregator/abc"
+                    )
+                }
+            ]
+        },
     ),
     ClientAdapter(
         method="list_members",

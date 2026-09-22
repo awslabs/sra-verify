@@ -80,6 +80,29 @@ class CloudTrailClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
+    def get_event_selectors(self, trail_arn: str) -> Mapping[str, Any]:
+        """
+        Get a trail's event selectors.
+
+        Args:
+            trail_arn: The trail ARN. Pass the full owner ARN, never a bare name:
+                a name resolves against the *calling* account, so an organization
+                trail owned by the management account answers
+                ``TrailNotFoundException`` when asked for by name from anywhere
+                else.
+
+        Returns:
+            The ``GetEventSelectors`` response on success, or the error result.
+
+            A trail carries either ``EventSelectors`` (basic) or
+            ``AdvancedEventSelectors``, never both, and the whole response is
+            returned so the caller can tell which.
+        """
+        try:
+            return self.client.get_event_selectors(TrailName=trail_arn)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
     def list_delegated_administrators(
         self, service_principal: str = "cloudtrail.amazonaws.com"
     ) -> Mapping[str, Any]:

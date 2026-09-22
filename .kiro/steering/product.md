@@ -10,7 +10,8 @@ The SRA is a document, not a control. SRA Verify turns its recommendations into 
 
 - **Read-only.** Checks call `Describe*` / `Get*` / `List*` APIs only. They never remediate, never mutate. Remediation is emitted as text in the finding, not performed.
 - **Assessment, not enforcement.** Output is a report. There is no blocking, no policy deployment.
-- Currently **158 checks across 18 AWS services** (guardduty 25, securitylake 17, shield 14, cloudtrail 13, inspector 11, securityhub 11, firewallmanager 10, macie 10, config 9, organizations 9, waf 9, securityincidentresponse 5, accessanalyzer 4, s3 4, account 3, auditmanager 2, ec2 1, iam 1).
+- Currently **167 checks across 18 AWS services** (guardduty 26, securitylake 17, cloudtrail 14, securityhub 14, shield 14, organizations 12, inspector 11, config 10, firewallmanager 10, macie 10, waf 9, securityincidentresponse 5, accessanalyzer 4, s3 4, account 3, auditmanager 2, ec2 1, iam 1).
+- Nine of those are **AI-coverage checks** added together, and they are the only ones that mostly run ahead of the published SRA prose rather than behind it: `SRA-ORGANIZATIONS-10/11/12` (Amazon Bedrock policy type enabled on the root, a customer-managed Bedrock policy exists, and the *effective* policy names a Guardrail per account), `SRA-GUARDDUTY-26` (AI Protection auto-enabled for all accounts), `SRA-SECURITYHUB-12/13/14` (the AI Security Best Practices standard enabled per Region, enabled by the central configuration policy, and Security Hub V2 enabled at all), `SRA-CONFIG-10` (the recorder records the 13 AI/ML resource types the standard evaluates) and `SRA-CLOUDTRAIL-14` (the organization trail selects the 32 Bedrock and AgentCore data-event resource types). Only the CloudTrail one is asked for by the published AI security guidance; the rest cover controls AWS shipped after it was written.
 
 ## Users
 

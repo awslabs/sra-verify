@@ -114,6 +114,52 @@ class OrganizationsClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
+    def list_accounts(self) -> Mapping[str, Any]:
+        """
+        List every account in the organization.
+
+        Returns:
+            ``{"Accounts": [...]}`` with every page merged, on success, or the
+            error result.
+
+            The whole paginator loop sits inside the ``try`` deliberately: a
+            failure on page three has to arrive as an error result, because a
+            short list is indistinguishable from a smaller organization.
+        """
+        try:
+            accounts = []
+            for page in self.client.get_paginator('list_accounts').paginate():
+                accounts.extend(page.get('Accounts', []))
+            return {"Accounts": accounts}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def describe_effective_policy(
+        self, policy_type: str, target_id: str
+    ) -> Mapping[str, Any]:
+        """
+        Describe the effective management policy for a target.
+
+        Args:
+            policy_type: A management policy type, e.g. ``"BEDROCK_POLICY"``.
+            target_id: An account ID. A root or OU is **not** supported and
+                answers ``InvalidInputException`` (verified 2026-09-16), so
+                callers must iterate accounts.
+
+        Returns:
+            ``{"EffectivePolicy": {...}}`` on success, or the error result.
+
+            ``EffectivePolicyNotFoundException`` means no policy of that type
+            reaches the target, which is a real answer and is declared in
+            ``OrganizationsCheck.NOT_CONFIGURED_ERRORS``.
+        """
+        try:
+            return self.client.describe_effective_policy(
+                PolicyType=policy_type, TargetId=target_id
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
     def list_accounts_for_parent(self, parent_id: str) -> Mapping[str, Any]:
         """
         List the accounts directly under a parent.

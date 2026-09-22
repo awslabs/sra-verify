@@ -206,6 +206,16 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             ),
         ),
         A(
+            "get_event_selectors",
+            "accessor",
+            args=(_TEST_REGION, "arn:aws:cloudtrail:us-east-1:111122223333:trail/t"),
+            client_method="get_event_selectors",
+            cache_key=(
+                "event_selectors:arn:aws:cloudtrail:us-east-1:111122223333:trail/t:"
+                f"{_TEST_REGION}"
+            ),
+        ),
+        A(
             "get_delegated_administrators",
             "accessor",
             client_method="list_delegated_administrators",
@@ -512,6 +522,27 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             client_method="list_accounts_for_parent",
             cache_key="accounts:ou-abc-123",
         ),
+        A(
+            "get_accounts",
+            "accessor",
+            client_method="list_accounts",
+            cache_key="all_accounts",
+        ),
+        A(
+            "get_effective_policy",
+            "accessor",
+            args=("BEDROCK_POLICY", _TEST_ACCOUNT),
+            client_method="describe_effective_policy",
+            cache_key=f"effective_policy:BEDROCK_POLICY:{_TEST_ACCOUNT}",
+        ),
+        # A pure parser over EffectivePolicy.PolicyContent, which is a JSON
+        # string. It lives on the base so that no `except` clause appears inside
+        # a check's execute().
+        A(
+            "guardrail_identifiers_of",
+            "helper",
+            args=({"EffectivePolicy": {"PolicyContent": "{}"}},),
+        ),
     ),
     "s3": (
         A("get_client", "client_lookup", args=(_TEST_REGION,)),
@@ -579,6 +610,63 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             args=(_TEST_REGION,),
             client_method="list_members",
             cache_key=f"securityhub_members:{_TEST_REGION}",
+        ),
+        A(
+            "get_security_hub_v2",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="describe_security_hub_v2",
+            cache_key=f"security_hub_v2:{_TEST_REGION}",
+        ),
+        A(
+            "get_finding_aggregators",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_finding_aggregators",
+            cache_key=f"finding_aggregators:{_TEST_REGION}",
+        ),
+        A(
+            "get_configuration_policies",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_configuration_policies",
+            cache_key=f"configuration_policies:{_TEST_REGION}",
+        ),
+        A(
+            "get_configuration_policy",
+            "accessor",
+            args=(_TEST_REGION, "policy-abc"),
+            client_method="get_configuration_policy",
+            cache_key=f"configuration_policy:{_TEST_REGION}:policy-abc",
+        ),
+        # A pure parser over a ListFindingAggregators response. The home Region is
+        # the ARN's Region segment, not a field, so this parse is what avoids a
+        # second GetFindingAggregator call.
+        # A pure string reduction over a standards ARN. On the base because two
+        # checks need it and the separator trap is worth stating once.
+        A(
+            "standard_name_of",
+            "helper",
+            args=(
+                "arn:aws:securityhub:us-west-2::standards/"
+                "ai-security-best-practices/v/1.0.0",
+            ),
+        ),
+        A(
+            "home_region_of",
+            "helper",
+            args=(
+                {
+                    "FindingAggregators": [
+                        {
+                            "FindingAggregatorArn": (
+                                "arn:aws:securityhub:us-west-2:111122223333:"
+                                "finding-aggregator/abc"
+                            )
+                        }
+                    ]
+                },
+            ),
         ),
         # Writes into the SHARED "organizations" namespace, and builds its own
         # error result in its own except clause and caches it -- one of the two

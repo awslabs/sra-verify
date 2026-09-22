@@ -133,7 +133,7 @@ The chain:
 
 - `services/<svc>/__init__.py` is one call: `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is one call: `import_service_packages(__name__)`.
-- `import sraverify.services` therefore registers all 158 checks. `main.py` carries that import with a `# noqa: F401` — it looks removable and is not; drop it and every scan selects nothing.
+- `import sraverify.services` therefore registers all 167 checks. `main.py` carries that import with a `# noqa: F401` — it looks removable and is not; drop it and every scan selects nothing.
 - Importing a check module executes its class body, which fires `SecurityCheck.__init_subclass__`, which cross-checks identity and calls `register()`.
 
 Only modules whose file name starts with `sra_` are discovered (`CHECK_MODULE_PREFIX` in `core/discovery.py`). Subpackages are skipped. Re-importing is a no-op via `sys.modules`, and `register()` is idempotent for the same class object; a *different* class claiming a live ID raises `DuplicateCheckIdError`.
@@ -144,7 +144,7 @@ The registry is read through `all_checks()` only, which returns a `MappingProxyT
 
 **The module file stem is the authority.** `__init_subclass__` derives the expected check ID from it and compares three other expressions of identity against that. Every rule below raises `CheckIdentityError`:
 
-1. **Stem format** — must fullmatch `sra_([a-z][a-z0-9]*)_(0[1-9]|[1-9][0-9])`. Deliberately tighter than `sra_([a-z0-9]+)_(\d{2})`, which would admit `sra_12_01` and `sra_guardduty_00`. The `01`–`99` range caps one service at 99 checks; the largest today is GuardDuty at 25.
+1. **Stem format** — must fullmatch `sra_([a-z][a-z0-9]*)_(0[1-9]|[1-9][0-9])`. Deliberately tighter than `sra_([a-z0-9]+)_(\d{2})`, which would admit `sra_12_01` and `sra_guardduty_00`. The `01`–`99` range caps one service at 99 checks; the largest today is GuardDuty at 26.
 2. **`meta` is declared in the class's own body** — read via `vars(cls)`, never `getattr`. Inheritance would let a class register under an ID it does not own. A check that forgot `meta` raises rather than silently inheriting one.
 3. **`meta.check_id` matches the derived ID** — still load-bearing with inline metadata, because nothing else catches `check_id="SRA-GUARDDUTY-02"` inside `sra_guardduty_01.py`.
 4. **Class name matches** — `expected_id.replace("-", "_")`. Applies to *every* `SecurityCheck` subclass created inside a `sra_*` module, so a second or intermediate subclass declared there fails rather than registering.
@@ -348,7 +348,17 @@ from sraverify.core.logging import logger
 ```
 
 `logger.debug(f"ServiceName: <message>")` in base classes, `logger.warning` for a
-missing client, `logger.error` for an API failure.
+missing client, and **`logger.debug` — not `logger.error` — for a failed AWS
+call.** (An earlier revision of this line said `error`, contradicting the "Never
+raise the level" paragraph below it and the reasoning in `tech.md`. `debug` is
+correct: this tier cannot know whether the failure is semantic.)
+
+**The default level is `ERROR`, so a scan without `--debug` writes nothing to
+stderr.** The package makes no `logger.info` calls, so relative to the old `INFO`
+default this suppresses only `WARNING` — and every condition a warning describes
+already reaches the report as a row. Write the call sites at their honest level
+anyway; `--debug` is what makes them visible, and raising a level to be seen by
+default breaks the `logger.error`-means-an-ERROR-row correspondence.
 
 This is a contract, not a convention, and it is asserted:
 `tests/property/test_stdout_contract_property.py` holds that nothing in the package
@@ -432,7 +442,7 @@ classified differently by two operations where they warrant it —
 bare message. It is what lets a reader tell a permission gap from an unreachable
 endpoint without opening the build log, and
 `test_every_error_row_names_the_failed_operation_and_code` asserts the shape over
-all 158 checks.
+all 167 checks.
 
 **The ERROR remediation is `self._remediation_for(error)`.** An ERROR row reports
 that the control could not be evaluated, so its remediation concerns fixing the

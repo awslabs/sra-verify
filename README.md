@@ -156,12 +156,7 @@ In this step you will clone the Github repository and run the tool.
     python -m venv .venv
     source .venv/bin/activate  # On Windows use: venv\Scripts\activate
     ```
-3. Install development dependencies:
-    ```bash
-    pip install -r sraverify/requirements.txt
-    ```
-
-4. Install sraverify
+3. Install sraverify (dependencies are declared in `sraverify/pyproject.toml` and installed with it)
    1. Install
 
         ```bash
@@ -180,7 +175,7 @@ In this step you will clone the Github repository and run the tool.
         cd sraverify && uv sync && uv run pytest -q
         ```
 
-5. Run sraverify
+4. Run sraverify
 
     ```bash
     usage: sraverify [-h] [--profile PROFILE] [--role ROLE] [--regions REGIONS]
@@ -225,7 +220,7 @@ In this step you will clone the Github repository and run the tool.
                             boto3 max_pool_connections (default: 50)
     ```
 
-6. Review these detailed examples
+5. Review these detailed examples
    - Run specific service checks. `--service` is case-insensitive but matches the service
      name in full, so `--service Security` matches nothing:
    ```bash

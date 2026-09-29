@@ -2,7 +2,7 @@
 
 ## Stack
 
-- **Python** — `requires-python = ">=3.11"` in `pyproject.toml`. The floor is load-bearing, not cosmetic: the code uses `StrEnum` (3.11+), `@dataclass(slots=True)`, and `X | None` annotations. The CodeBuild image runs 3.11; the `uv sync` venv at `sra-verify/sraverify/.venv` is 3.14.7. (An older hand-built venv at `sra-verify/.venv` holds a stale `sraverify 0.2.0` and no setuptools — don't build or test from it.)
+- **Python** — `requires-python = ">=3.11"` in `pyproject.toml`. The floor is load-bearing, not cosmetic: the code uses `StrEnum` (3.11+), `@dataclass(slots=True)`, and `X | None` annotations. The CodeBuild image runs 3.11; the `uv sync` venv at `sra-verify/sraverify/.venv` is 3.14.7.
 - **boto3 / botocore** — the only AWS access path. Every AWS call goes through `ScanContext.get_client()`, never `boto3.client()` directly.
 - **colorama** — used by `utils/banner.py` and `utils/progress.py` for terminal output.
 - **pytest + hypothesis + pyyaml** — the `dev` dependency group (what `uv sync` installs), and repeated as the `dev` and `test` extras so `pip install sraverify[test]` still works. PyYAML is needed only by `util/generate_iam_policy.py` and `tests/unit/util/test_generate_iam_policy.py`; it is not a runtime dependency. It was undeclared until the uv migration — the old venv happened to have it.
@@ -15,18 +15,17 @@ Packaging is **`sra-verify/sraverify/pyproject.toml` with hatchling**, and **uv*
 sraverify = "sraverify.main:main"
 ```
 
-The build is scoped explicitly: the wheel ships `packages = ["sraverify"]`, the sdist ships only the package plus `README.md`, `LICENSE`, `NOTICE` and `requirements.txt`, and `**/.hypothesis`, `**/.pytest_cache` and `**/__pycache__` are excluded — test runs leave hypothesis databases inside `sraverify/tests/property/`. The wheel's file list is identical to the old setuptools build apart from setuptools' `top_level.txt`.
+The build is scoped explicitly: the wheel ships `packages = ["sraverify"]`, the sdist ships only the package plus `README.md`, `LICENSE` and `NOTICE`, and `**/.hypothesis`, `**/.pytest_cache` and `**/__pycache__` are excluded — test runs leave hypothesis databases inside `sraverify/tests/property/`. The wheel's file list is identical to the old setuptools build apart from setuptools' `top_level.txt`.
 
-`uv.lock` is for reproducible development only. Consumers installing the package still resolve the ranges in `[project].dependencies`, which is correct for a library. `requirements.txt` is kept for the README's pip instructions and must track `dependencies` by hand.
+`uv.lock` is for reproducible development only. Consumers installing the package still resolve the ranges in `[project].dependencies`, which is correct for a library. There is no `requirements.txt`: every install path (pip, `uv sync`, the CodeBuild buildspec) reads `[project].dependencies`, so `pyproject.toml` is the only dependency declaration. If a pinned requirements file is ever needed, generate it with `uv export --format requirements-txt` rather than committing a second hand-maintained copy.
 
 There is no Makefile, no tox/nox, and no CI workflow. pytest is configured in `[tool.pytest.ini_options]` (`testpaths`, `pythonpath = ["."]`). `ruff` and `pyright` are **not** adopted here, deliberately: `sra-verify-mcp` formats with single quotes, so `ruff format` would rewrite nearly every file and belongs in a change of its own.
 
 ### Known inconsistencies (do not "fix" without asking)
 
 - `sra-verify-mcp/pyproject.toml` declares `requires-python = ">=3.10"`, which cannot satisfy the scanner's 3.11 floor. The MCP repo's declared floor and its dependency are in conflict.
-- ~~`requirements.txt` pins `boto3>=1.40.5`; `setup.py` says `boto3>=1.26.0`.~~ **Fixed.** `requirements.txt` and `pyproject.toml` both pin `boto3>=1.43.96`, and the floor is load-bearing rather than cosmetic: the AI-coverage checks call `securityhub:DescribeSecurityHubV2`, `securityhub:ListConfigurationPolicies`, `securityhub:GetConfigurationPolicy` and `organizations:DescribeEffectivePolicy` with `BEDROCK_POLICY`. A missing *operation* on an older botocore raises `AttributeError`, which is outside `AWS_EXCEPTIONS`, escapes the client, and reaches the orchestrator as a synthetic ERROR row — the metric whose expected value is zero. A missing enum *value* would have been free; an operation is not.
+- ~~`requirements.txt` pins `boto3>=1.40.5`; `setup.py` says `boto3>=1.26.0`.~~ **Fixed**, and now moot: `requirements.txt` and `setup.py` are both gone, and `pyproject.toml` alone pins `boto3>=1.43.96`. The floor is load-bearing rather than cosmetic: the AI-coverage checks call `securityhub:DescribeSecurityHubV2`, `securityhub:ListConfigurationPolicies`, `securityhub:GetConfigurationPolicy` and `organizations:DescribeEffectivePolicy` with `BEDROCK_POLICY`. A missing *operation* on an older botocore raises `AttributeError`, which is outside `AWS_EXCEPTIONS`, escapes the client, and reaches the orchestrator as a synthetic ERROR row — the metric whose expected value is zero. A missing enum *value* would have been free; an operation is not.
 - **Several client methods read the first page only, and the deferral is deliberate.** `ShieldClient.list_protections` is the clearest case: `shield` publishes a `list_protections` paginator, and the method does not use it. Most of `WAFClient`'s enumeration calls are the same shape, and `wafv2:ListWebACLs` has no botocore paginator at all — it takes a `NextMarker`/`Limit` pair that would have to be looped by hand. Fixing any of them changes *which resources* the per-resource fan-out covers, and a row-count change cannot be separated from a verdict change when reviewing two scans of the same organization, so all of them were held back rather than folded into the client-error-contract work. Where a call *does* paginate, the whole paginator loop belongs inside the `try`: a failure on page three has to arrive as an error result, because a short list is indistinguishable from a smaller organization.
-- `build/`, `dist/`, and `*.egg-info/` are present in the working tree as stale setuptools artifacts. They are gitignored and untracked, so they are local debris rather than committed content — but they shadow a fresh build if you read from them. Hatchling does not produce them, so they can be deleted.
 
 The version is single-sourced: `__version__` in `sraverify/__init__.py` is the only place to edit. `[tool.hatch.version] path = "sraverify/__init__.py"` reads that line **as text** rather than importing the package, because importing `sraverify` pulls in `main.py` and boto3, which are not installed in the isolated build environment. Keep it a plain string-literal assignment. (The two copies it replaced had drifted once, `0.1.4` vs `0.1.0`.) `sra-verify-mcp/pyproject.toml` pins `sraverify>=0.1.4` and is a separate copy, in the other repo.
 
@@ -42,7 +41,7 @@ All commands below assume you are at the workspace root. The pip project root is
 cd sra-verify/sraverify && uv sync             # creates .venv here: editable sraverify + the dev group, from uv.lock
 ```
 
-`uv sync` warns and ignores an activated `VIRTUAL_ENV` that points elsewhere (for example the old `sra-verify/.venv`); `deactivate` first to silence it. After adding or changing a dependency in `pyproject.toml`, run `uv lock` and commit `uv.lock` with it.
+`uv sync` warns and ignores an activated `VIRTUAL_ENV` that points elsewhere; `deactivate` first to silence it. After adding or changing a dependency in `pyproject.toml`, run `uv lock` and commit `uv.lock` with it.
 
 Plain pip still works and is what the CodeBuild buildspec does (`pip install ./sra-verify/sraverify`, which fetches hatchling for an isolated build):
 

@@ -74,7 +74,6 @@ include = [
     "README.md",
     "LICENSE",
     "NOTICE",
-    "requirements.txt",
 ]
 
 [tool.pytest.ini_options]

@@ -18,8 +18,8 @@ sra-verify/
 ├── 2-sraverify-codebuild-deploy.yaml   # CodeBuild project + findings bucket
 ├── docs/checks.txt                     # verbatim `sraverify --list-checks` output
 ├── util/generate_iam_policy.py         # derives the least-privilege member policy
-└── sraverify/                          # pip project root (setup.py lives here)
-    ├── setup.py, requirements.txt
+└── sraverify/                          # project root (pyproject.toml lives here)
+    ├── pyproject.toml, uv.lock
     └── sraverify/                      # the Python package
         ├── main.py                     # SRAVerify class, _select, CLI, exit codes
         ├── core/
@@ -46,7 +46,7 @@ sra-verify/
             └── property/               # hypothesis modules + strategies.py
 ```
 
-Note the doubled directory name: the pip project root is `sra-verify/sraverify/` and the
+Note the doubled directory name: the project root is `sra-verify/sraverify/` and the
 package itself is `sra-verify/sraverify/sraverify/`.
 
 ## Architecture
@@ -849,7 +849,8 @@ before `is_not_configured` runs.
 ### Installation
 
 ```bash
-pip install -e ./sraverify        # from the repo root, for development
+cd sraverify && uv sync           # from the repo root, for development (uses uv.lock)
+pip install -e './sraverify[dev]' # or with pip
 ```
 
 ### Public surface
@@ -947,16 +948,11 @@ clean scan that found nothing. The CLI turns both into exit 2.
 The suite lives at `sraverify/tests/` and collects **8265 tests**. None of them needs AWS
 credentials or issues an AWS call.
 
-From the pip project root:
+From the project root. `[tool.pytest.ini_options]` in `pyproject.toml` sets `testpaths`
+and `pythonpath`, so no `PYTHONPATH` is needed:
 
 ```bash
-cd sraverify && pytest -q
-```
-
-From the workspace root, point `PYTHONPATH` at the pip project root:
-
-```bash
-PYTHONPATH=sraverify python -m pytest sraverify/sraverify/tests/ -q
+cd sraverify && uv run pytest -q
 ```
 
 - `tests/unit/core/` — registration, enums, `Finding`, `CheckMeta`, registry, selection,
@@ -969,14 +965,14 @@ PYTHONPATH=sraverify python -m pytest sraverify/sraverify/tests/ -q
 The client-error-contract modules are the largest block, and between them they hold the whole
 contract:
 
-| Module | What it holds |
-| --- | --- |
-| `test_client_contract_property.py` | All 92 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition |
-| `test_accessor_cache_property.py` | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key |
-| `test_check_classification_property.py` | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call |
-| `test_discriminator_property.py` | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared |
-| `test_no_confessing_fail_property.py` | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access |
-| `test_stdout_contract_property.py` | Nothing in the package writes to stdout |
+| Module                                  | What it holds                                                                                                                                                                                                                                        |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_client_contract_property.py`      | All 92 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition |
+| `test_accessor_cache_property.py`       | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                      |
+| `test_check_classification_property.py` | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                            |
+| `test_discriminator_property.py`        | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared                                                                                                                                 |
+| `test_no_confessing_fail_property.py`   | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                               |
+| `test_stdout_contract_property.py`      | Nothing in the package writes to stdout                                                                                                                                                                                                              |
 
 Two of these carry **prescriptive** adapter tables — the `ClientAdapter` tables name the
 boto3 method, operation and success shape each client method is contracted to produce, and

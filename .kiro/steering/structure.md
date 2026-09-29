@@ -43,7 +43,7 @@ sra-verify/
 ├── util/generate_iam_policy.py         # derives the least-privilege member policy
 ├── sratester/                          # gitignored: test-org accounts.md (see below)
 └── sraverify/                          # project root (pyproject.toml lives here)
-    ├── pyproject.toml, uv.lock, requirements.txt
+    ├── pyproject.toml, uv.lock
     └── sraverify/                      # the Python package
         ├── main.py                     # SRAVerify class, _select, CLI, exit codes
         ├── core/
@@ -648,7 +648,7 @@ pytest config file.
   which no longer exists on any check.
 - The version lives only in `sraverify/__init__.py` (`__version__`).
   `pyproject.toml` reads it via `[tool.hatch.version]`; see `tech.md`.
-- `requirements.txt` and `pyproject.toml` agree on `boto3>=1.43.96`; see `tech.md`
+- `pyproject.toml` is the only dependency declaration and pins `boto3>=1.43.96`; see `tech.md`
   for why that floor is load-bearing rather than cosmetic.
 - **`sra_securityhub_01` reduces a standards ARN by splitting on `"/standards/"`,
   which never matches.** A standards ARN reads
@@ -660,7 +660,8 @@ pytest config file.
   correcting it rewrites the `ActualValue` cell on rows a consumer may already be
   diffing, which is exactly the class of change the Region-labelling deferrals
   above are held back for.
-- `build/`, `dist/`, and `*.egg-info/` are checked into the working tree.
+- `uv build` writes to `sraverify/dist/`, which is gitignored. The old setuptools
+  `build/` and `*.egg-info/` directories are no longer produced.
 
 For the current check-authoring anti-pattern list, see
 `creating_checks_best_practices.md`.

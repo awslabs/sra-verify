@@ -38,7 +38,9 @@ See sraverify/README.md for the check-authoring contract and the full library
 surface.
 """
 
-__version__ = "0.2.5"
+# The single source of the package version. pyproject.toml's [tool.hatch.version]
+# reads this line as text, so keep it a plain string literal assignment.
+__version__ = "0.2.6"
 
 from sraverify.main import SRAVerify
 

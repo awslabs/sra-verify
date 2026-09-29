@@ -3,6 +3,7 @@ SRA-INSPECTOR-07: All Active Member Accounts Have Inspector Enabled.
 """
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -84,7 +85,7 @@ class SRA_INSPECTOR_07(InspectorCheck):
             # Create a set of all active organization account IDs
             org_account_ids = set()
             for account in org_accounts:
-                if account.get('Status') == 'ACTIVE':
+                if is_active_account(account):
                     org_account_ids.add(account.get('Id'))
 
             # Get delegated admin account

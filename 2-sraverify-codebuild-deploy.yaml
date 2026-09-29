@@ -191,7 +191,7 @@ Resources:
                   echo "Running in AWS region: $AWS_DEFAULT_REGION"
 
                   # Get list of all accounts using management role
-                  account_list=$(aws organizations list-accounts --query 'Accounts[?State==`ACTIVE` || Status==`ACTIVE`].Id' --output text)
+                  account_list=$(aws organizations list-accounts --query 'Accounts[?State==`ACTIVE` || (State==null && Status==`ACTIVE`)].Id' --output text)
                   echo "Found accounts: $account_list"
                   export account_list
 

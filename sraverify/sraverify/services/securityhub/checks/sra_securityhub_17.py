@@ -3,6 +3,7 @@ SRA-SECURITYHUB-17: The effective Security Hub policy enables every scanned Regi
 """
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -24,7 +25,7 @@ class SRA_SECURITYHUB_17(SecurityHubCheck):
             "account. One row is produced per active account."
         ),
         check_logic=(
-            "Call organizations:ListAccounts, keep Status ACTIVE, then DescribeEffectivePolicy "
+            "Call organizations:ListAccounts, keep State ACTIVE, then DescribeEffectivePolicy "
             "with PolicyType SECURITYHUB_POLICY per account. Passes if every scanned Region is "
             "enabled (named or ALL_SUPPORTED) and not disabled (named or ALL_SUPPORTED). Fails "
             "on EffectivePolicyNotFoundException or any uncovered Region, naming them."
@@ -89,7 +90,7 @@ class SRA_SECURITYHUB_17(SecurityHubCheck):
             (
                 account
                 for account in accounts_response.get("Accounts", [])
-                if account.get("Status") == "ACTIVE" and account.get("Id")
+                if is_active_account(account) and account.get("Id")
             ),
             key=lambda account: account["Id"],
         )

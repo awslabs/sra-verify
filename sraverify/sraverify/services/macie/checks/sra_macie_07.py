@@ -3,6 +3,7 @@ SRA-MACIE-07: All active member accounts have relationship with delegated admin 
 """
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -114,7 +115,7 @@ class SRA_MACIE_07(MacieCheck):
             # Filter active organization members
             active_org_members = [
                 member for member in org_members
-                if member.get('Status') == 'ACTIVE'
+                if is_active_account(member)
             ]
 
             # Create sets of account IDs for comparison

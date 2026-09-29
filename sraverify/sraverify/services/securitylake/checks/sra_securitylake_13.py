@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
@@ -102,7 +103,7 @@ class SRA_SECURITYLAKE_13(SecurityLakeCheck):
                 semantic = self.is_not_configured(error)
                 active_ids = sorted(
                     a.get('Id') for a in org_accounts
-                    if a.get('Status') == 'ACTIVE' and a.get('Id')
+                    if is_active_account(a) and a.get('Id')
                 )
                 for account_id in active_ids:
                     resource_id = (
@@ -139,7 +140,7 @@ class SRA_SECURITYLAKE_13(SecurityLakeCheck):
             # Create sets of active account IDs
             active_org_account_ids = set()
             for account in org_accounts:
-                if account.get('Status') == 'ACTIVE':
+                if is_active_account(account):
                     active_org_account_ids.add(account.get('Id'))
 
             # Check each account in the organization

@@ -3,6 +3,7 @@ Check if the effective Amazon Bedrock policy names a Guardrail for every account
 """
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -28,7 +29,7 @@ class SRA_ORGANIZATIONS_12(OrganizationsCheck):
             "account."
         ),
         check_logic=(
-            "Call organizations:ListAccounts, keep accounts with Status ACTIVE, then call "
+            "Call organizations:ListAccounts, keep accounts with State ACTIVE, then call "
             "organizations:DescribeEffectivePolicy with PolicyType BEDROCK_POLICY per account. "
             "Parse EffectivePolicy.PolicyContent and collect every "
             "bedrock.guardrail_inference.<region>.<config>.identifier. Passes if at least one "
@@ -118,11 +119,11 @@ class SRA_ORGANIZATIONS_12(OrganizationsCheck):
             )
             return
 
-        # Organizations retired the account Status field in favour of State but
-        # was still returning both as of 2026-09-16, so accept either.
+        # State is authoritative; is_active_account falls back to the retiring
+        # Status field only when State is absent.
         active_accounts = [
             account for account in org_accounts
-            if account.get("State") == "ACTIVE" or account.get("Status") == "ACTIVE"
+            if is_active_account(account)
         ]
 
         if not active_accounts:

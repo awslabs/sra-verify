@@ -15,6 +15,7 @@ one implementation, :meth:`_cached_call`.
 ``OrganizationsCheck.get_organization`` uses, so either service populates it for
 the other and one scan issues ``DescribeOrganization`` once.
 """
+import json
 from typing import Any, ClassVar, Mapping, Optional
 
 from sraverify.core.aws_client import AWS_EXCEPTIONS
@@ -28,6 +29,14 @@ from sraverify.core.aws_errors import (
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
 from sraverify.services.securityhub.client import SecurityHubClient
+
+#: The EventBridge ``detail-type`` of a Security Hub (V2) finding event. Security
+#: Hub CSPM uses ``Security Hub Findings - Imported`` instead.
+#: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-v2-cwe-event-types.html
+V2_FINDINGS_DETAIL_TYPE = "Findings Imported V2"
+
+#: The Organizations policy type that enables Security Hub (V2) org-wide.
+SECURITYHUB_POLICY_TYPE = "SECURITYHUB_POLICY"
 
 #: Evidence for the overloaded ``InvalidAccessException``.
 _NOT_SUBSCRIBED_EVIDENCE = (
@@ -55,12 +64,20 @@ class SecurityHubCheck(SecurityCheck):
     #: ``InvalidAccessException`` is overloaded. Without the needle this table
     #: would turn every Security Hub permission denial into a fabricated FAIL.
     #:
-    #: The two Organizations operations this service also calls --
-    #: ``ListDelegatedAdministrators`` and ``ListAccounts`` -- are deliberately
-    #: absent. Their errors are Organizations errors: an
+    #: Of the Organizations operations this service also calls,
+    #: ``ListDelegatedAdministrators``, ``ListAccounts``, ``ListRoots``,
+    #: ``ListPoliciesForTarget`` and ``DescribePolicy`` are deliberately absent.
+    #: Their errors are Organizations errors: an
     #: ``AWSOrganizationsNotInUseException`` there means no organization exists,
     #: which is a different fact from Security Hub not being subscribed, and a
-    #: table keyed only by code could not have told them apart.
+    #: table keyed only by code could not have told them apart. The one
+    #: Organizations entry, ``DescribeEffectivePolicy``, is keyed by its own
+    #: operation and states "no Security Hub policy reaches this account", which
+    #: is exactly what SRA-SECURITYHUB-17 asks.
+    #:
+    #: The V2 operations are needle-guarded like the rest: ``ConflictException``
+    #: means "V2 is not enabled" from ``ListAggregatorsV2`` but "wrong Region" from
+    #: ``GetAggregatorV2``, and only the first is declared.
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
         "GetEnabledStandards": {
             "InvalidAccessException": NotConfigured(
@@ -135,6 +152,38 @@ class SecurityHubCheck(SecurityCheck):
                     "API_DescribeSecurityHubV2.html"
                 ),
                 message="not subscribed to hubv2",
+            ),
+        },
+        "ListAggregatorsV2": {
+            "ConflictException": NotConfigured(
+                evidence=(
+                    "Observed 2026-09-25 from management account 195249513278, "
+                    "which has Security Hub V2 disabled, in us-east-1 and "
+                    "eu-central-1 as 'aws_call_failed operation=ListAggregatorsV2 "
+                    "code=ConflictException message=\"Security Hub V2 is not "
+                    "enabled for 195249513278\"' -- the account has no V2 hub, so "
+                    "it can hold no aggregator and the control is absent. The "
+                    "needle is required: GetAggregatorV2 returns the same code for "
+                    "'The current Region ... does not match the aggregation "
+                    "Region', which is a fact about where we asked. "
+                    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_ListAggregatorsV2.html"
+                ),
+                message="security hub v2 is not enabled",
+            ),
+        },
+        "DescribeEffectivePolicy": {
+            "EffectivePolicyNotFoundException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
+                    "API_DescribeEffectivePolicy.html -- returned when no policy of "
+                    "the requested type is in effect for the target, so no Security "
+                    "Hub policy reaches the account. Observed 2026-09-16 in "
+                    "organization o-svvpsun36e for BEDROCK_POLICY and declared on "
+                    "OrganizationsCheck for the same operation. InvalidInputException "
+                    "(a root or OU target) is deliberately not declared: that is a "
+                    "defect in the caller."
+                ),
             ),
         },
         "ListConfigurationPolicies": {
@@ -357,6 +406,414 @@ class SecurityHubCheck(SecurityCheck):
             if len(parts) > 3 and parts[3]:
                 return parts[3]
         return None
+
+    # ------------------------------------------------------------------ #
+    # Unified Security Hub (V2) organization surface
+    # ------------------------------------------------------------------ #
+
+    def get_organization_admin_accounts_v2(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Security Hub (V2) delegated administrator, with caching.
+
+        Args:
+            region: AWS region name. The answer is organization-wide; the Region
+                only chooses the endpoint.
+
+        Returns:
+            ``{"AdminAccounts": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"organization_admin_accounts_v2:{region}",
+            "list_organization_admin_accounts_v2",
+        )
+
+    def get_aggregators_v2(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Security Hub (V2) aggregators visible from a Region, with caching.
+
+        Args:
+            region: AWS region name. Any V2-enabled Region answers.
+
+        Returns:
+            ``{"AggregatorsV2": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(
+            region, f"aggregators_v2:{region}", "list_aggregators_v2"
+        )
+
+    def get_aggregator_v2(self, region: str, aggregator_arn: str) -> Mapping[str, Any]:
+        """
+        Get one Security Hub (V2) aggregator, with caching.
+
+        Args:
+            region: AWS region name. Must be the aggregation Region.
+            aggregator_arn: The ``AggregatorV2Arn``.
+
+        Returns:
+            The ``GetAggregatorV2`` response, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"aggregator_v2:{region}:{aggregator_arn}",
+            "get_aggregator_v2",
+            aggregator_arn,
+        )
+
+    #: ``GetFindingsV2`` filter selecting Security Hub coverage findings.
+    #: ``metadata.product.name`` is ``Security Hub Coverage`` on every coverage
+    #: finding (observed 2026-09-25; 612 of them in the Code org, one per
+    #: account, Region and capability, each ``compliance.status`` Pass or Fail).
+    COVERAGE_FINDINGS_FILTER: ClassVar[Mapping[str, Any]] = {
+        "CompositeFilters": [
+            {
+                "StringFilters": [
+                    {
+                        "FieldName": "metadata.product.name",
+                        "Filter": {
+                            "Value": "Security Hub Coverage",
+                            "Comparison": "EQUALS",
+                        },
+                    }
+                ]
+            }
+        ]
+    }
+
+    def get_coverage_findings(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the Security Hub coverage findings visible from a Region, with caching.
+
+        From the delegated administrator the read already spans member accounts
+        without ``Scopes`` (observed 2026-09-25), and from the aggregation Region
+        it spans every linked Region.
+
+        Args:
+            region: AWS region name.
+
+        Returns:
+            ``{"Findings": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"coverage_findings:{region}",
+            "get_findings_v2",
+            self.COVERAGE_FINDINGS_FILTER,
+        )
+
+    @staticmethod
+    def aggregation_region_of(response: Mapping[str, Any]) -> Optional[str]:
+        """
+        Read the Security Hub (V2) aggregation Region from ``ListAggregatorsV2``.
+
+        Args:
+            response: A successful ``ListAggregatorsV2`` response.
+
+        Returns:
+            The Region segment of the first aggregator ARN
+            (``arn:aws:securityhub:<region>:<account>:aggregatorv2/<id>``), or
+            ``None`` when there is no aggregator.
+        """
+        for aggregator in response.get("AggregatorsV2") or []:
+            parts = (aggregator.get("AggregatorV2Arn") or "").split(":")
+            if len(parts) > 3 and parts[3]:
+                return parts[3]
+        return None
+
+    @staticmethod
+    def unlinked_regions(
+        aggregator: Mapping[str, Any], regions: list[str]
+    ) -> list[str]:
+        """
+        Return the Regions an aggregator does not aggregate into its home Region.
+
+        ``RegionLinkingMode`` follows the finding-aggregator vocabulary:
+        ``ALL_REGIONS`` links everything, ``ALL_REGIONS_EXCEPT_SPECIFIED`` links
+        everything but ``LinkedRegions``, and ``SPECIFIED_REGIONS`` links only
+        ``LinkedRegions`` (observed 2026-09-25). The aggregation Region itself is
+        always covered. An unrecognized mode links nothing, so it reads as a gap
+        rather than a pass.
+
+        Args:
+            aggregator: A successful ``GetAggregatorV2`` response.
+            regions: The Regions that should be aggregated.
+
+        Returns:
+            The uncovered Regions, sorted.
+        """
+        home = aggregator.get("AggregationRegion")
+        mode = aggregator.get("RegionLinkingMode")
+        linked = set(aggregator.get("LinkedRegions") or [])
+        uncovered = []
+        for region in regions:
+            if region == home or mode == "ALL_REGIONS":
+                continue
+            if mode == "ALL_REGIONS_EXCEPT_SPECIFIED" and region not in linked:
+                continue
+            if mode == "SPECIFIED_REGIONS" and region in linked:
+                continue
+            uncovered.append(region)
+        return sorted(uncovered)
+
+    @staticmethod
+    def open_coverage_gaps(findings: list[Mapping[str, Any]]) -> dict[str, list[str]]:
+        """
+        Group coverage findings into open gaps per account.
+
+        A gap is a coverage finding whose ``compliance.status`` is ``Fail`` and
+        whose workflow ``status`` is not ``Suppressed``, ``Resolved`` or
+        ``Archived`` -- suppression is how the console records an accepted
+        exception, and a suppressed finding is excluded from coverage.
+
+        Args:
+            findings: OCSF coverage findings.
+
+        Returns:
+            ``{account_id: ["<capability> in <region>", ...]}`` for every account
+            that has at least one coverage finding, with an empty list for an
+            account whose every capability passes. Lists are sorted and
+            de-duplicated so the row is diffable.
+        """
+        closed = {"Suppressed", "Resolved", "Archived"}
+        by_account: dict[str, set[str]] = {}
+        for finding in findings:
+            account = ((finding.get("cloud") or {}).get("account") or {}).get("uid")
+            if not account:
+                continue
+            gaps = by_account.setdefault(account, set())
+            if finding.get("status") in closed:
+                continue
+            if (finding.get("compliance") or {}).get("status") != "Fail":
+                continue
+            capability = (finding.get("finding_info") or {}).get("title") or "Unknown"
+            capability = capability.removesuffix(" Coverage Finding")
+            region = (finding.get("cloud") or {}).get("region") or "unknown Region"
+            gaps.add(f"{capability} in {region}")
+        return {account: sorted(gaps) for account, gaps in by_account.items()}
+
+    # ------------------------------------------------------------------ #
+    # Organizations: the SECURITYHUB_POLICY management policy type
+    # ------------------------------------------------------------------ #
+
+    def get_roots(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the organization roots and their policy types, with caching.
+
+        Args:
+            region: AWS region name, used only to pick a client.
+
+        Returns:
+            ``{"Roots": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(region, "roots", "list_roots")
+
+    def get_policies_for_target(
+        self, region: str, target_id: str, policy_type: str
+    ) -> Mapping[str, Any]:
+        """
+        Get the policies of one type attached to a target, with caching.
+
+        Args:
+            region: AWS region name, used only to pick a client.
+            target_id: A root, OU or account ID.
+            policy_type: e.g. ``"SECURITYHUB_POLICY"``.
+
+        Returns:
+            ``{"Policies": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"policies_for_target:{target_id}:{policy_type}",
+            "list_policies_for_target",
+            target_id,
+            policy_type,
+        )
+
+    def get_policy(self, region: str, policy_id: str) -> Mapping[str, Any]:
+        """
+        Get one Organizations policy with its stored content, with caching.
+
+        Args:
+            region: AWS region name, used only to pick a client.
+            policy_id: The policy ID.
+
+        Returns:
+            The ``DescribePolicy`` response, or an error result.
+        """
+        return self._cached_call(
+            region, f"policy:{policy_id}", "describe_policy", policy_id
+        )
+
+    def get_effective_policy(
+        self, region: str, policy_type: str, target_id: str
+    ) -> Mapping[str, Any]:
+        """
+        Get an account's effective policy of one type, with caching.
+
+        Args:
+            region: AWS region name, used only to pick a client.
+            policy_type: e.g. ``"SECURITYHUB_POLICY"``.
+            target_id: An account ID.
+
+        Returns:
+            The ``DescribeEffectivePolicy`` response, or an error result. "No
+            policy reaches this account" arrives as
+            ``EffectivePolicyNotFoundException``, declared as not configured.
+        """
+        return self._cached_call(
+            region,
+            f"effective_policy:{policy_type}:{target_id}",
+            "describe_effective_policy",
+            policy_type,
+            target_id,
+        )
+
+    @staticmethod
+    def securityhub_policy_regions(
+        content: Optional[str],
+    ) -> Optional[tuple[list[str], list[str]]]:
+        """
+        Parse a Security Hub policy document into its two Region lists.
+
+        Accepts both forms: the **stored** document from ``DescribePolicy``, where
+        each list is wrapped in an inheritance operator (``{"@@assign": [...]}``
+        or ``{"@@append": [...]}`` -- the console writes ``@@append``, observed
+        2026-09-25), and the **effective** document from
+        ``DescribeEffectivePolicy``, where the operators are resolved away to
+        plain lists.
+
+        Args:
+            content: The policy JSON string.
+
+        Returns:
+            ``(enable_in_regions, disable_in_regions)``, or ``None`` when the
+            document is not valid JSON or has no ``securityhub`` block.
+        """
+        try:
+            document = json.loads(content or "")
+        except ValueError:
+            return None
+        block = document.get("securityhub") if isinstance(document, dict) else None
+        if not isinstance(block, dict):
+            return None
+
+        def _values(node: Any) -> list[str]:
+            if isinstance(node, list):
+                return [str(v) for v in node]
+            if isinstance(node, dict):
+                values: list[str] = []
+                for operator in ("@@assign", "@@append"):
+                    values.extend(str(v) for v in node.get(operator) or [])
+                return values
+            return []
+
+        return (
+            _values(block.get("enable_in_regions")),
+            _values(block.get("disable_in_regions")),
+        )
+
+    @staticmethod
+    def regions_not_enabled(
+        enable: list[str], disable: list[str], regions: list[str]
+    ) -> list[str]:
+        """
+        Return the Regions a Security Hub policy does not leave enabled.
+
+        ``ALL_SUPPORTED`` stands for every Region, current and future, in either
+        list, and ``disable_in_regions`` takes precedence over
+        ``enable_in_regions``.
+
+        Args:
+            enable: ``enable_in_regions``.
+            disable: ``disable_in_regions``.
+            regions: The Regions that should be enabled.
+
+        Returns:
+            The Regions that are not enabled, sorted.
+        """
+        all_enabled = "ALL_SUPPORTED" in enable
+        all_disabled = "ALL_SUPPORTED" in disable
+        return sorted(
+            region
+            for region in regions
+            if all_disabled
+            or region in disable
+            or not (all_enabled or region in enable)
+        )
+
+    # ------------------------------------------------------------------ #
+    # EventBridge: the rules that route Security Hub findings
+    # ------------------------------------------------------------------ #
+
+    def get_event_rules(self, region: str) -> Mapping[str, Any]:
+        """
+        Get the EventBridge rules on the default bus in a Region, with caching.
+
+        Args:
+            region: AWS region name.
+
+        Returns:
+            ``{"Rules": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(region, f"event_rules:{region}", "list_event_rules")
+
+    def get_rule_targets(self, region: str, rule_name: str) -> Mapping[str, Any]:
+        """
+        Get the targets of one EventBridge rule, with caching.
+
+        Args:
+            region: AWS region name.
+            rule_name: The rule name.
+
+        Returns:
+            ``{"Targets": [...]}`` on success, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"rule_targets:{region}:{rule_name}",
+            "list_targets_by_rule",
+            rule_name,
+        )
+
+    @staticmethod
+    def matches_v2_findings(rule: Mapping[str, Any]) -> bool:
+        """
+        Return whether an EventBridge rule's pattern matches V2 finding events.
+
+        The pattern must name ``aws.securityhub`` in ``source``, and either name
+        ``Findings Imported V2`` in ``detail-type``, or be a bare source-only
+        pattern with neither ``detail-type`` nor ``detail`` (which matches every
+        Security Hub event, V2 included). A pattern that omits ``detail-type`` but
+        filters on ``detail`` does **not** count: its filter was written against one
+        finding schema, and in practice it is the CSPM ASFF schema -- observed
+        2026-09-25 as ``{"source":["aws.securityhub"],"detail":{"findings":
+        {"ProductName":["GuardDuty"],"Severity":{"Label":[...]}}}}``, which no
+        OCSF V2 event can satisfy. A rule matching only the CSPM ``Security Hub
+        Findings - Imported`` detail-type does not count either. A scheduled rule,
+        or one whose pattern is not valid JSON, does not match.
+
+        Args:
+            rule: One ``ListRules`` entry.
+
+        Returns:
+            ``True`` if the rule would receive Security Hub V2 finding events.
+        """
+        try:
+            pattern = json.loads(rule.get("EventPattern") or "")
+        except ValueError:
+            return False
+        if not isinstance(pattern, dict):
+            return False
+        sources = pattern.get("source")
+        if not isinstance(sources, list) or "aws.securityhub" not in sources:
+            return False
+        detail_types = pattern.get("detail-type")
+        if detail_types is None:
+            return "detail" not in pattern
+        return (
+            isinstance(detail_types, list)
+            and V2_FINDINGS_DETAIL_TYPE in detail_types
+        )
 
     def get_administrator_account(self, region: str) -> Mapping[str, Any]:
         """

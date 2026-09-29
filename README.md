@@ -171,7 +171,13 @@ In this step you will clone the Github repository and run the tool.
     2. Install for development
 
         ```bash
-        pip install -e ./sraverify
+        pip install -e './sraverify[dev]'
+        ```
+
+        Or, with [uv](https://docs.astral.sh/uv/), which installs from the committed `uv.lock` into `sraverify/.venv`:
+
+        ```bash
+        cd sraverify && uv sync && uv run pytest -q
         ```
 
 5. Run sraverify

@@ -42,8 +42,8 @@ sra-verify/
 ├── generated_sraverify_cf_policy.yaml
 ├── util/generate_iam_policy.py         # derives the least-privilege member policy
 ├── sratester/                          # gitignored: test-org accounts.md (see below)
-└── sraverify/                          # pip project root (setup.py lives here)
-    ├── setup.py, requirements.txt
+└── sraverify/                          # project root (pyproject.toml lives here)
+    ├── pyproject.toml, uv.lock, requirements.txt
     └── sraverify/                      # the Python package
         ├── main.py                     # SRAVerify class, _select, CLI, exit codes
         ├── core/
@@ -646,10 +646,9 @@ pytest config file.
   scans.
 - `IAMCheck._validate_metadata` is dead and unusable: it validates `check_name`,
   which no longer exists on any check.
-- The version lives in two hand-maintained places, `setup.py` and
-  `sraverify/__init__.py` (`__version__`), both `0.3.0`. Nothing single-sources
-  it and they have drifted once already, so change both together.
-- `requirements.txt` and `setup.py` now agree on `boto3>=1.43.96`; see `tech.md`
+- The version lives only in `sraverify/__init__.py` (`__version__`).
+  `pyproject.toml` reads it via `[tool.hatch.version]`; see `tech.md`.
+- `requirements.txt` and `pyproject.toml` agree on `boto3>=1.43.96`; see `tech.md`
   for why that floor is load-bearing rather than cosmetic.
 - **`sra_securityhub_01` reduces a standards ARN by splitting on `"/standards/"`,
   which never matches.** A standards ARN reads

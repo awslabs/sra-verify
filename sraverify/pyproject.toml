@@ -1,0 +1,83 @@
+[project]
+name = "sraverify"
+# Single source: __version__ in sraverify/__init__.py (see [tool.hatch.version]).
+dynamic = ["version"]
+description = "AWS Security Reference Architecture Verification Tool"
+readme = "README.md"
+# 3.11 is load-bearing: the code uses StrEnum, @dataclass(slots=True) and X | None.
+requires-python = ">=3.11"
+# The boto3 floor is load-bearing too: older botocore lacks operations the
+# AI-coverage checks call, which would surface as synthetic ERROR rows.
+dependencies = [
+    "boto3>=1.43.96",
+    "colorama>=0.4.4",
+]
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    {name = "SRA Verify team", email = "schiefj@amazon.com"},
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/awslabs/sra-verify"
+
+[project.scripts]
+sraverify = "sraverify.main:main"
+
+# Kept as installable extras so `pip install sraverify[test]` keeps working.
+# pyyaml is for util/generate_iam_policy.py and its tests, not the scanner.
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.0",
+    "pytest>=7.0",
+    "pyyaml>=6.0",
+]
+test = [
+    "hypothesis>=6.0",
+    "pytest>=7.0",
+    "pyyaml>=6.0",
+]
+
+# What `uv sync` installs for local development.
+[dependency-groups]
+dev = [
+    "hypothesis>=6.0",
+    "pytest>=7.0",
+    "pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "sraverify/__init__.py"
+
+[tool.hatch.build]
+# Test runs leave hypothesis databases and caches inside the package tree.
+exclude = [
+    "**/.hypothesis",
+    "**/.pytest_cache",
+    "**/__pycache__",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sraverify"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "sraverify",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "requirements.txt",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["sraverify/tests"]
+# Lets pytest run from the workspace root without PYTHONPATH.
+pythonpath = ["."]

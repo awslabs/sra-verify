@@ -475,6 +475,45 @@ _IAM = (
         success=({"Users": [{"UserName": "alice", "Arn": "arn:aws:iam::1:user/alice"}]},),
         paginated=True,
     ),
+    ClientAdapter(
+        method="list_organizations_features",
+        boto_service="iam",
+        boto_method="list_organizations_features",
+        operation="ListOrganizationsFeatures",
+        success={
+            "OrganizationId": "o-exampleorgid",
+            "EnabledFeatures": ["RootCredentialsManagement", "RootSessions"],
+        },
+    ),
+    ClientAdapter(
+        method="get_account_summary",
+        boto_service="iam",
+        boto_method="get_account_summary",
+        operation="GetAccountSummary",
+        success={"SummaryMap": {"AccountPasswordPresent": 0, "AccountMFAEnabled": 0}},
+    ),
+    ClientAdapter(
+        method="get_account_password_policy",
+        boto_service="iam",
+        boto_method="get_account_password_policy",
+        operation="GetAccountPasswordPolicy",
+        success={"PasswordPolicy": {"MinimumPasswordLength": 14}},
+    ),
+    ClientAdapter(
+        method="list_delegated_administrators",
+        boto_service="organizations",
+        boto_method="list_delegated_administrators",
+        operation="ListDelegatedAdministrators",
+        success=({"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="describe_organization",
+        boto_service="organizations",
+        boto_method="describe_organization",
+        operation="DescribeOrganization",
+        success={"Organization": {"MasterAccountId": _TEST_ACCOUNT}},
+    ),
 )
 
 _INSPECTOR = (

@@ -4,7 +4,7 @@ Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazo
 to the SRA Verify checks that assess it, so gaps are visible.
 
 - **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
-- **Check source:** the live registry (`sraverify --list-checks`), **178 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20) and the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06).
+- **Check source:** the live registry (`sraverify --list-checks`), **182 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,7 +15,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` matches the live registry byte for byte at the time of writing (178 checks).
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (182 checks).
 
 ## Summary
 
@@ -27,7 +27,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS Config                        |       7 |       5 |       0 |       2 |
 | Amazon GuardDuty                  |      17 |      11 |       1 |       5 |
 | IAM                               |       8 |       5 |       1 |       2 |
-| IAM Access Analyzer               |       8 |       4 |       0 |       4 |
+| IAM Access Analyzer               |       8 |       8 |       0 |       0 |
 | Amazon Detective                  |       9 |       0 |       0 |       9 |
 | AWS Firewall Manager              |      10 |       8 |       0 |       2 |
 | Amazon Inspector                  |       8 |       6 |       1 |       1 |
@@ -45,12 +45,12 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
 | AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **115** |  **15** |  **94** |
+| **Total**                         | **224** | **119** |  **15** |  **90** |
 
 Coverage is concentrated in the security services SRA Verify has packages for. Six
 checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
 Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 94 missing items.
+the 90 missing items.
 
 ---
 
@@ -160,16 +160,16 @@ the 94 missing items.
 
 ## IAM Access Analyzer
 
-|    # | Checklist item                                                     | SRA Verify check(s)                          | Status  | Note                                   |
-| ---: | ------------------------------------------------------------------ | -------------------------------------------- | ------- | -------------------------------------- |
-|    1 | Enabled for all member accounts and the management account         | SRA-ACCESSANALYZER-01                        | Covered | Account zone-of-trust analyzer present |
-|    2 | Delegated administrator set to the Security Tooling account        | SRA-ACCESSANALYZER-02, SRA-ACCESSANALYZER-03 | Covered |                                        |
-|    3 | External access analyzer, organization zone of trust, every Region | SRA-ACCESSANALYZER-04                        | Covered |                                        |
-|    4 | External access analyzer, account zone of trust, every Region      | SRA-ACCESSANALYZER-01                        | Covered |                                        |
-|    5 | Internal access analyzer, organization zone of trust, every Region | —                                            | Missing |                                        |
-|    6 | Internal access analyzer, account zone of trust, every Region      | —                                            | Missing |                                        |
-|    7 | Unused access analyzer for the current account                     | —                                            | Missing |                                        |
-|    8 | Unused access analyzer for the current organization                | —                                            | Missing |                                        |
+|    # | Checklist item                                                     | SRA Verify check(s)                          | Status  | Note                                                                          |
+| ---: | ------------------------------------------------------------------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------- |
+|    1 | Enabled for all member accounts and the management account         | SRA-ACCESSANALYZER-01                        | Covered | Account zone-of-trust analyzer present                                        |
+|    2 | Delegated administrator set to the Security Tooling account        | SRA-ACCESSANALYZER-02, SRA-ACCESSANALYZER-03 | Covered |                                                                               |
+|    3 | External access analyzer, organization zone of trust, every Region | SRA-ACCESSANALYZER-04                        | Covered |                                                                               |
+|    4 | External access analyzer, account zone of trust, every Region      | SRA-ACCESSANALYZER-01                        | Covered |                                                                               |
+|    5 | Internal access analyzer, organization zone of trust, every Region | SRA-ACCESSANALYZER-05                        | Covered | Presence and ACTIVE status; the monitored resource selection is not evaluated |
+|    6 | Internal access analyzer, account zone of trust, every Region      | SRA-ACCESSANALYZER-06                        | Covered | Presence and ACTIVE status; the monitored resource selection is not evaluated |
+|    7 | Unused access analyzer for the current account                     | SRA-ACCESSANALYZER-07                        | Covered | One row per account; a Security Hub-managed analyzer counts                   |
+|    8 | Unused access analyzer for the current organization                | SRA-ACCESSANALYZER-08                        | Covered | One row, from the audit account                                               |
 
 ## Amazon Detective
 

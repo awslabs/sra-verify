@@ -133,7 +133,7 @@ The chain:
 
 - `services/<svc>/__init__.py` is one call: `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is one call: `import_service_packages(__name__)`.
-- `import sraverify.services` therefore registers all 178 checks. `main.py` carries that import with a `# noqa: F401` — it looks removable and is not; drop it and every scan selects nothing.
+- `import sraverify.services` therefore registers all 182 checks. `main.py` carries that import with a `# noqa: F401` — it looks removable and is not; drop it and every scan selects nothing.
 - Importing a check module executes its class body, which fires `SecurityCheck.__init_subclass__`, which cross-checks identity and calls `register()`.
 
 Only modules whose file name starts with `sra_` are discovered (`CHECK_MODULE_PREFIX` in `core/discovery.py`). Subpackages are skipped. Re-importing is a no-op via `sys.modules`, and `register()` is idempotent for the same class object; a *different* class claiming a live ID raises `DuplicateCheckIdError`.
@@ -442,7 +442,7 @@ classified differently by two operations where they warrant it —
 bare message. It is what lets a reader tell a permission gap from an unreachable
 endpoint without opening the build log, and
 `test_every_error_row_names_the_failed_operation_and_code` asserts the shape over
-all 178 checks.
+all 182 checks.
 
 **The ERROR remediation is `self._remediation_for(error)`.** An ERROR row reports
 that the control could not be evaluated, so its remediation concerns fixing the

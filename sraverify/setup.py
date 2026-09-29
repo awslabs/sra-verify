@@ -21,7 +21,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.11",
+    python_requires=">=3.12",
     install_requires=[
         "boto3>=1.43.96",
         "colorama>=0.4.4"

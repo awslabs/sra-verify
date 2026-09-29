@@ -3,6 +3,7 @@ SRA-SECURITYHUB-08: Security Hub check.
 """
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -111,7 +112,7 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
             # Create sets of account IDs for comparison
             active_org_account_ids = set()
             for account in org_accounts:
-                if account.get('Status') == 'ACTIVE':
+                if is_active_account(account):
                     active_org_account_ids.add(account.get('Id'))
 
             securityhub_member_ids = set()

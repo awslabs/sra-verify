@@ -49,6 +49,7 @@ sra-verify/
         ├── cli.py                      # CLI: parse_args, configure_logging, main() -> exit code
         ├── __main__.py                 # `python -m sraverify` -> cli.main
         ├── core/
+        │   ├── accounts.py             # is_active_account (Organizations State, Status fallback)
         │   ├── check.py                # SecurityCheck: meta, registration, finding helpers
         │   ├── metadata.py             # CheckMeta, Remediation (validated, frozen)
         │   ├── finding.py              # Finding, Finding.FIELDS, GLOBAL_REGION

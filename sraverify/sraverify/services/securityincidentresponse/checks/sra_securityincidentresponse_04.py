@@ -3,6 +3,7 @@ Check if Security Incident Response is enabled for all organization accounts.
 """
 from collections.abc import Iterable
 
+from sraverify.core.accounts import is_active_account
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -134,7 +135,7 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
         membership_id = active_memberships[0].get("membershipId")
 
         # Get active organization accounts
-        active_accounts = [acc for acc in org_accounts if acc.get("Status") == "ACTIVE"]
+        active_accounts = [acc for acc in org_accounts if is_active_account(acc)]
         account_ids = [acc.get("Id") for acc in active_accounts]
 
         # Process accounts in batches of 100 (API limit)

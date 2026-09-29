@@ -4,7 +4,7 @@ Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazo
 to the SRA Verify checks that assess it, so gaps are visible.
 
 - **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
-- **Check source:** the live registry (`sraverify --list-checks`), **173 checks across 18 services**, including the nine AI-coverage checks and the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20).
+- **Check source:** the live registry (`sraverify --list-checks`), **178 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20) and the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06).
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,7 +15,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` matches the live registry byte for byte at the time of writing (173 checks).
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (178 checks).
 
 ## Summary
 
@@ -26,7 +26,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS Security Hub CSPM             |      17 |       6 |       5 |       6 |
 | AWS Config                        |       7 |       5 |       0 |       2 |
 | Amazon GuardDuty                  |      17 |      11 |       1 |       5 |
-| IAM                               |       8 |       1 |       0 |       7 |
+| IAM                               |       8 |       5 |       1 |       2 |
 | IAM Access Analyzer               |       8 |       4 |       0 |       4 |
 | Amazon Detective                  |       9 |       0 |       0 |       9 |
 | AWS Firewall Manager              |      10 |       8 |       0 |       2 |
@@ -45,12 +45,12 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
 | AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **111** |  **14** |  **99** |
+| **Total**                         | **224** | **115** |  **15** |  **94** |
 
 Coverage is concentrated in the security services SRA Verify has packages for. Six
 checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
 Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 99 missing items.
+the 94 missing items.
 
 ---
 
@@ -147,16 +147,16 @@ the 99 missing items.
 
 ## IAM
 
-|    # | Checklist item                                                     | SRA Verify check(s) | Status  | Note                             |
-| ---: | ------------------------------------------------------------------ | ------------------- | ------- | -------------------------------- |
-|    1 | IAM users are not used                                             | SRA-IAM-01          | Covered |                                  |
-|    2 | Centralized management of root access for member accounts enforced | —                   | Missing |                                  |
-|    3 | Centralized privileged root user task for the management account   | —                   | Missing |                                  |
-|    4 | Centralized root access management delegated to Security Tooling   | —                   | Missing |                                  |
-|    5 | All member account root credentials removed                        | —                   | Missing |                                  |
-|    6 | Account password policies set to the organization standard         | —                   | Missing |                                  |
-|    7 | IAM access advisor used to review last-used information            | —                   | Missing | Not machine-assessable as stated |
-|    8 | Permission boundaries restrict maximum permissions for roles       | —                   | Missing |                                  |
+|    # | Checklist item                                                     | SRA Verify check(s) | Status  | Note                                                                                                           |
+| ---: | ------------------------------------------------------------------ | ------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+|    1 | IAM users are not used                                             | SRA-IAM-01          | Covered |                                                                                                                |
+|    2 | Centralized management of root access for member accounts enforced | SRA-IAM-02          | Covered | `RootCredentialsManagement` in `ListOrganizationsFeatures`                                                     |
+|    3 | Centralized privileged root user task for the management account   | SRA-IAM-03          | Covered | `RootSessions` in `ListOrganizationsFeatures`                                                                  |
+|    4 | Centralized root access management delegated to Security Tooling   | SRA-IAM-04          | Covered | IAM delegated administrator compared against `--audit-account`                                                 |
+|    5 | All member account root credentials removed                        | SRA-IAM-05          | Covered | No root password, access keys, signing certificates or MFA per member account; management account out of scope |
+|    6 | Account password policies set to the organization standard         | SRA-IAM-06          | Partial | Checked against a fixed CIS-derived baseline; the organization's own standard cannot be read                   |
+|    7 | IAM access advisor used to review last-used information            | —                   | Missing | Not machine-assessable as stated; deferred                                                                     |
+|    8 | Permission boundaries restrict maximum permissions for roles       | —                   | Missing | Deferred                                                                                                       |
 
 ## IAM Access Analyzer
 
@@ -451,5 +451,4 @@ additional coverage, not gaps.
 1. **Six service sections with no package at all** — Detective (9), KMS (8), Systems Manager (8), Secrets Manager (8), IAM Identity Center (7 of 8), Private CA (6). 46 missing items.
 2. **Network Firewall and DNS Firewall** (12 items) — visible only through the Firewall Manager policy checks.
 3. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. No check inspects encryption, Object Lock, versioning, or resource policy on a destination bucket. The `s3` package covers public-access block only.
-4. **IAM root access management** (IAM items 2 – 5) — centralized root access is entirely unassessed.
-5. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.
+4. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.

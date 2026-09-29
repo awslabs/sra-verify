@@ -177,7 +177,10 @@ Resources:
           - Sid: IamPermissions
             Effect: Allow
             Action:
+              - iam:GetAccountPasswordPolicy
+              - iam:GetAccountSummary
               - iam:GetRole
+              - iam:ListOrganizationsFeatures
               - iam:ListUsers
             Resource: '*'
           - Sid: Inspector2Permissions

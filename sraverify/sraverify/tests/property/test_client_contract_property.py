@@ -805,6 +805,159 @@ _SECURITYHUB = (
         operation="ListOrganizationAdminAccounts",
         success={"AdminAccounts": [{"AccountId": _TEST_ACCOUNT, "Status": "ENABLED"}]},
     ),
+    # The V2 designation: same operation, Feature=SecurityHubV2. V2 entries
+    # carry no Status (observed 2026-09-25).
+    ClientAdapter(
+        method="list_organization_admin_accounts_v2",
+        boto_service="securityhub",
+        boto_method="list_organization_admin_accounts",
+        operation="ListOrganizationAdminAccounts",
+        success={"AdminAccounts": [{"AccountId": _TEST_ACCOUNT}], "Feature": "SecurityHubV2"},
+    ),
+    ClientAdapter(
+        method="list_aggregators_v2",
+        boto_service="securityhub",
+        boto_method="list_aggregators_v2",
+        operation="ListAggregatorsV2",
+        success=(
+            {
+                "AggregatorsV2": [
+                    {
+                        "AggregatorV2Arn": (
+                            f"arn:aws:securityhub:us-west-2:{_TEST_ACCOUNT}:"
+                            "aggregatorv2/abc"
+                        )
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="get_aggregator_v2",
+        boto_service="securityhub",
+        boto_method="get_aggregator_v2",
+        operation="GetAggregatorV2",
+        args=(f"arn:aws:securityhub:us-west-2:{_TEST_ACCOUNT}:aggregatorv2/abc",),
+        success={
+            "AggregatorV2Arn": (
+                f"arn:aws:securityhub:us-west-2:{_TEST_ACCOUNT}:aggregatorv2/abc"
+            ),
+            "AggregationRegion": "us-west-2",
+            "RegionLinkingMode": "SPECIFIED_REGIONS",
+            "LinkedRegions": ["us-east-1"],
+        },
+    ),
+    ClientAdapter(
+        method="get_findings_v2",
+        boto_service="securityhub",
+        boto_method="get_findings_v2",
+        operation="GetFindingsV2",
+        args=({"CompositeFilters": []},),
+        success=(
+            {
+                "Findings": [
+                    {
+                        "cloud": {"account": {"uid": _TEST_ACCOUNT}, "region": "us-east-1"},
+                        "compliance": {"status": "Pass"},
+                        "status": "New",
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="list_roots",
+        boto_service="organizations",
+        boto_method="list_roots",
+        operation="ListRoots",
+        success=(
+            {
+                "Roots": [
+                    {
+                        "Id": "r-abc1",
+                        "PolicyTypes": [
+                            {"Type": "SECURITYHUB_POLICY", "Status": "ENABLED"}
+                        ],
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="list_policies_for_target",
+        boto_service="organizations",
+        boto_method="list_policies_for_target",
+        operation="ListPoliciesForTarget",
+        args=("r-abc1", "SECURITYHUB_POLICY"),
+        success=({"Policies": [{"Id": "p-abc123", "Name": "securityhub-all"}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="describe_policy",
+        boto_service="organizations",
+        boto_method="describe_policy",
+        operation="DescribePolicy",
+        args=("p-abc123",),
+        success={
+            "Policy": {
+                "PolicySummary": {"Id": "p-abc123", "Type": "SECURITYHUB_POLICY"},
+                "Content": (
+                    '{"securityhub":{"enable_in_regions":{"@@append":["ALL_SUPPORTED"]},'
+                    '"disable_in_regions":{"@@append":[]}}}'
+                ),
+            }
+        },
+    ),
+    ClientAdapter(
+        method="describe_effective_policy",
+        boto_service="organizations",
+        boto_method="describe_effective_policy",
+        operation="DescribeEffectivePolicy",
+        args=("SECURITYHUB_POLICY", _TEST_ACCOUNT),
+        success={
+            "EffectivePolicy": {
+                "PolicyType": "SECURITYHUB_POLICY",
+                "TargetId": _TEST_ACCOUNT,
+                "PolicyContent": (
+                    '{"securityhub":{"disable_in_regions":[],'
+                    '"enable_in_regions":["ALL_SUPPORTED"]}}'
+                ),
+            }
+        },
+    ),
+    ClientAdapter(
+        method="list_event_rules",
+        boto_service="events",
+        boto_method="list_rules",
+        operation="ListRules",
+        success=(
+            {
+                "Rules": [
+                    {
+                        "Name": "securityhub-findings-v2",
+                        "State": "ENABLED",
+                        "EventPattern": (
+                            '{"source":["aws.securityhub"],'
+                            '"detail-type":["Findings Imported V2"]}'
+                        ),
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="list_targets_by_rule",
+        boto_service="events",
+        boto_method="list_targets_by_rule",
+        operation="ListTargetsByRule",
+        args=("securityhub-findings-v2",),
+        success=({"Targets": [{"Id": "1", "Arn": "arn:aws:sns:us-east-1:111122223333:t"}]},),
+        paginated=True,
+    ),
 )
 
 _SECURITYINCIDENTRESPONSE = (

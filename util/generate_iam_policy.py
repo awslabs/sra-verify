@@ -80,6 +80,14 @@ BOTO3_INTERNAL_METHODS: frozenset[str] = frozenset(
     }
 )
 
+#: Operations authorized by an IAM action of a different name, keyed by boto3
+#: service id. ``GetFindingsV2`` is authorized by ``securityhub:GetFindings`` --
+#: the API reference says so, and a call without it is refused with "not
+#: authorized to perform: securityhub:GetFindings" (observed 2026-09-25).
+ACTION_ALIASES: Dict[str, Dict[str, str]] = {
+    "securityhub": {"get_findings_v2": "get_findings"},
+}
+
 #: ``s3control`` operations and the ``s3`` action they actually require.
 S3CONTROL_TO_S3: Dict[str, str] = {
     "get_public_access_block": "get_account_public_access_block",
@@ -274,6 +282,16 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
 
     for calls in service_calls.values():
         calls.discard("get_paginator")
+
+    # Operations whose IAM action has a different name from the operation.
+    for service, aliases in ACTION_ALIASES.items():
+        calls = service_calls.get(service)
+        if not calls:
+            continue
+        for operation, action in aliases.items():
+            if operation in calls:
+                calls.discard(operation)
+                calls.add(action)
 
     # Dependent permissions AWS requires alongside the call the client makes.
     if "get_web_acl_for_resource" in service_calls.get("wafv2", set()):

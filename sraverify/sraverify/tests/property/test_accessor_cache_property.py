@@ -639,6 +639,149 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             client_method="get_configuration_policy",
             cache_key=f"configuration_policy:{_TEST_REGION}:policy-abc",
         ),
+        # --- Unified Security Hub (V2) org surface ---
+        A(
+            "get_organization_admin_accounts_v2",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_organization_admin_accounts_v2",
+            cache_key=f"organization_admin_accounts_v2:{_TEST_REGION}",
+        ),
+        A(
+            "get_aggregators_v2",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_aggregators_v2",
+            cache_key=f"aggregators_v2:{_TEST_REGION}",
+        ),
+        A(
+            "get_aggregator_v2",
+            "accessor",
+            args=(_TEST_REGION, "arn:aws:securityhub:us-west-2:111122223333:aggregatorv2/abc"),
+            client_method="get_aggregator_v2",
+            cache_key=(
+                f"aggregator_v2:{_TEST_REGION}:"
+                "arn:aws:securityhub:us-west-2:111122223333:aggregatorv2/abc"
+            ),
+        ),
+        A(
+            "get_coverage_findings",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="get_findings_v2",
+            cache_key=f"coverage_findings:{_TEST_REGION}",
+        ),
+        A(
+            "get_roots",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_roots",
+            cache_key="roots",
+        ),
+        A(
+            "get_policies_for_target",
+            "accessor",
+            args=(_TEST_REGION, "r-abc1", "SECURITYHUB_POLICY"),
+            client_method="list_policies_for_target",
+            cache_key="policies_for_target:r-abc1:SECURITYHUB_POLICY",
+        ),
+        A(
+            "get_policy",
+            "accessor",
+            args=(_TEST_REGION, "p-abc123"),
+            client_method="describe_policy",
+            cache_key="policy:p-abc123",
+        ),
+        A(
+            "get_effective_policy",
+            "accessor",
+            args=(_TEST_REGION, "SECURITYHUB_POLICY", _TEST_ACCOUNT),
+            client_method="describe_effective_policy",
+            cache_key=f"effective_policy:SECURITYHUB_POLICY:{_TEST_ACCOUNT}",
+        ),
+        A(
+            "get_event_rules",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_event_rules",
+            cache_key=f"event_rules:{_TEST_REGION}",
+        ),
+        A(
+            "get_rule_targets",
+            "accessor",
+            args=(_TEST_REGION, "securityhub-findings-v2"),
+            client_method="list_targets_by_rule",
+            cache_key=f"rule_targets:{_TEST_REGION}:securityhub-findings-v2",
+        ),
+        # Pure parsers, on the base so that no json.loads / except sits inside a
+        # check's execute().
+        A(
+            "aggregation_region_of",
+            "helper",
+            args=(
+                {
+                    "AggregatorsV2": [
+                        {
+                            "AggregatorV2Arn": (
+                                "arn:aws:securityhub:us-west-2:111122223333:"
+                                "aggregatorv2/abc"
+                            )
+                        }
+                    ]
+                },
+            ),
+        ),
+        A(
+            "unlinked_regions",
+            "helper",
+            args=(
+                {
+                    "AggregationRegion": "us-west-2",
+                    "RegionLinkingMode": "SPECIFIED_REGIONS",
+                    "LinkedRegions": ["us-east-1"],
+                },
+                ["us-east-1", "us-west-2", "eu-west-1"],
+            ),
+        ),
+        A(
+            "open_coverage_gaps",
+            "helper",
+            args=(
+                [
+                    {
+                        "cloud": {"account": {"uid": "111122223333"}, "region": "us-east-1"},
+                        "compliance": {"status": "Fail"},
+                        "finding_info": {"title": "Macie Coverage Finding"},
+                        "status": "New",
+                    }
+                ],
+            ),
+        ),
+        A(
+            "securityhub_policy_regions",
+            "helper",
+            args=(
+                '{"securityhub":{"enable_in_regions":{"@@append":["ALL_SUPPORTED"]},'
+                '"disable_in_regions":{"@@append":[]}}}',
+            ),
+        ),
+        A(
+            "regions_not_enabled",
+            "helper",
+            args=(["ALL_SUPPORTED"], ["eu-west-1"], ["us-east-1", "eu-west-1"]),
+        ),
+        A(
+            "matches_v2_findings",
+            "helper",
+            args=(
+                {
+                    "EventPattern": (
+                        '{"source":["aws.securityhub"],'
+                        '"detail-type":["Findings Imported V2"]}'
+                    )
+                },
+            ),
+        ),
         # A pure parser over a ListFindingAggregators response. The home Region is
         # the ARN's Region segment, not a field, so this parse is what avoids a
         # second GetFindingAggregator call.

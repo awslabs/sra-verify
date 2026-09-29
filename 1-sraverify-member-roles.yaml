@@ -154,6 +154,12 @@ Resources:
             Action:
               - elasticloadbalancing:DescribeLoadBalancers
             Resource: '*'
+          - Sid: EventsPermissions
+            Effect: Allow
+            Action:
+              - events:ListRules
+              - events:ListTargetsByRule
+            Resource: '*'
           - Sid: FmsPermissions
             Effect: Allow
             Action:
@@ -200,11 +206,13 @@ Resources:
             Action:
               - organizations:DescribeEffectivePolicy
               - organizations:DescribeOrganization
+              - organizations:DescribePolicy
               - organizations:ListAccounts
               - organizations:ListDelegatedAdministrators
               - organizations:ListAccountsForParent
               - organizations:ListOrganizationalUnitsForParent
               - organizations:ListPolicies
+              - organizations:ListPoliciesForTarget
               - organizations:ListRoots
             Resource: '*'
           - Sid: S3Permissions
@@ -227,8 +235,11 @@ Resources:
               - securityhub:DescribeOrganizationConfiguration
               - securityhub:DescribeSecurityHubV2
               - securityhub:GetAdministratorAccount
+              - securityhub:GetAggregatorV2
               - securityhub:GetConfigurationPolicy
               - securityhub:GetEnabledStandards
+              - securityhub:GetFindings
+              - securityhub:ListAggregatorsV2
               - securityhub:ListConfigurationPolicies
               - securityhub:ListEnabledProductsForImport
               - securityhub:ListFindingAggregators

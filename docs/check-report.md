@@ -3,8 +3,8 @@
 Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/checklist.html)
 to the SRA Verify checks that assess it, so gaps are visible.
 
-- **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections.
-- **Check source:** the live registry (`sraverify --list-checks`), **159 checks across 18 services**.
+- **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
+- **Check source:** the live registry (`sraverify --list-checks`), **173 checks across 18 services**, including the nine AI-coverage checks and the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20).
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,15 +15,14 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` is **stale** at the time of writing — it lists 158 checks and omits
-`SRA-ORGANIZATIONS-10`. This report is built from the live registry, not from that file.
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (173 checks).
 
 ## Summary
 
 | Checklist section                 |   Items | Covered | Partial | Missing |
 | --------------------------------- | ------: | ------: | ------: | ------: |
 | AWS Organizations                 |      11 |       7 |       1 |       3 |
-| AWS CloudTrail                    |      14 |       8 |       0 |       6 |
+| AWS CloudTrail                    |      14 |       8 |       1 |       5 |
 | AWS Security Hub CSPM             |      17 |       6 |       5 |       6 |
 | AWS Config                        |       7 |       5 |       0 |       2 |
 | Amazon GuardDuty                  |      17 |      11 |       1 |       5 |
@@ -38,7 +37,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS Shield Advanced               |      14 |      11 |       2 |       1 |
 | AWS Security Incident Response    |       4 |       3 |       0 |       1 |
 | AWS Audit Manager                 |       6 |       3 |       0 |       3 |
-| AWS Security Hub (unified)        |       8 |       0 |       1 |       7 |
+| AWS Security Hub (unified)        |       8 |       8 |       0 |       0 |
 | AWS Network Firewall              |       8 |       0 |       1 |       7 |
 | Route 53 Resolver DNS Firewall    |       4 |       0 |       1 |       3 |
 | AWS Key Management Service        |       8 |       0 |       0 |       8 |
@@ -46,105 +45,105 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
 | AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **103** |  **14** | **107** |
+| **Total**                         | **224** | **111** |  **14** |  **99** |
 
 Coverage is concentrated in the security services SRA Verify has packages for. Six
 checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
 Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 107 missing items.
+the 99 missing items.
 
 ---
 
 ## AWS Organizations
 
-|    # | Checklist item                                                | SRA Verify check(s)                        | Status  | Note                                                                                                                                         |
-| ---: | ------------------------------------------------------------- | ------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-|    1 | Organizations enabled with all features                       | SRA-ORGANIZATIONS-01, SRA-ORGANIZATIONS-05 | Covered | -01 enablement, -05 `FeatureSet=ALL`                                                                                                         |
-|    2 | SCPs used for IAM principal access control                    | SRA-ORGANIZATIONS-06                       | Covered |                                                                                                                                              |
-|    3 | RCPs used for resource access control                         | SRA-ORGANIZATIONS-07                       | Covered |                                                                                                                                              |
-|    4 | Declarative policies used to enforce service configuration    | SRA-ORGANIZATIONS-10                       | Partial | Only the `BEDROCK_POLICY` declarative type is checked, and only that it is enabled on the root — not that any declarative policy is attached |
-|    5 | Three foundational OUs (Security, Infrastructure, Workloads)  | SRA-ORGANIZATIONS-02, SRA-ORGANIZATIONS-03, SRA-ORGANIZATIONS-04             | Covered | One check per OU                                                                                                                             |
-|    6 | Security Tooling account created under the Security OU        | SRA-ORGANIZATIONS-08                       | Covered | Needs `--audit-account`                                                                                                                      |
-|    7 | Log Archive account created under the Security OU             | SRA-ORGANIZATIONS-09                       | Covered | Needs `--log-archive-account`                                                                                                                |
-|    8 | Network account created under the Infrastructure OU           | —                                          | Missing | No account-to-OU check beyond audit and log-archive                                                                                          |
-|    9 | Shared Services account created under the Infrastructure OU   | —                                          | Missing |                                                                                                                                              |
-|   10 | Application account created under the Workloads OU            | —                                          | Missing |                                                                                                                                              |
-|   11 | Alternate contacts (billing, operations, security) configured | SRA-ACCOUNT-01, SRA-ACCOUNT-02, SRA-ACCOUNT-03                   | Covered | Security, billing, operations respectively                                                                                                   |
+|    # | Checklist item                                                | SRA Verify check(s)                                              | Status  | Note                                                                                                                                                                                                   |
+| ---: | ------------------------------------------------------------- | ---------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+|    1 | Organizations enabled with all features                       | SRA-ORGANIZATIONS-01, SRA-ORGANIZATIONS-05                       | Covered | -01 enablement, -05 `FeatureSet=ALL`                                                                                                                                                                   |
+|    2 | SCPs used for IAM principal access control                    | SRA-ORGANIZATIONS-06                                             | Covered |                                                                                                                                                                                                        |
+|    3 | RCPs used for resource access control                         | SRA-ORGANIZATIONS-07                                             | Covered |                                                                                                                                                                                                        |
+|    4 | Declarative policies used to enforce service configuration    | SRA-ORGANIZATIONS-10, SRA-ORGANIZATIONS-11, SRA-ORGANIZATIONS-12 | Partial | Only the `BEDROCK_POLICY` type: -10 enabled on the root, -11 a customer-managed policy exists, -12 the effective policy names a Guardrail per active account. EC2 declarative policies are not checked |
+|    5 | Three foundational OUs (Security, Infrastructure, Workloads)  | SRA-ORGANIZATIONS-02, SRA-ORGANIZATIONS-03, SRA-ORGANIZATIONS-04 | Covered | One check per OU                                                                                                                                                                                       |
+|    6 | Security Tooling account created under the Security OU        | SRA-ORGANIZATIONS-08                                             | Covered | Needs `--audit-account`                                                                                                                                                                                |
+|    7 | Log Archive account created under the Security OU             | SRA-ORGANIZATIONS-09                                             | Covered | Needs `--log-archive-account`                                                                                                                                                                          |
+|    8 | Network account created under the Infrastructure OU           | —                                                                | Missing | No account-to-OU check beyond audit and log-archive                                                                                                                                                    |
+|    9 | Shared Services account created under the Infrastructure OU   | —                                                                | Missing |                                                                                                                                                                                                        |
+|   10 | Application account created under the Workloads OU            | —                                                                | Missing |                                                                                                                                                                                                        |
+|   11 | Alternate contacts (billing, operations, security) configured | SRA-ACCOUNT-01, SRA-ACCOUNT-02, SRA-ACCOUNT-03                   | Covered | Security, billing, operations respectively                                                                                                                                                             |
 
 ## AWS CloudTrail
 
-|    # | Checklist item                                                          | SRA Verify check(s)                  | Status  | Note                                                                              |
-| ---: | ----------------------------------------------------------------------- | ------------------------------------ | ------- | --------------------------------------------------------------------------------- |
-|    1 | Organization trail configured for management and all member accounts    | SRA-CLOUDTRAIL-01                    | Covered |                                                                                   |
-|    2 | Organization trail is multi-Region                                      | SRA-CLOUDTRAIL-04                    | Covered |                                                                                   |
-|    3 | Organization trail captures global service events                       | SRA-CLOUDTRAIL-06                    | Covered |                                                                                   |
-|    4 | Additional trails for specific data events                              | —                                    | Missing | Only the organization management-event trail is assessed                          |
-|    5 | Security Tooling account is delegated administrator of the trail        | SRA-CLOUDTRAIL-12, SRA-CLOUDTRAIL-13 | Covered | -12 a delegated admin exists, -13 it is the audit account                         |
-|    6 | Trail automatically enabled for new member accounts                     | —                                    | Missing |                                                                                   |
-|    7 | Trail publishes to a centralized S3 bucket in the Log Archive account   | SRA-CLOUDTRAIL-08, SRA-CLOUDTRAIL-11 | Covered | -08 delivery working, -11 bucket is in the Log Archive account                    |
-|    8 | Log file validation enabled                                             | SRA-CLOUDTRAIL-03, SRA-CLOUDTRAIL-10 | Covered | -10 also confirms digest files are delivered                                      |
-|    9 | Integrated with CloudWatch Logs for retention                           | SRA-CLOUDTRAIL-05, SRA-CLOUDTRAIL-09 | Covered | -05 configuration present, -09 delivery working                                   |
-|   10 | Trail encrypted with a customer managed key                             | SRA-CLOUDTRAIL-02                    | Covered | Verifies a KMS key is set; does not distinguish customer managed from AWS managed |
-|   11 | Central log bucket in Log Archive encrypted with a customer managed key | —                                    | Missing | No S3 encryption check on the log bucket                                          |
-|   12 | Central log bucket configured with S3 Object Lock                       | —                                    | Missing |                                                                                   |
-|   13 | Versioning enabled on the central log bucket                            | —                                    | Missing |                                                                                   |
-|   14 | Central log bucket resource policy restricts uploads to the trail ARN   | —                                    | Missing |                                                                                   |
+|    # | Checklist item                                                          | SRA Verify check(s)                  | Status  | Note                                                                                                                                           |
+| ---: | ----------------------------------------------------------------------- | ------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+|    1 | Organization trail configured for management and all member accounts    | SRA-CLOUDTRAIL-01                    | Covered |                                                                                                                                                |
+|    2 | Organization trail is multi-Region                                      | SRA-CLOUDTRAIL-04                    | Covered |                                                                                                                                                |
+|    3 | Organization trail captures global service events                       | SRA-CLOUDTRAIL-06                    | Covered |                                                                                                                                                |
+|    4 | Additional trails for specific data events                              | SRA-CLOUDTRAIL-14                    | Partial | -14 requires the 32 Bedrock and AgentCore data-event types on the organization trail; other data events and additional trails are not assessed |
+|    5 | Security Tooling account is delegated administrator of the trail        | SRA-CLOUDTRAIL-12, SRA-CLOUDTRAIL-13 | Covered | -12 a delegated admin exists, -13 it is the audit account                                                                                      |
+|    6 | Trail automatically enabled for new member accounts                     | —                                    | Missing |                                                                                                                                                |
+|    7 | Trail publishes to a centralized S3 bucket in the Log Archive account   | SRA-CLOUDTRAIL-08, SRA-CLOUDTRAIL-11 | Covered | -08 delivery working, -11 bucket is in the Log Archive account                                                                                 |
+|    8 | Log file validation enabled                                             | SRA-CLOUDTRAIL-03, SRA-CLOUDTRAIL-10 | Covered | -10 also confirms digest files are delivered                                                                                                   |
+|    9 | Integrated with CloudWatch Logs for retention                           | SRA-CLOUDTRAIL-05, SRA-CLOUDTRAIL-09 | Covered | -05 configuration present, -09 delivery working                                                                                                |
+|   10 | Trail encrypted with a customer managed key                             | SRA-CLOUDTRAIL-02                    | Covered | Verifies a KMS key is set; does not distinguish customer managed from AWS managed                                                              |
+|   11 | Central log bucket in Log Archive encrypted with a customer managed key | —                                    | Missing | No S3 encryption check on the log bucket                                                                                                       |
+|   12 | Central log bucket configured with S3 Object Lock                       | —                                    | Missing |                                                                                                                                                |
+|   13 | Versioning enabled on the central log bucket                            | —                                    | Missing |                                                                                                                                                |
+|   14 | Central log bucket resource policy restricts uploads to the trail ARN   | —                                    | Missing |                                                                                                                                                |
 
 ## AWS Security Hub CSPM
 
-|    # | Checklist item                                                   | SRA Verify check(s)                                        | Status  | Note                                                                                                            |
-| ---: | ---------------------------------------------------------------- | ---------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
-|    1 | CSPM enabled for all member accounts and the management account  | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Covered | -08 all active accounts are members, -09 all members are Enabled                                                |
-|    2 | AWS Config enabled as a prerequisite                             | SRA-CONFIG-01, SRA-CONFIG-02                               | Covered | Recorder configured and running per Region                                                                      |
-|    3 | Security Tooling account is delegated administrator              | SRA-SECURITYHUB-06, SRA-SECURITYHUB-07, SRA-SECURITYHUB-03 | Covered | -06 exists, -07 is the audit account, -03 account-level agreement                                               |
-|    4 | GuardDuty and Detective share the CSPM delegated administrator   | SRA-GUARDDUTY-14, SRA-SECURITYHUB-07                       | Partial | Both are compared to the audit account independently, which implies agreement; Detective is not assessed at all |
-|    5 | Central configuration used                                       | SRA-SECURITYHUB-04                                         | Covered |                                                                                                                 |
-|    6 | All OUs and member accounts designated centrally managed         | —                                                          | Missing | Central configuration is checked, per-target association is not                                                 |
-|    7 | Automatically enabled for new member accounts                    | SRA-SECURITYHUB-10                                         | Covered |                                                                                                                 |
-|    8 | Automatically enabled for new standards                          | SRA-SECURITYHUB-02                                         | Covered |                                                                                                                 |
-|    9 | Findings from all Regions aggregated to a single home Region     | —                                                          | Missing | No finding-aggregator check                                                                                     |
-|   10 | Findings from all member accounts aggregated in Security Tooling | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Partial | Membership implies finding flow but is not the aggregation configuration itself                                 |
-|   11 | FSBP standard enabled for all member accounts                    | SRA-SECURITYHUB-01                                         | Partial | Passes if *any* standard is enabled; does not identify FSBP                                                     |
-|   12 | CIS AWS Foundations Benchmark enabled for all member accounts    | SRA-SECURITYHUB-01                                         | Partial | Same — no per-standard identification                                                                           |
-|   13 | Other standards enabled as applicable                            | SRA-SECURITYHUB-01                                         | Partial | Same                                                                                                            |
-|   14 | CSPM findings consumed by Security Hub for exposure correlation  | —                                                          | Missing |                                                                                                                 |
-|   15 | Automation rule enriches findings with resource context          | —                                                          | Missing |                                                                                                                 |
-|   16 | Custom EventBridge rules for automated response and remediation  | —                                                          | Missing |                                                                                                                 |
-|   17 | CloudWatch telemetry enablement rule for the organization        | —                                                          | Missing |                                                                                                                 |
+|    # | Checklist item                                                   | SRA Verify check(s)                                        | Status  | Note                                                                                                                                                              |
+| ---: | ---------------------------------------------------------------- | ---------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|    1 | CSPM enabled for all member accounts and the management account  | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Covered | -08 all active accounts are members, -09 all members are Enabled                                                                                                  |
+|    2 | AWS Config enabled as a prerequisite                             | SRA-CONFIG-01, SRA-CONFIG-02                               | Covered | Recorder configured and running per Region                                                                                                                        |
+|    3 | Security Tooling account is delegated administrator              | SRA-SECURITYHUB-06, SRA-SECURITYHUB-07, SRA-SECURITYHUB-03 | Covered | -06 exists, -07 is the audit account, -03 account-level agreement                                                                                                 |
+|    4 | GuardDuty and Detective share the CSPM delegated administrator   | SRA-GUARDDUTY-14, SRA-SECURITYHUB-07                       | Partial | Both are compared to the audit account independently, which implies agreement; Detective is not assessed at all                                                   |
+|    5 | Central configuration used                                       | SRA-SECURITYHUB-04                                         | Covered |                                                                                                                                                                   |
+|    6 | All OUs and member accounts designated centrally managed         | —                                                          | Missing | Central configuration is checked, per-target association is not                                                                                                   |
+|    7 | Automatically enabled for new member accounts                    | SRA-SECURITYHUB-10                                         | Covered |                                                                                                                                                                   |
+|    8 | Automatically enabled for new standards                          | SRA-SECURITYHUB-02                                         | Covered |                                                                                                                                                                   |
+|    9 | Findings from all Regions aggregated to a single home Region     | —                                                          | Missing | No finding-aggregator check                                                                                                                                       |
+|   10 | Findings from all member accounts aggregated in Security Tooling | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Partial | Membership implies finding flow but is not the aggregation configuration itself                                                                                   |
+|   11 | FSBP standard enabled for all member accounts                    | SRA-SECURITYHUB-01                                         | Partial | Passes if *any* standard is enabled; does not identify FSBP                                                                                                       |
+|   12 | CIS AWS Foundations Benchmark enabled for all member accounts    | SRA-SECURITYHUB-01                                         | Partial | Same — no per-standard identification                                                                                                                             |
+|   13 | Other standards enabled as applicable                            | SRA-SECURITYHUB-01, SRA-SECURITYHUB-12, SRA-SECURITYHUB-13 | Partial | -12 identifies the AI Security Best Practices standard per Region (READY), -13 confirms central configuration policies enable it; no other standard is identified |
+|   14 | CSPM findings consumed by Security Hub for exposure correlation  | —                                                          | Missing |                                                                                                                                                                   |
+|   15 | Automation rule enriches findings with resource context          | —                                                          | Missing |                                                                                                                                                                   |
+|   16 | Custom EventBridge rules for automated response and remediation  | —                                                          | Missing |                                                                                                                                                                   |
+|   17 | CloudWatch telemetry enablement rule for the organization        | —                                                          | Missing |                                                                                                                                                                   |
 
 ## AWS Config
 
-|    # | Checklist item                                                        | SRA Verify check(s)          | Status  | Note                                                 |
-| ---: | --------------------------------------------------------------------- | ---------------------------- | ------- | ---------------------------------------------------- |
-|    1 | Recorder enabled for all member accounts and the management account   | SRA-CONFIG-01, SRA-CONFIG-02, SRA-CONFIG-03      | Covered | -03 also confirms the last recording event succeeded |
-|    2 | Recorder enabled for all Regions                                      | SRA-CONFIG-01                | Covered | Emits one row per Region in `--regions`              |
-|    3 | Delivery channel S3 bucket centralized in the Log Archive account     | SRA-CONFIG-06                | Covered | Needs `--log-archive-account`                        |
-|    4 | Delegated administrator set to the Security Tooling account           | SRA-CONFIG-07, SRA-CONFIG-08 | Covered | -07 exists, -08 is the audit account                 |
-|    5 | Organization aggregator set up, covering all Regions                  | SRA-CONFIG-04, SRA-CONFIG-05, SRA-CONFIG-09      | Covered | -04 exists, -05 all Regions, -09 valid status        |
-|    6 | Conformance packs deployed uniformly from the delegated administrator | —                            | Missing |                                                      |
-|    7 | Config rule findings sent to Security Hub CSPM                        | —                            | Missing |                                                      |
+|    # | Checklist item                                                        | SRA Verify check(s)                         | Status  | Note                                                 |
+| ---: | --------------------------------------------------------------------- | ------------------------------------------- | ------- | ---------------------------------------------------- |
+|    1 | Recorder enabled for all member accounts and the management account   | SRA-CONFIG-01, SRA-CONFIG-02, SRA-CONFIG-03 | Covered | -03 also confirms the last recording event succeeded |
+|    2 | Recorder enabled for all Regions                                      | SRA-CONFIG-01                               | Covered | Emits one row per Region in `--regions`              |
+|    3 | Delivery channel S3 bucket centralized in the Log Archive account     | SRA-CONFIG-06                               | Covered | Needs `--log-archive-account`                        |
+|    4 | Delegated administrator set to the Security Tooling account           | SRA-CONFIG-07, SRA-CONFIG-08                | Covered | -07 exists, -08 is the audit account                 |
+|    5 | Organization aggregator set up, covering all Regions                  | SRA-CONFIG-04, SRA-CONFIG-05, SRA-CONFIG-09 | Covered | -04 exists, -05 all Regions, -09 valid status        |
+|    6 | Conformance packs deployed uniformly from the delegated administrator | —                                           | Missing |                                                      |
+|    7 | Config rule findings sent to Security Hub CSPM                        | —                                           | Missing |                                                      |
 
 ## Amazon GuardDuty
 
-|    # | Checklist item                                                      | SRA Verify check(s)                  | Status  | Note                                                                                                                                                     |
-| ---: | ------------------------------------------------------------------- | ------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|    1 | Detector enabled for all member accounts and the management account | SRA-GUARDDUTY-01, SRA-GUARDDUTY-03   | Covered | -01 detector exists, -03 it is enabled                                                                                                                   |
-|    2 | Detector enabled for all Regions                                    | SRA-GUARDDUTY-01                     | Covered | One row per Region                                                                                                                                       |
-|    3 | Automatically enabled for new member accounts                       | SRA-GUARDDUTY-15, SRA-GUARDDUTY-20, SRA-GUARDDUTY-21, SRA-GUARDDUTY-22, SRA-GUARDDUTY-23, SRA-GUARDDUTY-24, SRA-GUARDDUTY-25     | Covered | -15 detector auto-enable; -20 S3 data events, -21 EBS malware, -22 EKS audit logs, -23 runtime monitoring, -24 Lambda network logs, -25 RDS login events |
-|    4 | Delegated administration set to the Security Tooling account        | SRA-GUARDDUTY-13, SRA-GUARDDUTY-14   | Covered |                                                                                                                                                          |
-|    5 | Foundational data sources (CloudTrail, VPC flow logs, Route 53 DNS) | SRA-GUARDDUTY-08, SRA-GUARDDUTY-05, SRA-GUARDDUTY-04           | Covered | CloudTrail, VPC flow logs, DNS logs respectively                                                                                                         |
-|    6 | S3 Protection enabled                                               | SRA-GUARDDUTY-06                     | Covered |                                                                                                                                                          |
-|    7 | Malware Protection for EBS volumes enabled                          | SRA-GUARDDUTY-09                     | Covered |                                                                                                                                                          |
-|    8 | Malware Protection for S3 enabled                                   | —                                    | Missing | -06 is S3 data-event protection, a different feature                                                                                                     |
-|    9 | RDS Protection enabled                                              | SRA-GUARDDUTY-10                     | Covered |                                                                                                                                                          |
-|   10 | Lambda Protection enabled                                           | SRA-GUARDDUTY-12                     | Covered |                                                                                                                                                          |
-|   11 | EKS Protection enabled                                              | SRA-GUARDDUTY-07                     | Covered |                                                                                                                                                          |
-|   12 | EKS Runtime Monitoring enabled                                      | SRA-GUARDDUTY-11, SRA-GUARDDUTY-17, SRA-GUARDDUTY-18, SRA-GUARDDUTY-19 | Covered | -17 EKS addon, -18 ECS Fargate agent, -19 EC2 agent management                                                                                           |
-|   13 | Findings flow to Security Hub CSPM and Security Hub                 | SRA-SECURITYHUB-05                   | Partial | -05 passes if any product is ingesting; it does not confirm GuardDuty specifically                                                                       |
-|   14 | Integrated with Amazon Detective                                    | —                                    | Missing |                                                                                                                                                          |
-|   15 | Findings exported to S3 encrypted with a customer managed KMS key   | —                                    | Missing |                                                                                                                                                          |
-|   16 | Extended Threat Detection enabled                                   | —                                    | Missing |                                                                                                                                                          |
-|   17 | Findings exported to a central bucket in Log Archive, CMK-encrypted | —                                    | Missing |                                                                                                                                                          |
+|    # | Checklist item                                                      | SRA Verify check(s)                                                                                                                            | Status  | Note                                                                                                                                                                        |
+| ---: | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|    1 | Detector enabled for all member accounts and the management account | SRA-GUARDDUTY-01, SRA-GUARDDUTY-03                                                                                                             | Covered | -01 detector exists, -03 it is enabled                                                                                                                                      |
+|    2 | Detector enabled for all Regions                                    | SRA-GUARDDUTY-01                                                                                                                               | Covered | One row per Region                                                                                                                                                          |
+|    3 | Automatically enabled for new member accounts                       | SRA-GUARDDUTY-15, SRA-GUARDDUTY-20, SRA-GUARDDUTY-21, SRA-GUARDDUTY-22, SRA-GUARDDUTY-23, SRA-GUARDDUTY-24, SRA-GUARDDUTY-25, SRA-GUARDDUTY-26 | Covered | -15 detector auto-enable; -20 S3 data events, -21 EBS malware, -22 EKS audit logs, -23 runtime monitoring, -24 Lambda network logs, -25 RDS login events, -26 AI Protection |
+|    4 | Delegated administration set to the Security Tooling account        | SRA-GUARDDUTY-13, SRA-GUARDDUTY-14                                                                                                             | Covered |                                                                                                                                                                             |
+|    5 | Foundational data sources (CloudTrail, VPC flow logs, Route 53 DNS) | SRA-GUARDDUTY-08, SRA-GUARDDUTY-05, SRA-GUARDDUTY-04                                                                                           | Covered | CloudTrail, VPC flow logs, DNS logs respectively                                                                                                                            |
+|    6 | S3 Protection enabled                                               | SRA-GUARDDUTY-06                                                                                                                               | Covered |                                                                                                                                                                             |
+|    7 | Malware Protection for EBS volumes enabled                          | SRA-GUARDDUTY-09                                                                                                                               | Covered |                                                                                                                                                                             |
+|    8 | Malware Protection for S3 enabled                                   | —                                                                                                                                              | Missing | -06 is S3 data-event protection, a different feature                                                                                                                        |
+|    9 | RDS Protection enabled                                              | SRA-GUARDDUTY-10                                                                                                                               | Covered |                                                                                                                                                                             |
+|   10 | Lambda Protection enabled                                           | SRA-GUARDDUTY-12                                                                                                                               | Covered |                                                                                                                                                                             |
+|   11 | EKS Protection enabled                                              | SRA-GUARDDUTY-07                                                                                                                               | Covered |                                                                                                                                                                             |
+|   12 | EKS Runtime Monitoring enabled                                      | SRA-GUARDDUTY-11, SRA-GUARDDUTY-17, SRA-GUARDDUTY-18, SRA-GUARDDUTY-19                                                                         | Covered | -17 EKS addon, -18 ECS Fargate agent, -19 EC2 agent management                                                                                                              |
+|   13 | Findings flow to Security Hub CSPM and Security Hub                 | SRA-SECURITYHUB-05                                                                                                                             | Partial | -05 passes if any product is ingesting; it does not confirm GuardDuty specifically                                                                                          |
+|   14 | Integrated with Amazon Detective                                    | —                                                                                                                                              | Missing |                                                                                                                                                                             |
+|   15 | Findings exported to S3 encrypted with a customer managed KMS key   | —                                                                                                                                              | Missing |                                                                                                                                                                             |
+|   16 | Extended Threat Detection enabled                                   | —                                                                                                                                              | Missing |                                                                                                                                                                             |
+|   17 | Findings exported to a central bucket in Log Archive, CMK-encrypted | —                                                                                                                                              | Missing |                                                                                                                                                                             |
 
 ## IAM
 
@@ -190,31 +189,31 @@ No `detective` service package exists. All 9 items are Missing.
 
 ## AWS Firewall Manager
 
-|    # | Checklist item                                                        | SRA Verify check(s)              | Status  | Note                                                              |
-| ---: | --------------------------------------------------------------------- | -------------------------------- | ------- | ----------------------------------------------------------------- |
+|    # | Checklist item                                                        | SRA Verify check(s)                                                    | Status  | Note                                                              |
+| ---: | --------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------- | ----------------------------------------------------------------- |
 |    1 | Security policies are set                                             | SRA-FIREWALLMANAGER-09, SRA-FIREWALLMANAGER-08, SRA-FIREWALLMANAGER-10 | Covered | -09 policies active, -08 remediation enabled, -10 cleanup enabled |
-|    2 | Delegated administrator set to the Security Tooling account           | SRA-FIREWALLMANAGER-01           | Covered | Pinned to us-east-1; `--regions` does not affect the row          |
-|    3 | AWS Config enabled as a prerequisite                                  | SRA-CONFIG-01, SRA-CONFIG-02     | Covered |                                                                   |
-|    4 | Multiple administrators with scope restricted per OU, account, Region | —                                | Missing |                                                                   |
-|    5 | AWS WAF security policy defined                                       | SRA-FIREWALLMANAGER-03           | Covered |                                                                   |
-|    6 | AWS WAF centralized logging policy defined                            | —                                | Missing |                                                                   |
-|    7 | Shield Advanced security policy defined                               | SRA-FIREWALLMANAGER-04           | Covered |                                                                   |
-|    8 | Security group security policy defined                                | SRA-FIREWALLMANAGER-02           | Covered |                                                                   |
-|    9 | AWS Network Firewall policy defined                                   | SRA-FIREWALLMANAGER-06           | Covered |                                                                   |
-|   10 | Route 53 DNS Firewall policy defined                                  | SRA-FIREWALLMANAGER-07           | Covered |                                                                   |
+|    2 | Delegated administrator set to the Security Tooling account           | SRA-FIREWALLMANAGER-01                                                 | Covered | Pinned to us-east-1; `--regions` does not affect the row          |
+|    3 | AWS Config enabled as a prerequisite                                  | SRA-CONFIG-01, SRA-CONFIG-02                                           | Covered |                                                                   |
+|    4 | Multiple administrators with scope restricted per OU, account, Region | —                                                                      | Missing |                                                                   |
+|    5 | AWS WAF security policy defined                                       | SRA-FIREWALLMANAGER-03                                                 | Covered |                                                                   |
+|    6 | AWS WAF centralized logging policy defined                            | —                                                                      | Missing |                                                                   |
+|    7 | Shield Advanced security policy defined                               | SRA-FIREWALLMANAGER-04                                                 | Covered |                                                                   |
+|    8 | Security group security policy defined                                | SRA-FIREWALLMANAGER-02                                                 | Covered |                                                                   |
+|    9 | AWS Network Firewall policy defined                                   | SRA-FIREWALLMANAGER-06                                                 | Covered |                                                                   |
+|   10 | Route 53 DNS Firewall policy defined                                  | SRA-FIREWALLMANAGER-07                                                 | Covered |                                                                   |
 
 ## Amazon Inspector
 
-|    # | Checklist item                                              | SRA Verify check(s)                | Status  | Note                                                                                    |
-| ---: | ----------------------------------------------------------- | ---------------------------------- | ------- | --------------------------------------------------------------------------------------- |
-|    1 | Enabled for all member accounts                             | SRA-INSPECTOR-01, SRA-INSPECTOR-07 | Covered | -01 per account, -07 org-wide from the delegated admin                                  |
-|    2 | Automatically enabled for any new member account            | SRA-INSPECTOR-08, SRA-INSPECTOR-09, SRA-INSPECTOR-10, SRA-INSPECTOR-11    | Covered | EC2, ECR, Lambda, Lambda code                                                           |
-|    3 | Delegated administrator set to the Security Tooling account | SRA-INSPECTOR-05, SRA-INSPECTOR-06 | Covered |                                                                                         |
-|    4 | EC2 vulnerability scanning enabled                          | SRA-INSPECTOR-02                   | Covered |                                                                                         |
-|    5 | ECR image vulnerability scanning enabled                    | SRA-INSPECTOR-03                   | Covered |                                                                                         |
-|    6 | Lambda function and layer vulnerability scanning enabled    | SRA-INSPECTOR-04                   | Covered |                                                                                         |
-|    7 | Lambda code scanning enabled                                | SRA-INSPECTOR-11                   | Partial | Only the org auto-enable flag; no per-account "is it on now" check as -02 … -04 provide |
-|    8 | Code security scanning enabled                              | —                                  | Missing |                                                                                         |
+|    # | Checklist item                                              | SRA Verify check(s)                                                    | Status  | Note                                                                                    |
+| ---: | ----------------------------------------------------------- | ---------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------- |
+|    1 | Enabled for all member accounts                             | SRA-INSPECTOR-01, SRA-INSPECTOR-07                                     | Covered | -01 per account, -07 org-wide from the delegated admin                                  |
+|    2 | Automatically enabled for any new member account            | SRA-INSPECTOR-08, SRA-INSPECTOR-09, SRA-INSPECTOR-10, SRA-INSPECTOR-11 | Covered | EC2, ECR, Lambda, Lambda code                                                           |
+|    3 | Delegated administrator set to the Security Tooling account | SRA-INSPECTOR-05, SRA-INSPECTOR-06                                     | Covered |                                                                                         |
+|    4 | EC2 vulnerability scanning enabled                          | SRA-INSPECTOR-02                                                       | Covered |                                                                                         |
+|    5 | ECR image vulnerability scanning enabled                    | SRA-INSPECTOR-03                                                       | Covered |                                                                                         |
+|    6 | Lambda function and layer vulnerability scanning enabled    | SRA-INSPECTOR-04                                                       | Covered |                                                                                         |
+|    7 | Lambda code scanning enabled                                | SRA-INSPECTOR-11                                                       | Partial | Only the org auto-enable flag; no per-account "is it on now" check as -02 … -04 provide |
+|    8 | Code security scanning enabled                              | —                                                                      | Missing |                                                                                         |
 
 ## Amazon Macie
 
@@ -290,12 +289,12 @@ fan-out in items 2 – 9 can under-report on organizations with many protections
 
 ## AWS Security Incident Response
 
-|    # | Checklist item                                              | SRA Verify check(s)                  | Status  | Note                                                        |
-| ---: | ----------------------------------------------------------- | ------------------------------------ | ------- | ----------------------------------------------------------- |
+|    # | Checklist item                                              | SRA Verify check(s)                                              | Status  | Note                                                        |
+| ---: | ----------------------------------------------------------- | ---------------------------------------------------------------- | ------- | ----------------------------------------------------------- |
 |    1 | Enabled for the whole AWS organization                      | SRA-SECURITYINCIDENTRESPONSE-02, SRA-SECURITYINCIDENTRESPONSE-04 | Covered | -02 membership active, -04 one row per organization account |
-|    2 | Delegated administrator set to the Security Tooling account | SRA-SECURITYINCIDENTRESPONSE-01      | Covered | Region cell is labelled from `regions[0]` — a known defect  |
+|    2 | Delegated administrator set to the Security Tooling account | SRA-SECURITYINCIDENTRESPONSE-01                                  | Covered | Region cell is labelled from `regions[0]` — a known defect  |
 |    3 | Proactive response and alert triaging workflow enabled      | SRA-SECURITYINCIDENTRESPONSE-03, SRA-SECURITYINCIDENTRESPONSE-05 | Covered | -03 Triage opt-in, -05 triage service-linked role           |
-|    4 | AWS CIRT containment actions authorized                     | —                                    | Missing |                                                             |
+|    4 | AWS CIRT containment actions authorized                     | —                                                                | Missing |                                                             |
 
 ## AWS Audit Manager
 
@@ -310,19 +309,21 @@ fan-out in items 2 – 9 can under-report on organizations with many protections
 
 ## AWS Security Hub (unified, exposure correlation)
 
-The `securityhub` package targets **Security Hub CSPM**, not the newer unified
-Security Hub. Nothing here reads the V2 API surface.
+SRA-SECURITYHUB-01 – SRA-SECURITYHUB-13 read the **Security Hub CSPM** API surface.
+SRA-SECURITYHUB-14 – SRA-SECURITYHUB-20 read the unified Security Hub (V2) surface: the V2
+hub, the V2 delegated administrator, the Organizations `SECURITYHUB_POLICY` type, the
+`AggregatorV2`, V2 coverage findings, and EventBridge rules for `Findings Imported V2`.
 
-|    # | Checklist item                                                             | SRA Verify check(s) | Status  | Note                                                                       |
-| ---: | -------------------------------------------------------------------------- | ------------------- | ------- | -------------------------------------------------------------------------- |
-|    1 | Security Hub enabled for all member accounts and the management account    | —                   | Missing | Existing checks read the CSPM API                                          |
-|    2 | Security Tooling set as delegated administrator for Security Hub           | —                   | Missing |                                                                            |
-|    3 | All Regions, OUs and accounts enabled automatically, including future ones | —                   | Missing |                                                                            |
-|    4 | Cross-Region aggregation into a single home Region                         | —                   | Missing |                                                                            |
-|    5 | CSPM, GuardDuty, Inspector and Macie enabled as building-block services    | SRA-SECURITYHUB-05  | Partial | -05 passes if any product ingests findings; it does not require these four |
-|    6 | Coverage findings used to validate uniform service enablement              | —                   | Missing |                                                                            |
-|    7 | Findings formatted in OCSF                                                 | —                   | Missing |                                                                            |
-|    8 | EventBridge integration for automated response and remediation             | —                   | Missing |                                                                            |
+|    # | Checklist item                                                             | SRA Verify check(s)                    | Status  | Note                                                                                                                      |
+| ---: | -------------------------------------------------------------------------- | -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+|    1 | Security Hub enabled for all member accounts and the management account    | SRA-SECURITYHUB-14                     | Covered | -14 calls `DescribeSecurityHubV2` per Region in each account                                                              |
+|    2 | Security Tooling set as delegated administrator for Security Hub           | SRA-SECURITYHUB-15                     | Covered | `ListOrganizationAdminAccounts` with `Feature=SecurityHubV2`; the V2 designation is separate from CSPM's (-07)            |
+|    3 | All Regions, OUs and accounts enabled automatically, including future ones | SRA-SECURITYHUB-16, SRA-SECURITYHUB-17 | Covered | -16 root-attached `SECURITYHUB_POLICY` with `ALL_SUPPORTED`; -17 effective policy per active account                      |
+|    4 | Cross-Region aggregation into a single home Region                         | SRA-SECURITYHUB-18                     | Covered | `GetAggregatorV2` in the home Region; every scanned Region must be linked                                                 |
+|    5 | CSPM, GuardDuty, Inspector and Macie enabled as building-block services    | SRA-SECURITYHUB-19, SRA-SECURITYHUB-05 | Covered | -19's coverage findings assess exactly these four capabilities per account and Region                                     |
+|    6 | Coverage findings used to validate uniform service enablement              | SRA-SECURITYHUB-19                     | Covered | One row per account; unsuppressed coverage findings with `compliance.status` Fail are gaps                                |
+|    7 | Findings formatted in OCSF                                                 | SRA-SECURITYHUB-14                     | Covered | V2 findings are OCSF by construction, so V2 enablement is the whole control; there is no format setting to check          |
+|    8 | EventBridge integration for automated response and remediation             | SRA-SECURITYHUB-20                     | Covered | An ENABLED rule with a target matching `aws.securityhub` / `Findings Imported V2` (ASFF-filtered CSPM rules do not count) |
 
 ## AWS Network Firewall
 
@@ -425,12 +426,13 @@ No `secretsmanager` service package. All 8 items are Missing.
 
 ## SRA Verify checks with no checklist counterpart
 
-These 13 checks assess something the checklist does not state as an item. They are
+These 14 checks assess something the checklist does not state as an item. They are
 additional coverage, not gaps.
 
 | Check                  | Title                                                                |
 | ---------------------- | -------------------------------------------------------------------- |
 | SRA-CLOUDTRAIL-07      | Organization trail is actively publishing events                     |
+| SRA-CONFIG-10          | AWS Config recorder records the AI/ML resource types                 |
 | SRA-EC2-01             | AWS account level EBS encryption by default is enabled               |
 | SRA-S3-01              | S3 restrict public bucket is enabled                                 |
 | SRA-S3-02              | S3 block public ACLs is set                                          |
@@ -447,8 +449,7 @@ additional coverage, not gaps.
 ## Largest coverage gaps, by size
 
 1. **Six service sections with no package at all** — Detective (9), KMS (8), Systems Manager (8), Secrets Manager (8), IAM Identity Center (7 of 8), Private CA (6). 46 missing items.
-2. **Unified Security Hub** (8 items) — the `securityhub` package reads the CSPM API surface only.
-3. **Network Firewall and DNS Firewall** (12 items) — visible only through the Firewall Manager policy checks.
-4. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. No check inspects encryption, Object Lock, versioning, or resource policy on a destination bucket. The `s3` package covers public-access block only.
-5. **IAM root access management** (IAM items 2 – 5) — centralized root access is entirely unassessed.
-6. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.
+2. **Network Firewall and DNS Firewall** (12 items) — visible only through the Firewall Manager policy checks.
+3. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. No check inspects encryption, Object Lock, versioning, or resource policy on a destination bucket. The `s3` package covers public-access block only.
+4. **IAM root access management** (IAM items 2 – 5) — centralized root access is entirely unassessed.
+5. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.

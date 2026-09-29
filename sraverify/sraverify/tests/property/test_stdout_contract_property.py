@@ -66,23 +66,27 @@ _PACKAGE_ROOT: Path = Path(sraverify.__file__).resolve().parent
 #: stderr binding is declared, and it passes ``sys.stderr`` explicitly rather
 #: than relying on ``StreamHandler``'s default -- which is stderr today, but is a
 #: default rather than a declaration.
-_LOGGING_MODULE: Path = _PACKAGE_ROOT / "core" / "logging.py"
 
 #: CLI modules, excluded from the contract. These write to stdout on purpose:
 #: the buildspec parses the summary, the operator reads the banner, and
 #: ``test_exit_codes_scan.py`` asserts ``-> Scan complete!`` appears there.
 #: The contract stops at the library boundary (Requirement 8, Non-Goal 10).
 _CLI_MODULES: frozenset[str] = frozenset(
-    {"main.py", "banner.py", "progress.py"}
+    {"cli.py", "__main__.py", "banner.py", "progress.py"}
 )
 
 
 def _library_modules() -> list[Path]:
     """Return every library module, per the Requirement 8 glossary.
 
-    ``core/``, ``services/``, ``utils/outputs.py``, and ``__init__.py``.
-    ``main.py``, ``utils/banner.py``, and ``utils/progress.py`` are the CLI
-    surface and are excluded. ``tests/`` is not library code.
+    ``core/``, ``services/``, ``utils/outputs.py``, ``scanner.py`` and
+    ``__init__.py``. ``cli.py``, ``__main__.py``, ``utils/banner.py``, and
+    ``utils/progress.py`` are the CLI surface and are excluded. ``tests/`` is
+    not library code.
+
+    ``scanner.py`` is the reason ``main.py`` was split: ``SRAVerify`` is what
+    the MCP server imports, and while it shared a file with the CLI's
+    ``print()`` calls it could not be held to this contract statically.
 
     Returns:
         Absolute paths, sorted, so parametrize IDs are stable.
@@ -97,6 +101,7 @@ def _library_modules() -> list[Path]:
         )
 
     modules.add(_PACKAGE_ROOT / "utils" / "outputs.py")
+    modules.add(_PACKAGE_ROOT / "scanner.py")
     modules.add(_PACKAGE_ROOT / "__init__.py")
 
     return sorted(modules)
@@ -130,16 +135,22 @@ def test_the_library_module_set_is_not_trivially_small() -> None:
 def test_the_cli_modules_are_excluded_deliberately() -> None:
     """The exclusions are named, so widening them is a visible edit.
 
-    If ``main.py`` ever drifted into the set, Property 21 would fail on its six
+    If ``cli.py`` ever drifted into the set, Property 21 would fail on its
     legitimate ``print()`` calls and the temptation would be to loosen the
-    assertion rather than to ask why the boundary moved.
+    assertion rather than to ask why the boundary moved. Conversely the
+    orchestrator must stay *in* the set.
     """
     names = {path.name for path in _LIBRARY_MODULES}
     assert names & _CLI_MODULES == set(), (
         f"a CLI module leaked into the library set: {names & _CLI_MODULES}"
     )
+    assert _PACKAGE_ROOT / "scanner.py" in _LIBRARY_MODULES, (
+        "scanner.py holds SRAVerify, which the MCP server imports; it is "
+        "library code and must be held to the stdout contract"
+    )
     # And they do exist, so the exclusion is not stale.
-    assert (_PACKAGE_ROOT / "main.py").is_file()
+    assert (_PACKAGE_ROOT / "cli.py").is_file()
+    assert (_PACKAGE_ROOT / "__main__.py").is_file()
     assert (_PACKAGE_ROOT / "utils" / "banner.py").is_file()
     assert (_PACKAGE_ROOT / "utils" / "progress.py").is_file()
 
@@ -254,19 +265,19 @@ def test_no_library_module_calls_warnings_warn(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", _LIBRARY_MODULES, ids=_module_ids())
-def test_only_core_logging_configures_handlers(path: Path) -> None:
-    """Requirement 8.8: one module declares where diagnostics go.
+def test_no_library_module_configures_handlers(path: Path) -> None:
+    """Requirement 8.8, as revised: the library declares no destination at all.
 
-    ``logging.StreamHandler()`` with no argument writes to stderr *today*, by
-    default. ``core/logging.py`` passes ``sys.stderr`` explicitly for that
-    reason. A second module adding a bare ``StreamHandler()`` would be relying
-    on that default, and ``logging.basicConfig()`` defaults to stderr too but
-    also silently does nothing if the root already has handlers -- so a caller
-    who added one would get behaviour that depends on import order.
+    Where diagnostics go is the host application's decision -- the CLI's
+    ``configure_logging``, or the MCP server's own setup. A library module
+    that added a ``StreamHandler`` or called ``basicConfig`` would override
+    that decision; the pre-split ``core/logging.py`` stripped the root
+    logger's handlers at import, which silently discarded the MCP server's
+    ``basicConfig`` because the server imported ``sraverify`` after making it.
+
+    ``core/logging.py`` is not exempt: it may add a ``NullHandler`` and
+    nothing else.
     """
-    if path == _LOGGING_MODULE:
-        pytest.skip("core/logging.py is where the stderr binding is declared")
-
     offenders: list[str] = []
     for node in ast.walk(_parse(path)):
         if not isinstance(node, ast.Call):
@@ -284,8 +295,8 @@ def test_only_core_logging_configures_handlers(path: Path) -> None:
             offenders.append(f"{_where(path, node)} ({func.id})")
 
     assert offenders == [], (
-        f"a library module configures logging at {offenders}; only "
-        f"core/logging.py may, and it binds sys.stderr explicitly"
+        f"a library module configures logging at {offenders}; handlers belong "
+        f"to the application -- see sraverify.cli.configure_logging"
     )
 
 
@@ -294,42 +305,64 @@ def test_only_core_logging_configures_handlers(path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-#: Probe source for the root-logger assertion. Runs in a clean interpreter
+#: Probe source for the logging assertions. Runs in a clean interpreter
 #: because pytest's own logging plugin attaches several handlers to the root
 #: logger (``LogCaptureHandler``, ``_LiveLoggingNullHandler``, a ``/dev/null``
-#: ``_FileHandler``), so the claim "core/logging.py leaves the root with exactly
-#: one handler" is simply not observable in-process. Asserting it under pytest
-#: would mean either asserting something weaker than the requirement or
-#: hard-coding pytest's handler set, and both would stop measuring the thing
-#: that matters.
-_ROOT_LOGGER_PROBE = """\
+#: ``_FileHandler``), so "importing sraverify leaves the root logger alone" is
+#: not observable in-process. ``argv[1]`` selects the scenario:
+#:
+#: * ``library`` -- the host configured nothing; import the package.
+#: * ``host``    -- the host ran ``basicConfig`` and quietened ``sraverify``
+#:   *before* importing it and building an ``SRAVerify``, exactly the order the
+#:   MCP server uses. The import and the constructor must leave both alone.
+#: * ``cli``     -- run ``sraverify.cli.configure_logging(debug=False)``.
+_LOGGING_PROBE = """\
 import json
 import logging
 import sys
 
-# Importing the package triggers core/logging.py's root-logger surgery.
-import sraverify.core.logging  # noqa: F401
+scenario = sys.argv[1]
+if scenario == "host":
+    logging.basicConfig(level=logging.CRITICAL, stream=sys.stderr)
+    logging.getLogger("sraverify").setLevel(logging.CRITICAL)
+
+import sraverify  # noqa: E402,F401  (the whole package, as a host imports it)
+
+if scenario == "host":
+    import boto3
+    sraverify.SRAVerify(session=boto3.Session(region_name="us-east-1"))
+elif scenario == "cli":
+    from sraverify.cli import configure_logging
+    configure_logging(debug=False)
 
 root = logging.getLogger()
 package = logging.getLogger("sraverify")
 
+def describe(logger):
+    return [
+        {
+            "type": type(h).__name__,
+            "stderr": getattr(h, "stream", None) is sys.stderr,
+            "stdout": getattr(h, "stream", None) in (sys.stdout, sys.__stdout__),
+        }
+        for h in logger.handlers
+    ]
+
 print(json.dumps({
-    "root_handler_count": len(root.handlers),
-    "root_streams_are_stderr": [
-        getattr(h, "stream", None) is sys.stderr for h in root.handlers
-    ],
-    "root_handler_reprs": [repr(h) for h in root.handlers],
-    "package_handler_count": len(package.handlers),
-    "package_streams_are_stderr": [
-        getattr(h, "stream", None) is sys.stderr for h in package.handlers
-    ],
+    "root_handlers": describe(root),
+    "root_level": root.level,
+    "package_handlers": describe(package),
+    "package_level": package.level,
     "package_propagates": package.propagate,
 }))
 """
 
 
-def _probe_logging_in_a_clean_interpreter() -> dict[str, Any]:
-    """Import the package in a subprocess and report its logging configuration.
+def _probe_logging(scenario: str) -> dict[str, Any]:
+    """Run ``_LOGGING_PROBE`` for *scenario* in a subprocess and decode it.
+
+    Args:
+        scenario: ``"library"``, ``"host"`` or ``"cli"``.
 
     Returns:
         The decoded probe output.
@@ -338,84 +371,116 @@ def _probe_logging_in_a_clean_interpreter() -> dict[str, Any]:
     import subprocess
 
     completed = subprocess.run(
-        [sys.executable, "-c", _ROOT_LOGGER_PROBE],
+        [sys.executable, "-c", _LOGGING_PROBE, scenario],
         capture_output=True,
         text=True,
         timeout=120,
     )
     assert completed.returncode == 0, (
-        f"the logging probe failed:\nstdout={completed.stdout}\n"
+        f"the {scenario} logging probe failed:\nstdout={completed.stdout}\n"
         f"stderr={completed.stderr}"
     )
     return json.loads(completed.stdout)
 
 
-def test_the_root_logger_has_exactly_one_handler_on_stderr() -> None:
-    """Requirement 8.8: ``core/logging.py`` leaves the root with one stderr handler.
+def test_importing_the_library_configures_nothing() -> None:
+    """Requirement 8.8, as revised: an import is not a logging decision.
 
-    Measured in a clean interpreter, for the reason recorded on
-    ``_ROOT_LOGGER_PROBE``: pytest attaches its own handlers to the root logger,
-    so in-process this can only be asserted in a weakened form that would no
-    longer detect the regression it exists for.
-
-    The regression it exists for: a future edit that adds a
-    ``logging.StreamHandler()`` relying on the default stream. That default is
-    stderr today, which is precisely why ``core/logging.py`` passes
-    ``sys.stderr`` explicitly instead -- a default can be changed by any code
-    that runs first, and a declaration cannot.
+    With nothing configured by the host, importing ``sraverify`` leaves the
+    root logger without handlers and at its default level, and gives the
+    ``sraverify`` logger exactly one ``NullHandler``, no level, and default
+    propagation -- the standard library-logging convention. The
+    ``NullHandler`` is what keeps Python's last-resort handler from printing
+    WARNING records the host never asked for.
     """
-    probe = _probe_logging_in_a_clean_interpreter()
+    probe = _probe_logging("library")
 
-    assert probe["root_handler_count"] == 1, (
-        f"the root logger has {probe['root_handler_count']} handlers: "
-        f"{probe['root_handler_reprs']}; core/logging.py strips them and "
-        f"installs exactly one"
+    assert probe["root_handlers"] == [], (
+        f"importing sraverify installed root handlers: {probe['root_handlers']}"
     )
-    assert probe["root_streams_are_stderr"] == [True], (
-        f"the root handler does not write to sys.stderr: "
-        f"{probe['root_handler_reprs']}"
+    assert probe["root_level"] == logging.WARNING, (
+        f"importing sraverify changed the root level to {probe['root_level']}"
+    )
+    assert [h["type"] for h in probe["package_handlers"]] == ["NullHandler"], (
+        f"the sraverify logger's handlers are {probe['package_handlers']}; the "
+        f"library adds a NullHandler and nothing else"
+    )
+    assert probe["package_level"] == logging.NOTSET, (
+        f"the library set the sraverify level to {probe['package_level']}; the "
+        f"level is the application's to choose"
+    )
+    assert probe["package_propagates"] is True, (
+        "the library turned off propagation, which hides its records from the "
+        "application's root handlers"
     )
 
 
-def test_the_package_logger_is_bound_to_stderr_in_a_clean_interpreter() -> None:
-    """The same measurement for the ``sraverify`` logger itself.
+def test_the_library_leaves_a_host_logging_setup_intact() -> None:
+    """The defect that motivated the change, as the MCP server hit it.
 
-    In-process this is also asserted below, where it is observable because
-    pytest does not attach handlers to named loggers. Doing it both ways costs
-    nothing and covers the case where a future conftest starts to.
+    The server calls ``basicConfig(level=CRITICAL)`` and sets ``sraverify`` to
+    ``CRITICAL`` before importing the package and constructing ``SRAVerify``.
+    Before the split, the import stripped the root handler and the constructor
+    reset ``sraverify`` to ``ERROR``. Both must now survive.
     """
-    probe = _probe_logging_in_a_clean_interpreter()
+    probe = _probe_logging("host")
 
-    assert probe["package_handler_count"] >= 1, (
-        "the sraverify logger has no handler at all"
+    assert [h["type"] for h in probe["root_handlers"]] == ["StreamHandler"], (
+        f"the host's basicConfig handler did not survive the import: "
+        f"{probe['root_handlers']}"
     )
-    assert all(probe["package_streams_are_stderr"]), (
-        "a sraverify handler does not write to sys.stderr"
+    assert probe["root_level"] == logging.CRITICAL
+    assert probe["package_level"] == logging.CRITICAL, (
+        f"SRAVerify() changed the host's sraverify level to "
+        f"{probe['package_level']}"
     )
-    assert probe["package_propagates"] is False, (
-        "the sraverify logger propagates; core/logging.py sets propagate=False"
-    )
 
 
-def test_every_sraverify_handler_writes_to_stderr() -> None:
-    """The package logger's own handlers, and its propagation setting.
+def test_the_cli_binds_diagnostics_to_stderr() -> None:
+    """Requirement 8.8, CLI half: every handler the CLI installs writes to stderr.
 
-    ``propagate = False`` matters here: if it were True and a handler were
-    misconfigured, records would also reach the root's handler and the leak
-    would be masked by the duplicate.
+    ``configure_logging`` gives ``sraverify`` its own stderr handler at
+    ``ERROR`` and stops propagation, so its level is independent of the root
+    logger's and no record is emitted twice. The root gets a stderr handler
+    for boto3/botocore. Nothing may point at stdout: the report's
+    separability from diagnostics depends on it.
     """
+    probe = _probe_logging("cli")
+
+    package_streams = [h for h in probe["package_handlers"] if h["type"] != "NullHandler"]
+    assert package_streams and all(h["stderr"] for h in package_streams), (
+        f"the CLI's sraverify handlers are {probe['package_handlers']}; each "
+        f"must write to sys.stderr"
+    )
+    assert probe["root_handlers"] and all(h["stderr"] for h in probe["root_handlers"]), (
+        f"the CLI's root handlers are {probe['root_handlers']}; each must write "
+        f"to sys.stderr"
+    )
+    assert not any(
+        h["stdout"] for h in probe["root_handlers"] + probe["package_handlers"]
+    ), "a handler writes to stdout"
+    assert probe["package_level"] == logging.ERROR
+    assert probe["package_propagates"] is False
+
+
+def test_configure_logging_is_idempotent(capsys: Any) -> None:
+    """Calling it twice replaces the CLI handler rather than stacking a second.
+
+    ``main()`` runs once per process from the console script, but a library
+    caller or a test can invoke it repeatedly, and a stacked handler would
+    print every record twice. The autouse fixture in ``conftest.py`` restores
+    the logger afterwards.
+    """
+    from sraverify.cli import configure_logging
+
+    configure_logging(debug=False)
+    configure_logging(debug=True)
     target = logging.getLogger("sraverify")
 
-    assert target.handlers, "the sraverify logger has no handler at all"
-    for handler in target.handlers:
-        assert getattr(handler, "stream", None) is sys.stderr, (
-            f"sraverify handler {handler!r} writes to "
-            f"{getattr(handler, 'stream', None)!r}, not sys.stderr"
-        )
-    assert target.propagate is False, (
-        "the sraverify logger propagates; core/logging.py sets propagate=False "
-        "so its records are not also emitted by the root handler"
-    )
+    streams = [h for h in target.handlers if not isinstance(h, logging.NullHandler)]
+    assert len(streams) == 1, f"configure_logging stacked handlers: {target.handlers}"
+    assert streams[0].stream is sys.stderr
+    assert target.level == logging.DEBUG
 
 
 # --------------------------------------------------------------------------- #
@@ -692,7 +757,7 @@ def four_probe_scan(monkeypatch: Any) -> Iterator[_NoAwsSession]:
     Yields:
         The refusing session, so a test can assert nothing asked it for a client.
     """
-    from sraverify import main as main_module
+    from sraverify import scanner as main_module
     from sraverify.tests.unit.cli.test_exit_codes_scan import _PROBE_SHAPES
 
     session = _NoAwsSession()

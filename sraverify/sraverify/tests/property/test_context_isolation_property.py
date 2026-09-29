@@ -75,7 +75,7 @@ reference to it still sees the restored contents. Emptying it is not
 housekeeping: with the real catalog present, ``account_type='all'`` would
 select 158 real checks and the scan would go to AWS.
 
-``import sraverify.main`` also imports ``sraverify.services`` for its
+``import sraverify.scanner`` also imports ``sraverify.services`` for its
 registration side effect, and during Phase 2 that raises
 ``CheckIdentityError`` on the not-yet-migrated checks. ``_import_main`` tries
 the honest import first and falls back to stubbing ``sraverify.services`` in
@@ -118,13 +118,13 @@ from sraverify.core.scan_context import ScanContext
 
 
 # ---------------------------------------------------------------------- #
-# Importing main.py, in both phases.
+# Importing scanner.py, in both phases.
 # ---------------------------------------------------------------------- #
 
 def _import_main() -> types.ModuleType:
-    """Import ``sraverify.main``, stubbing ``sraverify.services`` if it must.
+    """Import ``sraverify.scanner``, stubbing ``sraverify.services`` if it must.
 
-    ``main.py`` carries ``import sraverify.services`` purely for the
+    ``scanner.py`` carries ``import sraverify.services`` purely for the
     registration side effect, and until every check body is migrated that
     import raises ``CheckIdentityError``. The honest import is attempted first
     so that once the catalog is migrated this helper becomes a plain import and
@@ -132,17 +132,17 @@ def _import_main() -> types.ModuleType:
     only when the real thing fails.
 
     Returns:
-        The imported ``sraverify.main`` module.
+        The imported ``sraverify.scanner`` module.
     """
     try:
-        import sraverify.main as main_module
+        import sraverify.scanner as main_module
     except Exception:
-        # A failed import removes 'sraverify.main' from sys.modules, so the
+        # A failed import removes 'sraverify.scanner' from sys.modules, so the
         # retry below re-executes the module body in full.
         sys.modules.setdefault(
             "sraverify.services", types.ModuleType("sraverify.services")
         )
-        import sraverify.main as main_module
+        import sraverify.scanner as main_module
     return main_module
 
 
@@ -289,7 +289,7 @@ def _make_probe_check(
     explicitly by ``_isolated_registry`` instead, which is what keeps the
     synthetic catalog scoped to one test.
 
-    The ``meta`` is a real, fully validated ``CheckMeta`` -- ``_select`` reads
+    The ``meta`` is a real, fully validated ``CheckMeta`` -- ``select_checks`` reads
     ``meta.account_type`` and ``meta.service``, ``passed()`` and ``failed()``
     read six fields off it, and ``_synthetic_error`` reads eight -- so a
     stand-in object would only move the failure.
@@ -458,7 +458,7 @@ def _production_log_handling() -> Iterator[None]:
 
     What this does **not** do, which is the point:
 
-      * it does not touch ``main.run_checks``, which still logs with
+      * it does not touch ``scanner.run_checks``, which still logs with
         ``exc_info=True``;
       * it does not soften, skip, or xfail the assertion, and in particular it
         does not exclude the raising shapes from the drawn plan -- those are
@@ -498,7 +498,7 @@ def _production_log_handling() -> Iterator[None]:
 
 @contextlib.contextmanager
 def _recording_scan_context() -> Iterator[list[weakref.ref]]:
-    """Patch ``main.ScanContext`` with a factory that records a weak reference.
+    """Patch ``scanner.ScanContext`` with a factory that records a weak reference.
 
     A weak reference is the only handle the test keeps, which is the whole
     point: a strong one would keep the context alive and the property would

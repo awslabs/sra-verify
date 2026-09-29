@@ -37,6 +37,26 @@ def _silence_aws_sdk_loggers() -> None:
 _silence_aws_sdk_loggers()
 
 
+@pytest.fixture(autouse=True)
+def _restore_sraverify_logger():
+    """Undo any logging configuration a test applied to the ``sraverify`` logger.
+
+    The library configures nothing, but ``sraverify.cli.main()`` calls
+    ``configure_logging``, which installs a stderr handler bound to the
+    ``sys.stderr`` of that moment, sets a level, and turns propagation off. Left
+    in place, that would make every later test's logging depend on which CLI
+    test happened to run first.
+    """
+    target = logging.getLogger("sraverify")
+    saved = (target.handlers[:], target.level, target.propagate)
+    try:
+        yield
+    finally:
+        target.handlers[:] = saved[0]
+        target.setLevel(saved[1])
+        target.propagate = saved[2]
+
+
 #: Message the refused transport raises with. Asserted on by
 #: ``tests/property/test_availability_property.py``, so the two agree.
 _OFFLINE_MESSAGE = (

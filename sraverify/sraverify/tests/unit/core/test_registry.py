@@ -116,7 +116,7 @@ def test_duplicate_error_carries_the_id_and_both_classes(isolated_registry):
 
 
 def test_duplicate_error_is_an_sraverify_error(isolated_registry):
-    # main.py's except clauses lean on the common base.
+    # cli.py's except clauses lean on the common base.
     registry.register("SRA-TEST-01", _check_class("SRA_TEST_01"))
 
     with pytest.raises(SRAVerifyError):

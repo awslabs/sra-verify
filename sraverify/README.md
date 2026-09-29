@@ -21,7 +21,9 @@ sra-verify/
 └── sraverify/                          # project root (pyproject.toml lives here)
     ├── pyproject.toml, uv.lock
     └── sraverify/                      # the Python package
-        ├── main.py                     # SRAVerify class, _select, CLI, exit codes
+        ├── scanner.py                  # library: SRAVerify, select_checks, _synthetic_error
+        ├── cli.py                      # CLI: parse_args, configure_logging, main() -> exit code
+        ├── __main__.py                 # `python -m sraverify` -> cli.main
         ├── core/
         │   ├── check.py                # SecurityCheck: registration, finding helpers
         │   ├── metadata.py             # CheckMeta, Remediation (validated, frozen)
@@ -31,7 +33,7 @@ sra-verify/
         │   ├── registry.py             # _REGISTRY, register, all_checks
         │   ├── discovery.py            # import_check_modules, import_service_packages
         │   ├── scan_context.py         # ScanContext: all per-scan state
-        │   ├── logging.py              # shared stderr-only logger
+        │   ├── logging.py              # shared `sraverify` logger + NullHandler only
         │   └── session.py              # profile + assume-role session builder
         ├── utils/outputs.py            # write_csv_output
         ├── services/
@@ -168,11 +170,11 @@ layer instead of removing it. Each check's findings are materialized with
 ## Registration is automatic
 
 **A check module's presence on disk is the whole of its registration.** There is no
-`CHECKS` dict in any service `__init__.py`, no `ALL_CHECKS` in `main.py`, and no decorator.
+`CHECKS` dict in any service `__init__.py`, no `ALL_CHECKS` in `scanner.py`, and no decorator.
 
 - `services/<svc>/__init__.py` is one call: `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is one call: `import_service_packages(__name__)`.
-- `import sraverify.services` therefore registers the whole catalog. `main.py` carries that
+- `import sraverify.services` therefore registers the whole catalog. `scanner.py` carries that
   import purely for its side effect, with a `# noqa: F401` — it looks removable and is not.
 - Importing a check module executes its class body, which fires
   `SecurityCheck.__init_subclass__`, which cross-checks identity and registers the class.
@@ -334,7 +336,7 @@ class SRA_GUARDDUTY_01(GuardDutyCheck):
 Note what is **not** there. Check classes define no `__init__`:
 `SecurityCheck.__init__(self)` takes no arguments beyond `self`, so a leftover
 `super().__init__(account_type=...)` raises `TypeError` naming the argument. There is no
-`CHECKS` dict edit and no `main.py` edit.
+`CHECKS` dict edit and no `scanner.py` edit.
 
 ### `CheckMeta`
 
@@ -815,16 +817,22 @@ single scan.
 
 ## Logging
 
-Use the single shared logger. **Never call `print()`** from check, base, or client code:
-`core/logging.py` strips the root logger's handlers at import and installs a stderr-only
-handler, because stdout must stay clean for the MCP server.
+Use the single shared logger. **Never call `print()`** from check, base, or client code,
+because stdout must stay clean for the MCP server.
 
 ```python
 from sraverify.core.logging import logger
 ```
 
+The library follows the standard library-logging convention: `core/logging.py` gives the
+`sraverify` logger a `NullHandler` and configures nothing else. It sets no level, leaves
+propagation on, and touches neither the root logger nor boto3. The application decides where
+records go. The CLI does it in `sraverify.cli.configure_logging`: stderr only, `ERROR` by
+default, `DEBUG` with `--debug`. A library caller who wants the records configures logging
+itself, for example `logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)`.
+
 Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes,
-`logger.warning` for a missing client, `logger.error` for an API failure.
+`logger.warning` for a missing client, `logger.debug` for a failed AWS call.
 
 **stdout being empty is a contract**, asserted by
 `tests/property/test_stdout_contract_property.py`. The MCP server speaks JSON-RPC over
@@ -863,12 +871,13 @@ imported from its module — `sraverify.core.finding`, `sraverify.core.enums`,
 class SRAVerify:
     def __init__(self, profile: Optional[str] = None, role_arn: Optional[str] = None,
                  regions: Optional[List[str]] = None, session: Optional[Session] = None,
-                 debug: bool = False,
                  connect_timeout: Optional[float] = None,
                  read_timeout: Optional[float] = None,
                  max_attempts: Optional[int] = None,
                  max_pool_connections: Optional[int] = None): ...
 
+    def select_checks(self, account_type: str = 'all', service: Optional[str] = None,
+                      check_id: Optional[str] = None) -> Dict[str, type[SecurityCheck]]: ...
     def get_available_checks(self, account_type: str = 'all') -> Dict[str, Dict[str, str]]: ...
     def get_available_services(self) -> List[str]: ...
     def run_checks(self, account_type: str = 'all', service: Optional[str] = None,
@@ -876,6 +885,12 @@ class SRAVerify:
                    log_archive_accounts: Optional[List[str]] = None,
                    show_progress: bool = False) -> List[Finding]: ...
 ```
+
+There is no `debug` parameter: the library does not configure logging (see Logging).
+
+`select_checks` resolves the same filters `run_checks` applies and returns the selected
+classes without instantiating any. It raises `UnknownCheckError` or `NoChecksSelectedError`
+exactly as `run_checks` would, so use it to size or preview a scan.
 
 The four boto3 tuning knobs are **constructor** parameters, not `run_checks` parameters;
 they are forwarded into every `ScanContext` the instance builds. `None` means "keep the
@@ -895,15 +910,21 @@ them by attribute. Call `finding.to_row()` yourself if you want CSV-shaped dicts
 #!/usr/bin/env python3
 """Using SRA Verify as a library."""
 
+import logging
+import sys
+
 from sraverify import SRAVerify
 from sraverify.core.enums import Status
 from sraverify.core.errors import NoChecksSelectedError, UnknownCheckError
 from sraverify.utils.outputs import write_csv_output
 
+# Optional: the library logs nowhere until the application configures logging.
+logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
+logging.getLogger("sraverify").setLevel(logging.DEBUG)
+
 sra = SRAVerify(
     profile='my-profile',
     regions=['us-east-1', 'us-west-2'],
-    debug=True,
 )
 
 # Inventory. Credential-free and I/O-free.

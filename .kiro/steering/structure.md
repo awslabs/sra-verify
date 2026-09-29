@@ -114,7 +114,7 @@ decorator.
 - `services/<svc>/__init__.py` is three lines: a docstring, an import of
   `import_check_modules`, and `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is the aggregator: `import_service_packages(__name__)`.
-  `import sraverify.services` therefore registers all 178 checks. `main.py`
+  `import sraverify.services` therefore registers all 182 checks. `main.py`
   carries that import purely for its side effect — drop it and every scan
   selects nothing.
 - Discovery picks up only modules whose name starts with `sra_`, sorted
@@ -574,7 +574,7 @@ order ascending and reproducible.
 ## Tests
 
 The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collects
-**9343 tests**, with 598 skips and no xfails. It is no longer thin.
+**9459 tests**, with 598 skips and no xfails. It is no longer thin.
 
 - `tests/unit/core/` — `test_check_registration.py`, `test_enums.py`,
   `test_finding.py`, `test_metadata.py`, `test_registry.py`, `test_select.py`
@@ -591,9 +591,9 @@ name, because between them they hold the whole contract:
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test_client_contract_property.py`      | All 113 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over all 18 `client.py` files — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return |
 | `test_accessor_cache_property.py`       | Every public base method classified as `accessor`, `accessor_uncached`, `helper`, `client_lookup` or `derived`, proven total and exact against the real classes; then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                    |
-| `test_check_classification_property.py` | Catalog-wide over all 178 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                             |
+| `test_check_classification_property.py` | Catalog-wide over all 182 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                             |
 | `test_discriminator_property.py`        | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, and `is_not_configured` conservative on anything undeclared                                                                                                                               |
-| `test_no_confessing_fail_property.py`   | Static, by AST, over all 178 check modules: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                         |
+| `test_no_confessing_fail_property.py`   | Static, by AST, over all 182 check modules: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                         |
 | `test_availability_property.py`         | `service_available_in_region` is offline, cached, and fails open                                                                                                                                                                                                           |
 | `test_stdout_contract_property.py`      | Nothing in the package writes to stdout                                                                                                                                                                                                                                    |
 
@@ -607,7 +607,7 @@ table or `test_the_adapter_table_is_complete_and_exact` /
 deliberate: the tables are how the suite knows what to drive, so an unlisted
 method would be silently untested.
 
-Several property modules are **catalog-wide**: they enumerate the real 178
+Several property modules are **catalog-wide**: they enumerate the real 182
 registered checks with `pytest.mark.parametrize` rather than sampling, so a
 failure names the offending check ID in the test ID. None of them needs
 credentials or issues an AWS call.

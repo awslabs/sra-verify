@@ -38,7 +38,7 @@ See sraverify/README.md for the check-authoring contract and the full library
 surface.
 """
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 from sraverify.main import SRAVerify
 

@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from typing import Any, Dict, List, Set
 
 from sraverify.core.enums import AccountType, Severity
-from sraverify.core.finding import Finding
+from sraverify.core.finding import GLOBAL_REGION, Finding
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.iam.base import IAMCheck
 
@@ -69,7 +69,9 @@ class SRA_IAM_01(IAMCheck):
         Yields:
             One Finding per IAM user, or one Finding for the account.
         """
-        region = self.GLOBAL_REGION  # "us-east-1"
+        # IAM is global: rows carry "global", not the us-east-1 endpoint the
+        # client is pinned to.
+        region = GLOBAL_REGION
 
         response = self.list_users()
 

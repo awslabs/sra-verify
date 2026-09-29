@@ -365,6 +365,36 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             client_method="list_users",
             cache_key=f"users:{_TEST_ACCOUNT}",
         ),
+        A(
+            "get_organizations_features",
+            "accessor",
+            client_method="list_organizations_features",
+            cache_key=f"organizations_features:{_TEST_ACCOUNT}",
+        ),
+        A(
+            "get_account_summary",
+            "accessor",
+            client_method="get_account_summary",
+            cache_key=f"account_summary:{_TEST_ACCOUNT}",
+        ),
+        A(
+            "get_account_password_policy",
+            "accessor",
+            client_method="get_account_password_policy",
+            cache_key=f"password_policy:{_TEST_ACCOUNT}",
+        ),
+        A(
+            "get_iam_delegated_administrators",
+            "accessor",
+            client_method="list_delegated_administrators",
+            cache_key=f"delegated_admins:{_TEST_ACCOUNT}",
+        ),
+        A(
+            "get_organization",
+            "accessor",
+            client_method="describe_organization",
+            cache_key=f"organization:{_TEST_ACCOUNT}",
+        ),
     ),
     "inspector": (
         A("get_client", "client_lookup", args=(_TEST_REGION,)),

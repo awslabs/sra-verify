@@ -27,7 +27,7 @@ class IAMCheck(SecurityCheck):
 
     IAM is a global AWS service, so a single :class:`IAM_Client` is constructed
     per instance (no region) and findings always carry
-    ``Region = "us-east-1"``. Cached AWS-API responses live on the per-scan
+    ``Region = "global"`` (``GLOBAL_REGION``). Cached AWS-API responses live on the per-scan
     :class:`ScanContext` under the ``"iam"`` namespace, keyed by
     ``account_id``, which avoids duplicate ``ListUsers`` API calls when
     multiple IAM checks run in the same SRA Verify invocation.
@@ -37,14 +37,60 @@ class IAMCheck(SecurityCheck):
     # on the per-scan ``ScanContext``.
     NAMESPACE = "iam"
 
-    #: Empty, deliberately. An account with no IAM users is a **successful**
-    #: ``ListUsers`` returning an empty list, not an error, so every error from
-    #: this operation is an inability to determine.
-    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
-
-    # IAM is a global service; all API calls target this endpoint and every
-    # finding produced by an IAM check reports this region.
-    GLOBAL_REGION: str = "us-east-1"
+    #: The ``(operation, code)`` pairs that mean "the control is not configured".
+    #:
+    #: ``ListUsers`` and ``GetAccountSummary`` declare nothing: no IAM users is a
+    #: successful empty list, and the summary documents only ``ServiceFailure``.
+    #:
+    #: ``ListOrganizationsFeatures`` declares only what has been observed:
+    #: ``ServiceAccessNotEnabledException`` (IAM trusted access off), which leaves
+    #: centralized root access unavailable and so is the control being absent.
+    #: ``AccountNotManagementOrDelegatedAdministratorException`` is deliberately
+    #: absent: it means the scan ran from the wrong account, not that root access
+    #: management is off. ``OrganizationNotFoundException`` and
+    #: ``OrganizationNotInAllFeaturesModeException`` are documented but have not
+    #: been observed, and the wire spelling of this operation's codes differs
+    #: from the API reference (it carries an ``Exception`` suffix), so they are
+    #: left undeclared and read as an honest ERROR.
+    #:
+    #: ``DescribeOrganization`` is absent too: SRA-IAM-05 only uses it to
+    #: recognise the management account, and a standalone account is not a
+    #: member account the control can be judged for.
+    NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "ListOrganizationsFeatures": {
+            "ServiceAccessNotEnabledException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/IAM/latest/APIReference/"
+                    "API_ListOrganizationsFeatures.html -- ServiceAccessNotEnabled, "
+                    "trusted access for IAM is not enabled. Observed 2026-09-29 from "
+                    "the test-org management account after disable-aws-service-access "
+                    "for iam.amazonaws.com: 'Trusted Access for IAM not enabled by "
+                    "organization of input account <account-id>.'"
+                ),
+            ),
+        },
+        "GetAccountPasswordPolicy": {
+            "NoSuchEntity": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/IAM/latest/APIReference/"
+                    "API_GetAccountPasswordPolicy.html -- NoSuchEntity. Observed "
+                    "2026-09-29 in three test-org accounts with no custom policy: "
+                    "'The Password Policy with domain name <account-id> cannot be "
+                    "found.'"
+                ),
+            ),
+        },
+        "ListDelegatedAdministrators": {
+            "AWSOrganizationsNotInUseException": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
+                    "API_ListDelegatedAdministrators.html -- returned when the "
+                    "account is not a member of an organization, so no IAM "
+                    "delegated administrator can exist."
+                ),
+            ),
+        },
+    }
 
     def _setup_clients(self):
         """Set up the IAM client (global service, no per-region clients).
@@ -103,6 +149,85 @@ class IAMCheck(SecurityCheck):
         logger.debug("IAM: Cached list_users response")
 
         return response
+
+    def _cached_call(self, thing: str, client_method: str) -> Dict[str, Any]:
+        """
+        Issue one no-argument client call, caching a success per account.
+
+        Args:
+            thing: The cache-key prefix; the key is ``f"{thing}:{account_id}"``.
+            client_method: The :class:`IAM_Client` method to call on a miss.
+
+        Returns:
+            The client's success dict, or its error result unchanged (never
+            cached), or a ``NoClient`` result when no client was built.
+        """
+        cache_key = f"{thing}:{self.account_id}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug(f"IAM: Using cached {thing} response")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        if self._iam_client is None:
+            logger.warning("IAM: No client available")
+            return no_client_result(service="IAM", region="global")
+
+        logger.debug(f"IAM: Fetching {thing} response")
+        response = getattr(self._iam_client, client_method)()
+        if is_error(response):
+            # Never cached: a retry has to be able to re-issue the call.
+            return response
+
+        self._ctx._set(self.NAMESPACE, cache_key, response)
+        return response
+
+    def get_organizations_features(self) -> Dict[str, Any]:
+        """
+        Get the centralized root access features enabled for the organization.
+
+        Returns:
+            ``{"EnabledFeatures": [...], "OrganizationId": ...}`` on success, or
+            an error result.
+        """
+        return self._cached_call("organizations_features", "list_organizations_features")
+
+    def get_account_summary(self) -> Dict[str, Any]:
+        """
+        Get the IAM account summary for the current account.
+
+        Returns:
+            ``{"SummaryMap": {...}}`` on success, or an error result.
+        """
+        return self._cached_call("account_summary", "get_account_summary")
+
+    def get_account_password_policy(self) -> Dict[str, Any]:
+        """
+        Get the account's custom IAM password policy.
+
+        Returns:
+            ``{"PasswordPolicy": {...}}`` on success, or an error result.
+        """
+        return self._cached_call("password_policy", "get_account_password_policy")
+
+    def get_iam_delegated_administrators(self) -> Dict[str, Any]:
+        """
+        Get the delegated administrators registered for ``iam.amazonaws.com``.
+
+        Returns:
+            ``{"DelegatedAdministrators": [...]}`` on success, or an error result.
+        """
+        return self._cached_call("delegated_admins", "list_delegated_administrators")
+
+    def get_organization(self) -> Dict[str, Any]:
+        """
+        Describe the organization the current account belongs to.
+
+        Used instead of ``get_management_accountId()``, which raises on failure
+        and so would turn a denied call into a synthetic ERROR row.
+
+        Returns:
+            ``{"Organization": {...}}`` on success, or an error result.
+        """
+        return self._cached_call("organization", "describe_organization")
 
     def _validate_metadata(self):
         """

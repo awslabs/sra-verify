@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sraverify",
-    version="0.2.3",
+    version="0.2.4",
     author="SRA Verify team",
     author_email="schiefj@amazon.com",
     description="AWS Security Reference Architecture Verification Tool",

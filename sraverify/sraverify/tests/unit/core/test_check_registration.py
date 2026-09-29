@@ -356,20 +356,30 @@ def test_a_check_may_inherit_a_base_class_declared_in_base_py(synthetic_service)
     assert module.GuardDutyCheck not in set(catalog.values())
 
 
+def _subclass_in_module(name: str, module_name: str) -> type:
+    """Create a ``SecurityCheck`` subclass that claims to live in ``module_name``.
+
+    ``type()`` with ``__module__`` in the namespace sets the attribute before
+    ``__init_subclass__`` runs, which is what the registration skip reads. That
+    gives the same class a ``class`` statement in that module would, without
+    ``exec``.
+    """
+    return type(name, (SecurityCheck,), {"__module__": module_name})
+
+
 def test_a_subclass_whose_module_is_absent_from_sys_modules_is_skipped(
     isolated_registry,
 ):
-    # exec with a __name__ nobody has imported: sys.modules.get returns None.
+    # A __module__ nobody has imported: sys.modules.get returns None.
     # The class name, the module name, and the file stem the module name implies
     # are all otherwise valid, so absence from sys.modules is the only possible
     # grounds for the skip.
     module_name = "_sraverify_absent_pkg.guardduty.checks.sra_guardduty_01"
     assert module_name not in sys.modules
 
-    namespace = {"__name__": module_name, "SecurityCheck": SecurityCheck}
-    exec("class SRA_GUARDDUTY_01(SecurityCheck):\n    pass\n", namespace)
+    cls = _subclass_in_module("SRA_GUARDDUTY_01", module_name)
 
-    assert namespace["SRA_GUARDDUTY_01"].__module__ == module_name
+    assert cls.__module__ == module_name
     assert "SRA-GUARDDUTY-01" not in registry.all_checks()
 
 
@@ -382,8 +392,7 @@ def test_a_subclass_whose_module_carries_no_file_is_skipped(isolated_registry):
     assert getattr(module, "__file__", None) is None
     sys.modules[module_name] = module
     try:
-        namespace = {"__name__": module_name, "SecurityCheck": SecurityCheck}
-        exec("class SRA_GUARDDUTY_01(SecurityCheck):\n    pass\n", namespace)
+        _subclass_in_module("SRA_GUARDDUTY_01", module_name)
     finally:
         del sys.modules[module_name]
 
@@ -398,10 +407,9 @@ def test_neither_silent_skip_raises_even_with_a_malformed_class_name(
     module_name = "_sraverify_absent_pkg_2.nowhere.sra_9bad_00"
     assert module_name not in sys.modules
 
-    namespace = {"__name__": module_name, "SecurityCheck": SecurityCheck}
-    exec("class NotACheckAtAll(SecurityCheck):\n    pass\n", namespace)
+    cls = _subclass_in_module("NotACheckAtAll", module_name)
 
-    assert namespace["NotACheckAtAll"] not in set(registry.all_checks().values())
+    assert cls not in set(registry.all_checks().values())
 
 
 # --------------------------------------------------------------------------

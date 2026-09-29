@@ -1,8 +1,13 @@
 """
 sraverify - Security Reference Architecture Verification Tool
 
-This package provides both a command-line interface and a Python library for verifying
-AWS Security Reference Architecture implementations.
+This package provides both a command-line interface (``sraverify.cli``, run as
+``sraverify`` or ``python -m sraverify``) and a Python library
+(``sraverify.scanner``) for verifying AWS Security Reference Architecture
+implementations.
+
+The library configures no logging. Records go to the ``sraverify`` logger, which
+carries only a ``NullHandler``; configure logging in your application to see them.
 
 Example usage as a library:
 
@@ -40,8 +45,8 @@ surface.
 
 # The single source of the package version. pyproject.toml's [tool.hatch.version]
 # reads this line as text, so keep it a plain string literal assignment.
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
-from sraverify.main import SRAVerify
+from sraverify.scanner import SRAVerify
 
 __all__ = ['SRAVerify']

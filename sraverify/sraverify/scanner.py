@@ -1,30 +1,25 @@
 """
-SRA Verify - Security Reference Architecture Verification Tool
+SRA Verify library interface: the ``SRAVerify`` scan orchestrator.
 
-This module provides both the library interface and CLI functionality.
-The SRAVerify class implements the core functionality that can be used
-as a library, while the CLI functions use this class to provide the
-command-line interface.
+This module is the library half of the package and is what
+``from sraverify import SRAVerify`` resolves to. It selects checks, runs them
+against a per-scan ``ScanContext``, and returns findings. It configures no
+logging handlers and writes nothing to stdout; both belong to the host
+application. The command-line interface lives in ``sraverify.cli``.
 """
-import argparse
-import datetime
 import difflib
-import os
-import sys
 from boto3 import Session
 from typing import Dict, List, Any, Optional
 
 from sraverify.core.check import SecurityCheck
-from sraverify.core.enums import AccountType, Status
 from sraverify.core.errors import NoChecksSelectedError, UnknownCheckError
+from sraverify.core.enums import Status
 from sraverify.core.finding import GLOBAL_REGION, Finding
 from sraverify.core.registry import all_checks
 from sraverify.core.session import get_session
-from sraverify.core.logging import logger, configure_logging
+from sraverify.core.logging import logger
 from sraverify.core.scan_context import ScanContext
-from sraverify.utils.outputs import write_csv_output
 from sraverify.utils.progress import ScanProgress
-from sraverify.utils.banner import print_banner
 
 # Imported purely for its side effect: importing the services package walks
 # every service subpackage and every ``sra_*`` check module, and each check
@@ -40,12 +35,6 @@ SUGGESTION_CUTOFF = 0.6
 
 #: At most this many suggestions accompany an UnknownCheckError.
 SUGGESTION_LIMIT = 3
-
-#: Output path used when ``--output`` is omitted. Named rather than repeated
-#: because the CLI compares against it to decide whether to inject a timestamp
-#: (Requirement 9.12): an operator who supplies this exact path explicitly gets
-#: a timestamp too, which is the pre-change behavior and is deliberately kept.
-DEFAULT_OUTPUT = 'sraverify_findings.csv'
 
 
 def _near_misses(check_id: str, registry) -> List[str]:
@@ -147,7 +136,6 @@ class SRAVerify:
 
     def __init__(self, profile: Optional[str] = None, role_arn: Optional[str] = None,
                  regions: Optional[List[str]] = None, session: Optional[Session] = None,
-                 debug: bool = False,
                  connect_timeout: Optional[float] = None,
                  read_timeout: Optional[float] = None,
                  max_attempts: Optional[int] = None,
@@ -160,7 +148,6 @@ class SRAVerify:
             role_arn: ARN of IAM role to assume
             regions: List of AWS regions to check
             session: Existing AWS session to use (if provided)
-            debug: Enable debug logging
             connect_timeout: Optional override for the boto3 connect timeout (seconds)
                 applied to every client built during ``run_checks``. ``None``
                 keeps the ``ScanContext`` default (10s).
@@ -173,8 +160,11 @@ class SRAVerify:
             max_pool_connections: Optional override for the boto3
                 ``max_pool_connections`` applied to every client built during
                 ``run_checks``. ``None`` keeps the ``ScanContext`` default (50).
+
+        Logging is not configured here. The ``sraverify`` logger carries only a
+        ``NullHandler``, so the host application decides where records go and
+        at what level; the CLI does that in ``sraverify.cli``.
         """
-        configure_logging(debug)
         self.regions = regions
         self.session = session if session else get_session(profile=profile, role_arn=role_arn)
         self._connect_timeout = connect_timeout
@@ -183,10 +173,14 @@ class SRAVerify:
         self._max_pool_connections = max_pool_connections
         self.progress = None
 
-    def _select(self, account_type: str = 'all', service: Optional[str] = None,
-                check_id: Optional[str] = None) -> Dict[str, type[SecurityCheck]]:
+    def select_checks(self, account_type: str = 'all', service: Optional[str] = None,
+                      check_id: Optional[str] = None) -> Dict[str, type[SecurityCheck]]:
         """
-        Resolve CLI filters to the checks to run. Instantiates nothing.
+        Resolve scan filters to the checks to run. Instantiates nothing.
+
+        Public so a caller can size or preview a scan before running it -- the
+        CLI's banner reports ``len(select_checks(...))`` -- using exactly the
+        selection ``run_checks`` will apply.
 
         Every filter reads ``cls.meta``, a validated class attribute, so
         selection constructs no check and issues no AWS API call. ``--check``
@@ -254,7 +248,7 @@ class SRAVerify:
         Get all available checks, optionally filtered by account type.
 
         Reads ``cls.meta`` and constructs no check instance. Unlike
-        ``_select``, an empty result is not an error here: listing the checks
+        ``select_checks``, an empty result is not an error here: listing the checks
         for an account type that has none is a legitimate inventory answer.
 
         Args:
@@ -324,7 +318,7 @@ class SRAVerify:
             f"Selecting checks: account_type={account_type}, "
             f"service={service}, check_id={check_id}"
         )
-        checks_to_run = self._select(account_type, service, check_id)
+        checks_to_run = self.select_checks(account_type, service, check_id)
 
         all_findings: List[Finding] = []
 
@@ -488,208 +482,3 @@ class SRAVerify:
             # returns. This is the mechanism that gives the long-running MCP
             # server per-scan isolation without an explicit cache-clear step.
             del ctx
-
-
-def print_summary(findings: List[Finding], output_file: str) -> None:
-    """Report the per-status tallies on standard output.
-
-    Reached only once the report has been written, so its appearance is the
-    operator's signal that a usable CSV exists at ``output_file`` (Requirement
-    9.14 suppresses it on a write failure).
-
-    ``f.status`` is a :class:`Status` member and is compared against the enum, not
-    against a string literal. A ``Finding`` is a frozen dataclass with no ``get``,
-    so a dict-style read here would raise rather than silently tally zero.
-
-    Args:
-        findings: The findings just written, in output order.
-        output_file: The resolved path they were written to, echoed so the
-            operator does not have to reconstruct the injected timestamp.
-    """
-    pass_count = sum(1 for f in findings if f.status is Status.PASS)
-    fail_count = sum(1 for f in findings if f.status is Status.FAIL)
-    error_count = sum(1 for f in findings if f.status is Status.ERROR)
-
-    logger.debug("Scan complete")
-    print("\n-> Scan complete!")
-    print(f"  · Total findings: {len(findings)}")
-    print(f"  · Pass: {pass_count}")
-    print(f"  · Fail: {fail_count}")
-    print(f"  · Error: {error_count}")
-    print(f"  · Output: {output_file}")
-
-
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='SRA Verify - Security Rule Assessment Verification Tool')
-    parser.add_argument('--profile', type=str, help='AWS profile to use')
-    parser.add_argument('--role', type=str, help='ARN of IAM role to assume')
-    parser.add_argument('--regions', type=str, help='Comma-separated list of AWS regions to check')
-    parser.add_argument('--output', type=str, default=DEFAULT_OUTPUT,
-                        help=f'Output file name (default: {DEFAULT_OUTPUT})')
-    parser.add_argument('--check', type=str, help='Run a specific check (e.g., SRA-GUARDDUTY-01)')
-    parser.add_argument('--service', type=str, help='Run checks for a specific service (e.g., GuardDuty)')
-    # Choices derived from the enum plus the literal 'all', so the CLI holds no
-    # second list of account-type strings to drift from AccountType (9.10). The
-    # help text is generated from the same source for the same reason. Note the
-    # values are the members' ``.value`` strings, not the members: argparse
-    # compares the supplied string against the choices, and while StrEnum
-    # members would compare equal, they render as ``AccountType.APPLICATION``
-    # in the usage message.
-    account_type_choices = [t.value for t in AccountType] + ['all']
-    parser.add_argument('--account-type', type=str,
-                        choices=account_type_choices,
-                        default='all',
-                        help='Type of accounts to run checks against: '
-                             f'{", ".join(account_type_choices)} (default: all)')
-    parser.add_argument('--audit-account', type=str, metavar='ACCOUNTID1,ACCOUNTID2',
-                        help='AWS accounts used for Audit/Security Tooling, use comma separated values')
-    parser.add_argument('--log-archive-account', type=str, metavar='ACCOUNTID1,ACCOUNTID2',
-                        help='AWS accounts used for Logging, use comma separated values')
-    parser.add_argument('--list-checks', action='store_true', help='List available checks')
-    parser.add_argument('--list-services', action='store_true', help='List available services')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-
-    # Bounded boto3 Client_Config knobs forwarded into the per-scan
-    # ScanContext. Defaults match the ScanContext defaults (10s connect,
-    # 30s read, 3 retry attempts, 50 pool connections); when these flags
-    # are omitted the ScanContext defaults take effect.
-    parser.add_argument('--connect-timeout', type=float, default=None,
-                        help='boto3 connect timeout in seconds (default: 10)')
-    parser.add_argument('--read-timeout', type=float, default=None,
-                        help='boto3 read timeout in seconds (default: 30)')
-    parser.add_argument('--max-attempts', type=int, default=None,
-                        help='boto3 retry max_attempts (default: 3)')
-    parser.add_argument('--max-pool-connections', type=int, default=None,
-                        help='boto3 max_pool_connections (default: 50)')
-
-    return parser.parse_args()
-
-
-def main():
-    """Main entry point."""
-    args = parse_args()
-
-    # Create SRAVerify instance
-    regions = [r.strip() for r in args.regions.split(',')] if args.regions else None
-    sra = SRAVerify(
-        profile=args.profile,
-        role_arn=args.role,
-        regions=regions,
-        debug=args.debug,
-        connect_timeout=args.connect_timeout,
-        read_timeout=args.read_timeout,
-        max_attempts=args.max_attempts,
-        max_pool_connections=args.max_pool_connections,
-    )
-
-    if args.list_checks:
-        checks = sra.get_available_checks(args.account_type)
-        print("Available checks:")
-        for check_id, info in checks.items():
-            print(f"  {check_id}: {info['name']} ({info['service']}) [{info['account_type']}]")
-        return
-
-    if args.list_services:
-        services = sra.get_available_services()
-        print("Available services:")
-        for service in services:
-            print(f"  {service}")
-        return
-
-    # Parse audit accounts if provided
-    audit_accounts = None
-    if args.audit_account:
-        audit_accounts = [a.strip() for a in args.audit_account.split(',')]
-        logger.debug(f"Using audit accounts: {', '.join(audit_accounts)}")
-
-    # Parse log archive accounts if provided
-    log_archive_accounts = None
-    if args.log_archive_account:
-        log_archive_accounts = [a.strip() for a in args.log_archive_account.split(',')]
-        logger.debug(f"Using log archive accounts: {', '.join(log_archive_accounts)}")
-
-    # Resolved BEFORE the scan so the error paths below know the path -- the
-    # exit-2 path has to promise no file was created there, and the exit-1 path
-    # has to name it. A timestamp is injected ONLY when --output was left at
-    # its default, so an explicit --output is never rewritten (9.12).
-    # ``splitext`` rather than string surgery so the stamp lands before the
-    # extension: sraverify_findings_20250909_074500.csv.
-    output_file = args.output
-    if output_file == DEFAULT_OUTPUT:
-        stem, ext = os.path.splitext(DEFAULT_OUTPUT)
-        stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = f"{stem}_{stamp}{ext}"
-
-    # One guarded block spanning the banner and the scan, because BOTH resolve
-    # the filters: the banner's check count calls ``_select`` directly, and
-    # ``run_checks`` calls it again. A mistyped --check would otherwise
-    # traceback out of the banner before ever reaching the handler below. Exit
-    # 2 is the argparse convention for a usage error, which is also what
-    # argparse itself returns for a bad --account-type, so the CLI is
-    # internally consistent (9.7).
-    try:
-        # Display banner with session information
-        print_banner(
-            profile=args.profile or 'default',
-            region=sra.session.region_name,
-            session=sra.session,
-            regions=regions,
-            account_type=args.account_type,
-            # Derived from the selected mapping, so the banner reports the
-            # checks that are about to run rather than the whole account-type
-            # inventory, and constructs no check to count them.
-            checks_count=len(sra._select(args.account_type, args.service, args.check)),
-            output_file=output_file,
-            role=args.role
-        )
-
-        findings = sra.run_checks(
-            account_type=args.account_type,
-            service=args.service,
-            check_id=args.check,
-            audit_accounts=audit_accounts,
-            log_archive_accounts=log_archive_accounts,
-            show_progress=True
-        )
-    except (UnknownCheckError, NoChecksSelectedError) as exc:
-        # Usage error. UnknownCheckError composes a sentence carrying the
-        # unmatched ID and its near-miss suggestions; NoChecksSelectedError
-        # renders the three filter values through __str__ while keeping them as
-        # its args for a library caller. Either way ``str(exc)`` holds everything
-        # 9.7 requires be logged, and the phrasing belongs to the exception rather
-        # than to the CLI so a library caller sees the same text.
-        logger.error(str(exc))
-        # No file is created at output_file: nothing has touched it yet, and
-        # write_csv_output is not reached. This replaces the pre-change
-        # "log, return [], write a header-only CSV, exit 0", which was
-        # indistinguishable from a clean scan and, in the CodeBuild fan-out,
-        # silently under-reported a whole account (9.14).
-        sys.exit(2)
-
-    logger.debug(f"Writing findings to {output_file}")
-    try:
-        write_csv_output(findings, output_file)
-    except OSError as exc:
-        # The scan itself succeeded and the write failed -- often transient (a
-        # full disk, a stale working directory), so it is worth retrying, which
-        # is why it is status 1 and not the 2 reserved for arguments that will
-        # not work on a second run. No summary is printed: the summary is the
-        # operator's evidence that a usable report exists (9.14).
-        logger.error(f"Could not write {output_file}: {exc}")
-        sys.exit(1)
-
-    print_summary(findings, output_file)
-
-    # 0 even with FAIL and ERROR rows present (9.13). This is load-bearing and
-    # the instinct runs the other way: the buildspec fans sraverify out across
-    # every ACTIVE account with GNU parallel, and a non-zero exit from one
-    # member account would abort or degrade the fan-out. A FAIL is not a tool
-    # failure -- it is the tool working. A non-zero status means only "this
-    # invocation produced no usable report", which is exactly the signal the
-    # pandas consolidation step needs to tell a missing CSV from an empty one.
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()

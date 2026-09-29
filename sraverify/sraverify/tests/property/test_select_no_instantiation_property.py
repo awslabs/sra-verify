@@ -4,7 +4,7 @@ This module implements **Property 15: selection never instantiates a check**:
 
     Selection filters never instantiate a check class. Asserted by patching
     ``SecurityCheck.__init__`` with a counter (or a ``__new__`` spy) and
-    confirming zero calls across ``_select``, ``get_available_checks``, and
+    confirming zero calls across ``select_checks``, ``get_available_checks``, and
     ``get_available_services`` for every filter combination.
 
 **Validates: Requirements 9.1, 9.8, 9.9, 9.11**
@@ -48,7 +48,7 @@ asserts that half over a real ``run_checks`` call, which is possible without
 credentials: ``ScanContext`` construction touches no network, and the account
 identity lookup that does is already tolerated as non-fatal by design
 (Requirement 10.5), so the scan proceeds with empty account strings. Without
-that test this module would be satisfied by a ``_select`` that returned an empty
+that test this module would be satisfied by a ``select_checks`` that returned an empty
 mapping and a ``run_checks`` that ran nothing.
 
 Both spies, not one
@@ -98,14 +98,14 @@ from sraverify.core.metadata import CheckMeta, Remediation
 
 
 # ---------------------------------------------------------------------- #
-# Importing main.py, in Phase 2 and in Phase 3 alike.
+# Importing scanner.py, in Phase 2 and in Phase 3 alike.
 # ---------------------------------------------------------------------- #
 
 
 def _load_sra_verify() -> type:
-    """Return ``SRAVerify``, importing ``sraverify.main`` if it is not loaded.
+    """Return ``SRAVerify``, importing ``sraverify.scanner`` if it is not loaded.
 
-    ``main.py`` carries ``import sraverify.services`` for its registration side
+    ``scanner.py`` carries ``import sraverify.services`` for its registration side
     effect. During Phase 2 of this change that walk raises
     ``CheckIdentityError`` on the first check body that has not been migrated
     yet, so importing ``main`` fails for a reason that has nothing to do with
@@ -125,10 +125,10 @@ def _load_sra_verify() -> type:
     installed unconditionally.
 
     Returns:
-        The ``SRAVerify`` class from ``sraverify.main``.
+        The ``SRAVerify`` class from ``sraverify.scanner``.
     """
     try:
-        from sraverify.main import SRAVerify
+        from sraverify.scanner import SRAVerify
         return SRAVerify
     except Exception:
         pass
@@ -141,14 +141,14 @@ def _load_sra_verify() -> type:
     stub.__doc__ = (
         "Test stub standing in for the services package, whose import walks "
         "every check module. Installed only for the duration of importing "
-        "sraverify.main."
+        "sraverify.scanner."
     )
     # A package with nowhere to search: nothing can accidentally import a real
     # service module *through* the stub while it is installed.
     stub.__path__ = []  # type: ignore[attr-defined]
     sys.modules["sraverify.services"] = stub
     try:
-        from sraverify.main import SRAVerify
+        from sraverify.scanner import SRAVerify
     finally:
         if sys.modules.get("sraverify.services") is stub:
             del sys.modules["sraverify.services"]
@@ -316,7 +316,7 @@ def _synthetic_catalog() -> Iterator[None]:
 
     ``_REGISTRY`` is module-level process state. The snapshot is a shallow copy
     and restoration mutates the original dict in place rather than rebinding
-    the name, so ``main.py``'s already-imported ``all_checks`` reference keeps
+    the name, so ``scanner.py``'s already-imported ``all_checks`` reference keeps
     seeing the restored contents.
     """
     saved = dict(registry._REGISTRY)
@@ -561,11 +561,11 @@ def test_the_synthetic_catalog_is_what_selection_sees() -> None:
 def test_selection_constructs_no_check_for_any_filter_combination(
     account_type: str, service: Optional[str], check_id: Optional[str]
 ) -> None:
-    """Property 15: ``_select`` and both inventory functions instantiate nothing.
+    """Property 15: ``select_checks`` and both inventory functions instantiate nothing.
 
     Quantified over the whole filter space, and asserted on the failing paths
     as well as the succeeding one: ``UnknownCheckError`` and
-    ``NoChecksSelectedError`` are reached by different branches of ``_select``,
+    ``NoChecksSelectedError`` are reached by different branches of ``select_checks``,
     and a construction on the way to raising would count just the same.
 
     Validates: Requirements 9.1, 9.8, 9.9, 9.11
@@ -575,7 +575,7 @@ def test_selection_constructs_no_check_for_any_filter_combination(
     with _synthetic_catalog(), _instantiation_spy() as spy:
         selected = None
         try:
-            selected = sra._select(account_type, service, check_id)
+            selected = sra.select_checks(account_type, service, check_id)
         except (UnknownCheckError, NoChecksSelectedError):
             # A usage error, not a check failure. Either way nothing is built.
             pass
@@ -599,10 +599,10 @@ def test_selection_constructs_no_check_for_any_filter_combination(
         # A mapping of instances would satisfy a broken spy; classes cannot be
         # produced without reading `meta` off the class, which is the point.
         if selected is not None:
-            assert selected, "_select returned an empty mapping"
+            assert selected, "select_checks returned an empty mapping"
             for key, value in selected.items():
                 assert isinstance(value, type), (
-                    f"_select returned a non-class for {key!r}: {value!r}"
+                    f"select_checks returned a non-class for {key!r}: {value!r}"
                 )
                 assert issubclass(value, SecurityCheck)
                 assert not isinstance(value, SecurityCheck)
@@ -643,7 +643,7 @@ def test_repeated_selection_stays_free(
     with _synthetic_catalog(), _instantiation_spy() as spy:
         for _ in range(3):
             with contextlib.suppress(UnknownCheckError, NoChecksSelectedError):
-                sra._select(account_type, service, check_id)
+                sra.select_checks(account_type, service, check_id)
             sra.get_available_checks(account_type)
             sra.get_available_services()
 
@@ -662,9 +662,9 @@ def test_listing_the_inventory_constructs_nothing_and_reads_only_metadata(
     """Criterion 9.8: ``--list-checks`` and ``--list-services`` build nothing.
 
     Separated from the combined property because the CLI reaches these two
-    without ever calling ``_select``: ``--list-checks`` returns before the scan
+    without ever calling ``select_checks``: ``--list-checks`` returns before the scan
     path is entered. A regression confined to the inventory path would
-    otherwise be masked by ``_select`` in the same spy window.
+    otherwise be masked by ``select_checks`` in the same spy window.
 
     Validates: Requirements 9.8, 9.9
     """
@@ -707,7 +707,7 @@ def test_a_scan_constructs_exactly_one_instance_per_selected_check(
 
     The other half of Property 15. Zero constructions during selection is only
     an improvement if the scan itself still builds each selected check exactly
-    once -- ``_select`` returning an empty mapping would satisfy every
+    once -- ``select_checks`` returning an empty mapping would satisfy every
     assertion above.
 
     Runs without credentials. ``ScanContext`` construction touches no network,
@@ -723,7 +723,7 @@ def test_a_scan_constructs_exactly_one_instance_per_selected_check(
     sra = _selector(regions=["us-east-1"])
 
     with _synthetic_catalog():
-        selected = sra._select(account_type, service, check_id)
+        selected = sra.select_checks(account_type, service, check_id)
 
         with _instantiation_spy() as spy:
             findings = sra.run_checks(

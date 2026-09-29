@@ -464,7 +464,7 @@ def test_a_malformed_stem_leaves_the_registry_untouched(synthetic_service):
 
 
 def test_an_identity_failure_is_an_sraverify_error(synthetic_service):
-    # main.py's except clauses lean on the common base.
+    # cli.py's except clauses lean on the common base.
     pkg = synthetic_service(
         {
             "checks/sra_guardduty_00.py": _check_src(

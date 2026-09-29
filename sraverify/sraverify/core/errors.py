@@ -2,8 +2,9 @@
 
 The first three errors below are import-time failures -- a catalog defect that
 no invocation can work around. The last two are usage failures, and are the
-ones ``main()`` catches to exit non-zero. Keeping them in one module lets
-``main.py`` import every ``except`` clause from a single place.
+ones ``sraverify.cli.main()`` catches to exit non-zero. Keeping them in one
+module lets ``scanner.py`` and ``cli.py`` import every ``except`` clause from a
+single place.
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """Property-based test for selection's non-empty guarantee (task 11.6).
 
-This module implements **Property 16: ``_select`` never returns an empty
+This module implements **Property 16: ``select_checks`` never returns an empty
 mapping**:
 
     ∀ ``account_type`` ∈ ``AccountType``, ∀ ``service`` in the service set:
-    ``_select`` either returns a non-empty mapping whose every member matches
+    ``select_checks`` either returns a non-empty mapping whose every member matches
     the filters, or raises ``NoChecksSelectedError``. It never returns an empty
     mapping.
 
@@ -18,7 +18,7 @@ The failure this closes is not "selection returns the wrong checks", it is
 straight through ``run_checks`` into a zero-row CSV and an exit code of 0, so a
 mistyped ``--service GuardDuty2`` is indistinguishable from a fully compliant
 account. Requirement 9.2 makes the empty result unrepresentable rather than
-merely discouraged: the only two shapes ``_select`` can produce are a non-empty
+merely discouraged: the only two shapes ``select_checks`` can produce are a non-empty
 mapping and a raise, and this property is the assertion that no third shape
 exists for any filter combination.
 
@@ -68,7 +68,7 @@ catalog is not what this module thinks it is.
 Importing ``main`` during Phase 2
 ---------------------------------
 
-``main.py`` imports ``sraverify.services`` for its registration side effect, and
+``scanner.py`` imports ``sraverify.services`` for its registration side effect, and
 that import raises ``CheckIdentityError`` on the first unmigrated check until
 Phase 3 completes. ``_load_main`` attempts the real import first and only falls
 back to a stub ``sraverify.services`` in ``sys.modules``, removing the stub
@@ -100,12 +100,12 @@ from sraverify.core.metadata import CheckMeta, Remediation
 
 
 # ---------------------------------------------------------------------- #
-# Importing main.py before Phase 3 has migrated the catalog.
+# Importing scanner.py before Phase 3 has migrated the catalog.
 # ---------------------------------------------------------------------- #
 
 
 def _load_main() -> ModuleType:
-    """Import and return ``sraverify.main``, tolerating an unmigrated catalog.
+    """Import and return ``sraverify.scanner``, tolerating an unmigrated catalog.
 
     The real import is attempted first and is the only path taken once Phase 3
     is complete, so this module ends up testing ``main`` exactly as production
@@ -120,21 +120,21 @@ def _load_main() -> ModuleType:
     process once the catalog imports again -- reaches the real package.
 
     Returns:
-        The ``sraverify.main`` module.
+        The ``sraverify.scanner`` module.
     """
-    already = sys.modules.get("sraverify.main")
+    already = sys.modules.get("sraverify.scanner")
     if already is not None:
         return already
 
     try:
-        return importlib.import_module("sraverify.main")
+        return importlib.import_module("sraverify.scanner")
     except Exception:
         # Deliberately broad. The Phase 2 failure is CheckIdentityError today
         # and could be MetadataError mid-migration, and neither is worth
         # enumerating here: if the retry below also fails, that exception
         # propagates and the module still fails to import loudly. The stub
         # bypasses discovery and nothing else, so it cannot mask a defect in
-        # main.py itself.
+        # scanner.py itself.
         sys.modules.pop("sraverify.services", None)
         stub = ModuleType("sraverify.services")
         stub.__doc__ = (
@@ -148,7 +148,7 @@ def _load_main() -> ModuleType:
         stub.__path__ = []  # type: ignore[attr-defined]
         sys.modules["sraverify.services"] = stub
         try:
-            return importlib.import_module("sraverify.main")
+            return importlib.import_module("sraverify.scanner")
         finally:
             sys.modules.pop("sraverify.services", None)
 
@@ -233,7 +233,7 @@ _UNKNOWN_CHECK_IDS: tuple[str, ...] = (
 def _meta(check_id: str, account_type: AccountType, service: str) -> CheckMeta:
     """Build a real, fully validated ``CheckMeta`` for a synthetic check.
 
-    A real ``CheckMeta`` rather than a stand-in object, because ``_select``
+    A real ``CheckMeta`` rather than a stand-in object, because ``select_checks``
     reads ``meta.account_type`` and ``meta.service`` and the account-type
     comparison depends on ``AccountType`` being a ``StrEnum`` -- a plain string
     stand-in would let a broken comparison pass here and fail in production.
@@ -330,16 +330,16 @@ def _synthetic_catalog() -> Iterator[None]:
 
 
 def _selector() -> "SRAVerify":
-    """Return an ``SRAVerify`` whose ``_select`` is callable, built without AWS.
+    """Return an ``SRAVerify`` whose ``select_checks`` is callable, built without AWS.
 
     ``SRAVerify.__init__`` configures logging and builds a boto3 ``Session``,
-    neither of which ``_select`` reads: selection touches only ``cls.meta`` on
+    neither of which ``select_checks`` reads: selection touches only ``cls.meta`` on
     the registered classes. Bypassing ``__init__`` with ``__new__`` keeps these
     tests credential-free and offline, which is what lets them quantify over
     hundreds of filter combinations.
 
     Returns:
-        An uninitialized ``SRAVerify`` instance, sufficient for ``_select``.
+        An uninitialized ``SRAVerify`` instance, sufficient for ``select_checks``.
     """
     return SRAVerify.__new__(SRAVerify)
 
@@ -463,7 +463,7 @@ _CONTRADICTIONS: tuple[tuple[str, str, Optional[str]], ...] = tuple(
 def test_select_returns_a_non_empty_matching_mapping_or_raises(
     account_type: str, service: Optional[str], check_id: Optional[str]
 ) -> None:
-    """Property 16: ``_select`` never returns an empty mapping.
+    """Property 16: ``select_checks`` never returns an empty mapping.
 
     Either a non-empty mapping whose every member matches every supplied
     filter, or a raise. There is no third outcome for any filter combination,
@@ -479,7 +479,7 @@ def test_select_returns_a_non_empty_matching_mapping_or_raises(
     # is nothing for the other two filters to narrow.
     if check_id is not None and check_id not in _CHECK_IDS:
         with pytest.raises(UnknownCheckError) as excinfo:
-            sra._select(account_type, service, check_id)
+            sra.select_checks(account_type, service, check_id)
         assert excinfo.value.check_id == check_id, (
             f"UnknownCheckError does not carry the supplied ID: "
             f"{excinfo.value.check_id!r} != {check_id!r}"
@@ -493,7 +493,7 @@ def test_select_returns_a_non_empty_matching_mapping_or_raises(
     # ---- Nothing matches: a raise, never an empty mapping -------------- #
     if not expected:
         with pytest.raises(NoChecksSelectedError) as excinfo:
-            sra._select(account_type, service, check_id)
+            sra.select_checks(account_type, service, check_id)
         error = excinfo.value
         # Not an UnknownCheckError: the two are siblings under SRAVerifyError
         # and neither subclasses the other, so a caller distinguishing them
@@ -512,10 +512,10 @@ def test_select_returns_a_non_empty_matching_mapping_or_raises(
         return
 
     # ---- Something matches: a non-empty, fully matching mapping -------- #
-    selected = sra._select(account_type, service, check_id)
+    selected = sra.select_checks(account_type, service, check_id)
 
     assert selected, (
-        f"_select returned an empty mapping for account_type={account_type!r}, "
+        f"select_checks returned an empty mapping for account_type={account_type!r}, "
         f"service={service!r}, check_id={check_id!r}; it must raise "
         f"NoChecksSelectedError instead"
     )
@@ -573,11 +573,11 @@ def test_every_account_type_and_service_pair_is_non_empty_or_raises(
 
     if not expected:
         with pytest.raises(NoChecksSelectedError) as excinfo:
-            sra._select(account_type, service, None)
+            sra.select_checks(account_type, service, None)
         assert excinfo.value.args == (account_type, service, None)
         return
 
-    selected = sra._select(account_type, service, None)
+    selected = sra.select_checks(account_type, service, None)
 
     assert selected
     assert set(selected) == expected
@@ -614,7 +614,7 @@ def test_a_registered_check_id_contradicting_a_filter_raises_no_checks_selected(
     assert _expected(account_type, service, check_id) == set()
 
     with pytest.raises(NoChecksSelectedError) as excinfo:
-        sra._select(account_type, service, check_id)
+        sra.select_checks(account_type, service, check_id)
 
     error = excinfo.value
     assert not isinstance(error, UnknownCheckError), (
@@ -644,7 +644,7 @@ def test_a_registered_check_id_alone_selects_exactly_itself(
 
     for account_type in ("all", own_type.value):
         for service in (None, own_service, own_service.upper(), f"  {own_service} "):
-            selected = sra._select(account_type, service, check_id)
+            selected = sra.select_checks(account_type, service, check_id)
 
             assert set(selected) == {check_id}, (
                 f"--check {check_id!r} with account_type={account_type!r} and "
@@ -660,14 +660,14 @@ def test_no_filters_selects_the_whole_catalog() -> None:
     """
     sra = _selector()
 
-    selected = sra._select()
+    selected = sra.select_checks()
 
     assert set(selected) == set(_CHECK_IDS)
-    assert sra._select("all", None, None) == selected
+    assert sra.select_checks("all", None, None) == selected
 
 
 def test_the_returned_mapping_is_a_plain_dict_the_caller_may_hold() -> None:
-    """``_select`` hands back its own dict, not the registry's read-only view.
+    """``select_checks`` hands back its own dict, not the registry's read-only view.
 
     ``run_checks`` groups the result by service and reads ``len()`` off it, so
     the return value has to be an ordinary mapping. Returning
@@ -679,8 +679,8 @@ def test_the_returned_mapping_is_a_plain_dict_the_caller_may_hold() -> None:
     """
     sra = _selector()
 
-    unfiltered = sra._select()
-    filtered = sra._select("application", None, None)
+    unfiltered = sra.select_checks()
+    filtered = sra.select_checks("application", None, None)
 
     for selected in (unfiltered, filtered):
         assert isinstance(selected, dict)
@@ -768,29 +768,29 @@ def test_declaring_a_synthetic_subclass_does_not_register_it() -> None:
 
 
 def test_main_is_the_real_module_and_select_reads_the_live_registry() -> None:
-    """The import shim loaded ``sraverify.main`` itself, not a stand-in.
+    """The import shim loaded ``sraverify.scanner`` itself, not a stand-in.
 
-    And ``_select`` reads the registry through ``all_checks()`` on every call,
+    And ``select_checks`` reads the registry through ``all_checks()`` on every call,
     which is what makes the synthetic catalog visible to it at all. A module
     that had captured the catalog at import time would still be answering with
     the real one.
 
     Validates: Requirements 9.2
     """
-    assert _main.__name__ == "sraverify.main"
-    assert _main.__file__ is not None and _main.__file__.endswith("main.py")
-    assert SRAVerify.__module__ == "sraverify.main"
+    assert _main.__name__ == "sraverify.scanner"
+    assert _main.__file__ is not None and _main.__file__.endswith("scanner.py")
+    assert SRAVerify.__module__ == "sraverify.scanner"
 
     # No stub left behind for a sibling test module to inherit.
     stub = sys.modules.get("sraverify.services")
     assert stub is None or getattr(stub, "__file__", None) is not None
 
     # Reads the live registry: a check removed from it disappears from the
-    # selection without main.py being reloaded.
+    # selection without scanner.py being reloaded.
     sra = _selector()
-    assert "SRA-ECHO-01" in sra._select()
+    assert "SRA-ECHO-01" in sra.select_checks()
     removed = registry._REGISTRY.pop("SRA-ECHO-01")
     try:
-        assert "SRA-ECHO-01" not in sra._select()
+        assert "SRA-ECHO-01" not in sra.select_checks()
     finally:
         registry._REGISTRY["SRA-ECHO-01"] = removed

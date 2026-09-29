@@ -2,7 +2,7 @@
 
 This module implements **Property 17: unknown check ID exits without output**:
 
-    ``_select(check_id=x)`` for ``x`` not in the registry raises
+    ``select_checks(check_id=x)`` for ``x`` not in the registry raises
     ``UnknownCheckError``; the CLI exits 2 and creates no file.
 
 **Validates: Requirements 9.4, 9.7, 9.14**
@@ -18,7 +18,7 @@ the account silently disappears from the report. Three separate observable
 behaviors have to hold together for that failure mode to stay closed, and this
 module asserts all three:
 
-  * ``_select`` **raises** rather than returning an empty mapping;
+  * ``select_checks`` **raises** rather than returning an empty mapping;
   * the CLI **exits 2**, argparse's own convention for a usage error, which is
     also what argparse returns for a bad ``--account-type``, so the surface is
     internally consistent;
@@ -33,7 +33,7 @@ Three things about the shape of the tests
 **The suggestion ordering is asserted, not just the exception type.** Criterion
 9.4 requires at most three registry keys at similarity 0.6 or better, ordered
 most similar first *with ties broken by ascending check ID*. That last clause
-is why ``main._near_misses`` exists at all instead of a one-line call to
+is why ``scanner._near_misses`` exists at all instead of a one-line call to
 ``difflib.get_close_matches``: ``get_close_matches`` selects with
 ``heapq.nlargest`` over ``(ratio, key)`` tuples, so equally-similar keys come
 back in **descending** key order. Over the synthetic catalog below,
@@ -45,7 +45,7 @@ simplification back to the stdlib helper fails here rather than shipping a
 **The AWS boundary is asserted, not merely avoided.** ``main()`` constructs a
 real ``SRAVerify``, which builds a boto3 ``Session``, and it calls
 ``print_banner``, which calls ``sts:GetCallerIdentity``. On the exit-2 path
-neither should reach AWS: ``_select`` raises while ``print_banner``'s arguments
+neither should reach AWS: ``select_checks`` raises while ``print_banner``'s arguments
 are still being evaluated, so the banner never runs. Rather than trusting that,
 these tests install a session whose ``client()`` records the call and refuses,
 and assert it was never called -- which holds even if the banner *did* run, and
@@ -84,9 +84,9 @@ from sraverify.tests.property.strategies import check_ids
 # --------------------------------------------------------------------------- #
 
 def _ensure_main_importable() -> None:
-    """Make ``import sraverify.main`` work during the Phase 2 / Phase 3 window.
+    """Make ``import sraverify.scanner`` work during the Phase 2 / Phase 3 window.
 
-    ``main.py`` imports ``sraverify.services`` for its registration side
+    ``scanner.py`` imports ``sraverify.services`` for its registration side
     effect, and that import walks all 158 check modules. Until the last check
     body is migrated an unmigrated check raises ``CheckIdentityError`` at
     class-creation time, so the ``services`` package cannot be imported and
@@ -94,7 +94,7 @@ def _ensure_main_importable() -> None:
 
     Same shape as the root ``conftest.py`` bootstrap for the top-level package,
     and for the same reason: try the real import, and only if it fails install
-    a body-less stub module under the name ``main.py`` needs to find in
+    a body-less stub module under the name ``scanner.py`` needs to find in
     ``sys.modules``. The stub carries the real package directory as its
     ``__path__``, so an individual ``sraverify.services.<svc>.base`` import
     still resolves normally for any other test module in the session.
@@ -103,7 +103,7 @@ def _ensure_main_importable() -> None:
     never built, and this function is a no-op -- which is what keeps these
     tests running unchanged after the migration lands.
     """
-    if "sraverify.main" in sys.modules:
+    if "sraverify.scanner" in sys.modules:
         return
     try:
         importlib.import_module("sraverify.services")
@@ -128,13 +128,12 @@ def _ensure_main_importable() -> None:
 
 _ensure_main_importable()
 
-from sraverify.main import (  # noqa: E402  (must follow the bootstrap above)
-    DEFAULT_OUTPUT,
+from sraverify.cli import DEFAULT_OUTPUT, main  # noqa: E402  (must follow the bootstrap above)
+from sraverify.scanner import (  # noqa: E402
     SUGGESTION_CUTOFF,
     SUGGESTION_LIMIT,
     SRAVerify,
     _near_misses,
-    main,
 )
 
 
@@ -166,7 +165,7 @@ _CATALOG_IDS = frozenset(check_id for check_id, _, _ in _CATALOG)
 def _meta(check_id: str, service: str, account_type: AccountType) -> CheckMeta:
     """Build a real, fully-validated ``CheckMeta`` for a synthetic check.
 
-    A real ``CheckMeta`` rather than a stand-in: ``_select`` reads
+    A real ``CheckMeta`` rather than a stand-in: ``select_checks`` reads
     ``meta.check_id``, ``meta.account_type``, and ``meta.service``, and the
     validation rules are what guarantee those are the types the selector
     expects. A hand-rolled namespace would let this module pass while the real
@@ -199,7 +198,7 @@ def _check_class(check_id: str, service: str, account_type: AccountType) -> type
     """Return a throwaway class carrying ``meta``, registered directly.
 
     Deliberately **not** a ``SecurityCheck`` subclass declared in a real
-    ``sra_*.py`` file. ``_select`` reads ``cls.meta`` and nothing else, so a
+    ``sra_*.py`` file. ``select_checks`` reads ``cls.meta`` and nothing else, so a
     bare class with a real ``CheckMeta`` is a sufficient and honest stand-in,
     and registering it by hand keeps ``__init_subclass__``'s file-stem and
     class-name identity rules -- Requirement 4's business, tested in
@@ -265,7 +264,7 @@ class _RefusingSession:
 
     ``region_name`` is a real attribute because ``main()`` reads
     ``sra.session.region_name`` while evaluating ``print_banner``'s arguments,
-    which happens before ``_select`` raises.
+    which happens before ``select_checks`` raises.
 
     ``client()`` records the call *and then* raises, so the recording survives
     a caller that swallows the exception -- which ``print_banner`` does, in a
@@ -290,13 +289,13 @@ class _RefusingSession:
 def refusing_session(monkeypatch) -> _RefusingSession:
     """Install a ``_RefusingSession`` in place of the real session builder.
 
-    Patches the name ``get_session`` in ``sraverify.main``'s namespace, which
+    Patches the name ``get_session`` in ``sraverify.scanner``'s namespace, which
     is where ``SRAVerify.__init__`` looks it up, so no credential resolution,
     no profile lookup, and no ``assume_role`` happens even before the question
     of an API call arises.
     """
     session = _RefusingSession()
-    monkeypatch.setattr("sraverify.main.get_session", lambda **kwargs: session)
+    monkeypatch.setattr("sraverify.scanner.get_session", lambda **kwargs: session)
     return session
 
 
@@ -364,7 +363,7 @@ def unknown_check_ids() -> st.SearchStrategy[str]:
       * ``check_ids()`` -- well-formed ``SRA-<SERVICE>-NN`` strings naming
         services that do not exist, which is the far side of the same mistake;
       * arbitrary text -- the rest of the input space, including the empty
-        string. ``_select``'s guard is ``check_id is not None``, so ``--check=``
+        string. ``select_checks``'s guard is ``check_id is not None``, so ``--check=``
         reaches the registry lookup as ``""`` rather than being treated as "no
         filter supplied".
 
@@ -388,7 +387,7 @@ def _reference_near_misses(check_id: str, keys: list[str]) -> list[str]:
     An independent restatement of the rule rather than a copy of the
     implementation: score every key, keep those at or above the cutoff, sort by
     descending similarity with ascending check ID inside a tie, take the first
-    three. ``main._near_misses`` reaches the same answer through difflib's
+    three. ``scanner._near_misses`` reaches the same answer through difflib's
     ``real_quick_ratio``/``quick_ratio`` short-circuits, which are upper bounds
     on ``ratio`` and so can only skip keys that would have failed the cutoff
     anyway. If those short-circuits are ever misapplied -- compared the wrong
@@ -422,7 +421,7 @@ def _ratio(key: str, check_id: str) -> float:
 
 
 # --------------------------------------------------------------------------- #
-# Property 17, first half: _select raises (Requirement 9.4)
+# Property 17, first half: select_checks raises (Requirement 9.4)
 # --------------------------------------------------------------------------- #
 
 @given(unknown=unknown_check_ids())
@@ -430,7 +429,7 @@ def _ratio(key: str, check_id: str) -> float:
     # `catalog` is function-scoped, so hypothesis reuses one installed catalog
     # across the draws of a single test. That is exactly what is wanted here:
     # the catalog is a fixed constant, the fixture only puts it in place, and
-    # nothing in the test mutates it -- `_select` is a pure read.
+    # nothing in the test mutates it -- `select_checks` is a pure read.
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_select_raises_unknown_check_error_for_any_unregistered_id(
@@ -448,7 +447,7 @@ def test_select_raises_unknown_check_error_for_any_unregistered_id(
     sra = SRAVerify()
 
     with pytest.raises(UnknownCheckError) as excinfo:
-        sra._select(check_id=unknown)
+        sra.select_checks(check_id=unknown)
 
     # The unmatched value is carried verbatim -- not stripped, not upper-cased,
     # not normalized. 9.4 matches exactly and case-sensitively, so the operator
@@ -463,7 +462,7 @@ def test_select_raises_unknown_check_error_for_any_unregistered_id(
 
     # Selection is a pure read of cls.meta: no client, therefore no AWS call.
     assert refusing_session.client_calls == [], (
-        f"_select built an AWS client: {refusing_session.client_calls!r}"
+        f"select_checks built an AWS client: {refusing_session.client_calls!r}"
     )
 
 
@@ -484,7 +483,7 @@ def test_carried_suggestions_satisfy_criterion_9_4(
     sra = SRAVerify()
 
     with pytest.raises(UnknownCheckError) as excinfo:
-        sra._select(check_id=unknown)
+        sra.select_checks(check_id=unknown)
     suggestions = excinfo.value.suggestions
 
     # Recorded so `--hypothesis-show-statistics` shows how often the ordering
@@ -637,7 +636,7 @@ def test_nothing_near_enough_yields_an_empty_list_and_a_hintless_message(
     sra = SRAVerify()
 
     with pytest.raises(UnknownCheckError) as excinfo:
-        sra._select(check_id=unknown)
+        sra.select_checks(check_id=unknown)
 
     assert excinfo.value.suggestions == []
     assert "Did you mean" not in str(excinfo.value), (
@@ -656,7 +655,7 @@ def test_unknown_check_error_is_an_sraverify_error(
     sra = SRAVerify()
 
     with pytest.raises(SRAVerifyError):
-        sra._select(check_id="SRA-GUARDDUTY-99")
+        sra.select_checks(check_id="SRA-GUARDDUTY-99")
 
 
 def test_a_registered_id_does_not_raise(
@@ -664,14 +663,14 @@ def test_a_registered_id_does_not_raise(
 ) -> None:
     """The property is not vacuous: a real ID still selects.
 
-    Without this, a ``_select`` that raised ``UnknownCheckError``
+    Without this, a ``select_checks`` that raised ``UnknownCheckError``
     unconditionally would satisfy every other assertion in this module.
 
     Validates: Requirements 9.4
     """
     sra = SRAVerify()
 
-    selected = sra._select(check_id="SRA-GUARDDUTY-01")
+    selected = sra.select_checks(check_id="SRA-GUARDDUTY-01")
 
     assert list(selected) == ["SRA-GUARDDUTY-01"]
     assert refusing_session.client_calls == []
@@ -703,7 +702,7 @@ def test_the_cli_exits_2_and_creates_no_file_for_any_unknown_id(
     """Property 17: an unknown ``--check`` exits 2 with nothing written.
 
     The value is passed as ``--check=<value>`` rather than as two arguments, so
-    a drawn string beginning with ``-`` reaches ``_select`` as a value instead
+    a drawn string beginning with ``-`` reaches ``select_checks`` as a value instead
     of being parsed as an unknown option -- which would also exit 2, and for
     the wrong reason, making the assertion pass vacuously.
 
@@ -730,11 +729,12 @@ def test_the_cli_exits_2_and_creates_no_file_for_any_unknown_id(
         ],
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        main()
+    # main() reads sys.argv when given no argv, and returns the status the
+    # console script passes to sys.exit.
+    status = main()
 
-    assert excinfo.value.code == 2, (
-        f"--check={unknown!r} exited {excinfo.value.code!r}, expected 2"
+    assert status == 2, (
+        f"--check={unknown!r} exited {status!r}, expected 2"
     )
 
     # No file at the resolved output path, and none anywhere else under
@@ -747,7 +747,7 @@ def test_the_cli_exits_2_and_creates_no_file_for_any_unknown_id(
         f"under {tmp_path}"
     )
 
-    # No AWS client was built, so no API call was attempted. `_select` raises
+    # No AWS client was built, so no API call was attempted. `select_checks` raises
     # while print_banner's arguments are still being evaluated, which is also
     # why the banner text below is absent.
     assert refusing_session.client_calls == [], (
@@ -794,10 +794,7 @@ def test_the_cli_creates_no_file_at_the_timestamped_default_path(
         sys, "argv", ["sraverify", "--check=SRA-GUARDDUTY-99", "--regions", "us-east-1"]
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        main()
-
-    assert excinfo.value.code == 2
+    assert main() == 2
     assert list(tmp_path.iterdir()) == [], (
         f"the exit-2 path created {[p.name for p in tmp_path.iterdir()]} in "
         f"the working directory; the default output base name is "
@@ -812,12 +809,13 @@ def test_the_exit_status_is_an_integer_2_not_a_message(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """``sys.exit(2)`` and not ``sys.exit("...")``.
+    """``main()`` returns the integer 2, not a message.
 
-    ``SystemExit.code`` is whatever was passed, and a string argument makes the
-    process exit 1 while printing that string to stderr. The CodeBuild fan-out
-    distinguishes 1 (the scan ran, the write failed) from 2 (the filters were
-    unusable), so the difference is observable and worth pinning as a type.
+    The console script passes ``main()``'s return value to ``sys.exit``, and a
+    string argument there makes the process exit 1 while printing that string
+    to stderr. The CodeBuild fan-out distinguishes 1 (the scan ran, the write
+    failed) from 2 (the filters were unusable), so the difference is observable
+    and worth pinning as a type.
 
     Validates: Requirements 9.7
     """
@@ -832,9 +830,8 @@ def test_the_exit_status_is_an_integer_2_not_a_message(
         ],
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        main()
+    status = main()
 
-    assert isinstance(excinfo.value.code, int)
-    assert excinfo.value.code == 2
+    assert type(status) is int
+    assert status == 2
     assert not (tmp_path / "findings.csv").exists()

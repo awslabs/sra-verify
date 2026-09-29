@@ -12,7 +12,7 @@ design leans on:
     ``account_type="account"`` (the illegal value in ``services/config/base.py``)
     cannot survive metadata load.
   * **String comparison** -- ``AccountType.AUDIT == "audit"`` is true because
-    ``StrEnum`` members are ``str`` subclasses. ``_select`` compares
+    ``StrEnum`` members are ``str`` subclasses. ``select_checks`` compares
     ``cls.meta.account_type`` against the plain ``--account-type`` string with no
     explicit ``.value``, so if this ever stopped holding, every account-type
     filter would match nothing and the scan would quietly select zero checks.
@@ -124,11 +124,11 @@ def test_non_member_string_is_not_a_member(enum_cls):
 
 
 # --------------------------------------------------------------------------
-# The string comparison _select relies on (Requirements 1.3, 9.10)
+# The string comparison select_checks relies on (Requirements 1.3, 9.10)
 # --------------------------------------------------------------------------
 
 def test_account_type_member_equals_its_plain_string():
-    # This is the exact comparison _select performs, with no .value.
+    # This is the exact comparison select_checks performs, with no .value.
     assert AccountType.AUDIT == "audit"
     assert AccountType.APPLICATION == "application"
     assert AccountType.LOG_ARCHIVE == "log-archive"
@@ -150,8 +150,8 @@ def test_every_member_equals_its_value_as_a_plain_string(enum_cls):
 
 
 def test_select_style_filter_matches_on_the_plain_cli_string():
-    # Stands in for _select's `cls.meta.account_type == account_type` step
-    # without importing main.py, which pulls in the whole check catalog.
+    # Stands in for select_checks's `cls.meta.account_type == account_type` step
+    # without importing scanner.py, which pulls in the whole check catalog.
     catalog = {
         "SRA-A-01": AccountType.APPLICATION,
         "SRA-B-01": AccountType.AUDIT,

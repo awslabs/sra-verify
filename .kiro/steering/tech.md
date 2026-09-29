@@ -12,7 +12,7 @@ Packaging is **`sra-verify/sraverify/pyproject.toml` with hatchling**, and **uv*
 
 ```toml
 [project.scripts]
-sraverify = "sraverify.main:main"
+sraverify = "sraverify.cli:main"
 ```
 
 The build is scoped explicitly: the wheel ships `packages = ["sraverify"]`, the sdist ships only the package plus `README.md`, `LICENSE` and `NOTICE`, and `**/.hypothesis`, `**/.pytest_cache` and `**/__pycache__` are excluded — test runs leave hypothesis databases inside `sraverify/tests/property/`. The wheel's file list is identical to the old setuptools build apart from setuptools' `top_level.txt`.
@@ -23,11 +23,13 @@ There is no Makefile, no tox/nox, and no CI workflow. pytest is configured in `[
 
 ### Known inconsistencies (do not "fix" without asking)
 
+- **`sra-verify-mcp` still passes `SRAVerify(debug=False)`** (`server.py`, twice). The `debug` parameter was removed when logging moved to the CLI, so the MCP server raises `TypeError` at import until it drops that argument. It is being fixed in a separate change to the MCP repo. Do not add the parameter back as a shim.
+
 - `sra-verify-mcp/pyproject.toml` declares `requires-python = ">=3.10"`, which cannot satisfy the scanner's 3.11 floor. The MCP repo's declared floor and its dependency are in conflict.
 - ~~`requirements.txt` pins `boto3>=1.40.5`; `setup.py` says `boto3>=1.26.0`.~~ **Fixed**, and now moot: `requirements.txt` and `setup.py` are both gone, and `pyproject.toml` alone pins `boto3>=1.43.96`. The floor is load-bearing rather than cosmetic: the AI-coverage checks call `securityhub:DescribeSecurityHubV2`, `securityhub:ListConfigurationPolicies`, `securityhub:GetConfigurationPolicy` and `organizations:DescribeEffectivePolicy` with `BEDROCK_POLICY`. A missing *operation* on an older botocore raises `AttributeError`, which is outside `AWS_EXCEPTIONS`, escapes the client, and reaches the orchestrator as a synthetic ERROR row — the metric whose expected value is zero. A missing enum *value* would have been free; an operation is not.
 - **Several client methods read the first page only, and the deferral is deliberate.** `ShieldClient.list_protections` is the clearest case: `shield` publishes a `list_protections` paginator, and the method does not use it. Most of `WAFClient`'s enumeration calls are the same shape, and `wafv2:ListWebACLs` has no botocore paginator at all — it takes a `NextMarker`/`Limit` pair that would have to be looped by hand. Fixing any of them changes *which resources* the per-resource fan-out covers, and a row-count change cannot be separated from a verdict change when reviewing two scans of the same organization, so all of them were held back rather than folded into the client-error-contract work. Where a call *does* paginate, the whole paginator loop belongs inside the `try`: a failure on page three has to arrive as an error result, because a short list is indistinguishable from a smaller organization.
 
-The version is single-sourced: `__version__` in `sraverify/__init__.py` is the only place to edit. `[tool.hatch.version] path = "sraverify/__init__.py"` reads that line **as text** rather than importing the package, because importing `sraverify` pulls in `main.py` and boto3, which are not installed in the isolated build environment. Keep it a plain string-literal assignment. (The two copies it replaced had drifted once, `0.1.4` vs `0.1.0`.) `sra-verify-mcp/pyproject.toml` pins `sraverify>=0.1.4` and is a separate copy, in the other repo.
+The version is single-sourced: `__version__` in `sraverify/__init__.py` is the only place to edit. `[tool.hatch.version] path = "sraverify/__init__.py"` reads that line **as text** rather than importing the package, because importing `sraverify` pulls in `scanner.py` and boto3, which are not installed in the isolated build environment. Keep it a plain string-literal assignment. (The two copies it replaced had drifted once, `0.1.4` vs `0.1.0`.) `[tool.uv] cache-keys` lists `sraverify/__init__.py` alongside `pyproject.toml` so that `uv sync` rebuilds the editable install after a version bump. uv's default key is `pyproject.toml` alone, so without that line the venv keeps the old `dist-info`, and `uv pip list` / `importlib.metadata.version("sraverify")` report the previous version. `sra-verify-mcp/pyproject.toml` pins `sraverify>=0.1.4` and is a separate copy, in the other repo.
 
 `sra-verify/sraverify/README.md` is the developer guide and is current as of the check-contract branch: it documents `ScanContext`, automatic registration and the four-way identity cross-check, `CheckMeta`, the three keyword-only finding helpers, FAIL-vs-ERROR, and `Finding.FIELDS`. It agrees with this file and with `creating_checks_best_practices.md`; if the three ever disagree, the steering files win and the README is the one to correct.
 
@@ -68,7 +70,7 @@ sraverify --account-type audit --audit-account 111122223333
 cd sra-verify/sraverify && uv run pytest -q
 ```
 
-It reports **8861 passed, 598 skipped**, and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (~26 hypothesis and reflection modules, including catalog-wide properties that iterate the real 182 registered checks and the 113 real client methods) plus `tests/unit/{core,cli,util}/`. `tests/unit/mcp/` and `tests/unit/services/` hold only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees and nothing else.
+It reports **8867 passed, 597 skipped**, and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (~26 hypothesis and reflection modules, including catalog-wide properties that iterate the real 182 registered checks and the 113 real client methods) plus `tests/unit/{core,cli,util}/`. `tests/unit/mcp/` and `tests/unit/services/` hold only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees, refuses outbound HTTP, and restores the `sraverify` logger's handlers, level and propagation after every test, so a test that runs `cli.main()` cannot leak its logging configuration into the next.
 
 Add `-p no:logging` when you want readable output: several modules assert on log records, and pytest's live-log capture floods the terminal otherwise.
 
@@ -86,7 +88,7 @@ Use the installed console script, **not** `-m`:
 sra-verify/sraverify/.venv/bin/sraverify --list-checks > sra-verify/docs/checks.txt
 ```
 
-`python -m sraverify.main` emits a `runpy` `RuntimeWarning` on stderr — `sraverify/__init__.py` imports `main`, so the module is already in `sys.modules` when runpy executes it — which contaminates a capture that redirects stderr. The console script produces a 0-byte stderr. This artifact has drifted from the code twice; a stale `docs/checks.txt` is a real failure mode, so verify with `cmp` after regenerating.
+`python -m sraverify --list-checks` is equivalent (it runs `sraverify/__main__.py`) and also produces a 0-byte stderr. Do not use `python -m sraverify.cli`: runpy would re-execute a module that may already be imported and warn on stderr. This artifact has drifted from the code twice; a stale `docs/checks.txt` is a real failure mode, so verify with `cmp` after regenerating.
 
 ### Build
 
@@ -149,11 +151,13 @@ Use the single shared logger. **Never call `print()` from library or check code*
 from sraverify.core.logging import logger
 ```
 
-`core/logging.py` strips the root logger's handlers at import time and installs a **stderr-only** handler. `logger.propagate = False`; boto3/botocore/urllib3 are forced to WARNING and propagate to the stderr root handler.
+**The library configures no logging; the application does.** `core/logging.py` only creates the `sraverify` logger and adds a `NullHandler` — no level, default propagation, the root logger and boto3 untouched. `SRAVerify` takes no `debug` argument. The CLI configures logging in `sraverify.cli.configure_logging`, the first thing `main()` does: a stderr handler on `sraverify` with `propagate = False`, `basicConfig` on the root to stderr for boto3/botocore/urllib3 (held at WARNING), and nothing ever pointed at stdout. An embedding application such as the MCP server configures its own.
+
+This replaced an import-time setup that stripped the root logger's handlers and a constructor that reset the level. Together they silently discarded the MCP server's `basicConfig(level=CRITICAL)` and its `CRITICAL` level on `sraverify`, because the server imports the package after configuring logging. `test_the_library_leaves_a_host_logging_setup_intact` reproduces that order. Do not reintroduce a handler, a `basicConfig`, or a `setLevel` in library code; `test_no_library_module_configures_handlers` enforces the first two.
 
 Conventions: `logger.debug(f"ServiceName: <message>")` in service base classes, `logger.warning` for a missing client, and `logger.debug` for a failed AWS call.
 
-**The default level is `ERROR`, so a scan without `--debug` writes nothing to stderr.** That is deliberate and it is what the operator asked for: the report is the artefact, and a clean run should be silent. Three facts make it safe rather than lossy — the package makes **zero** `logger.info` calls, so the only thing this suppresses relative to `INFO` is `WARNING`; every condition a warning describes already reaches the report as a row (a missing client becomes a `NoClient` ERROR row, a failed call becomes an ERROR or a FAIL); and the banner, progress bar and summary do not travel through this logger, so they are unaffected.
+**The CLI's default level is `ERROR`, so a scan without `--debug` writes nothing to stderr.** That is deliberate and it is what the operator asked for: the report is the artefact, and a clean run should be silent. Three facts make it safe rather than lossy — the package makes **zero** `logger.info` calls, so the only thing this suppresses relative to `INFO` is `WARNING`; every condition a warning describes already reaches the report as a row (a missing client becomes a `NoClient` ERROR row, a failed call becomes an ERROR or a FAIL); and the banner, progress bar and summary do not travel through this logger, so they are unaffected.
 
 `--debug` restores everything, including the one-line `aws_call_failed` records, and that is the switch to reach for when diagnosing. Do not raise a call site's level to make it visible by default — `logger.error` still means "this produced an ERROR row", and `test_no_error_level_records_without_error_rows` holds that correspondence.
 

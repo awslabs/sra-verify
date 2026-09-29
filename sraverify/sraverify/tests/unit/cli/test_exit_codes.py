@@ -20,7 +20,7 @@ Why this module exists alongside the property tests
 
 ``tests/property/test_unknown_check_exit_property.py`` already covers the
 unknown-ID path exhaustively, and ``tests/unit/core/test_select.py`` covers
-``NoChecksSelectedError`` from ``_select``. Both install a **synthetic**
+``NoChecksSelectedError`` from ``select_checks``. Both install a **synthetic**
 seven-key catalog, which is what makes their exact suggestion lists assertable.
 Neither reaches ``main()`` for the ``NoChecksSelectedError`` path, and neither
 says anything about the real catalog. Two gaps follow, and this module closes
@@ -39,7 +39,7 @@ exactly those:
 
 The AWS boundary is asserted, not assumed. ``main()`` builds a real session and
 calls ``print_banner``, which calls ``sts:GetCallerIdentity``. On the exit-2
-path neither should reach AWS, because ``_select`` raises while
+path neither should reach AWS, because ``select_checks`` raises while
 ``print_banner``'s arguments are still being evaluated. Rather than trusting
 that reading, every test here installs a session that records and refuses each
 ``client()`` build, and asserts nothing was recorded.
@@ -53,7 +53,7 @@ from pathlib import Path
 import pytest
 
 from sraverify.core.registry import all_checks
-from sraverify.main import DEFAULT_OUTPUT, main
+from sraverify.cli import DEFAULT_OUTPUT, main
 
 
 # --------------------------------------------------------------------------- #
@@ -86,7 +86,7 @@ class _RefusingSession:
 
     ``region_name`` is a real attribute because ``main()`` reads
     ``sra.session.region_name`` while evaluating ``print_banner``'s arguments,
-    which happens before ``_select`` raises.
+    which happens before ``select_checks`` raises.
 
     ``client()`` records the call and *then* raises, so the recording survives a
     caller that swallows the exception -- which ``print_banner`` does, in a bare
@@ -111,13 +111,13 @@ class _RefusingSession:
 def refusing_session(monkeypatch) -> _RefusingSession:
     """Install a ``_RefusingSession`` in place of the real session builder.
 
-    Patches the name ``get_session`` in ``sraverify.main``'s namespace, which is
-    where ``SRAVerify.__init__`` looks it up, so no credential resolution, no
-    profile lookup, and no ``assume_role`` happens even before the question of
-    an API call arises.
+    Patches the name ``get_session`` in ``sraverify.scanner``'s namespace,
+    which is where ``SRAVerify.__init__`` looks it up, so no credential
+    resolution, no profile lookup, and no ``assume_role`` happens even before
+    the question of an API call arises.
     """
     session = _RefusingSession()
-    monkeypatch.setattr("sraverify.main.get_session", lambda **kwargs: session)
+    monkeypatch.setattr("sraverify.scanner.get_session", lambda **kwargs: session)
     return session
 
 
@@ -125,12 +125,11 @@ def refusing_session(monkeypatch) -> _RefusingSession:
 def logged() -> list[logging.LogRecord]:
     """Collect the records the shared ``sraverify`` logger emits during a test.
 
-    ``pytest``'s ``caplog`` cannot be used: ``core/logging.py`` sets
-    ``logger.propagate = False`` deliberately, so nothing reaches the root
-    handler ``caplog`` installs. Its stderr handler also captured ``sys.stderr``
-    at import time, so ``capsys`` does not see it either. Attaching a handler
-    directly to the named logger is what actually observes the output an
-    operator sees.
+    ``pytest``'s ``caplog`` cannot be used: ``cli.configure_logging`` sets
+    ``logger.propagate = False`` deliberately, so once ``main()`` has run
+    nothing reaches the root handler ``caplog`` installs. Attaching a handler
+    directly to the named logger observes the same records the CLI's stderr
+    handler writes.
     """
     records: list[logging.LogRecord] = []
 
@@ -148,28 +147,31 @@ def logged() -> list[logging.LogRecord]:
 
 
 def _run_cli(monkeypatch, argv: list[str]) -> int:
-    """Invoke ``main()`` with *argv* and return the status it exited with.
+    """Invoke ``main()`` with *argv* and return the status it would exit with.
+
+    ``main()`` returns its status and the console script wraps it in
+    ``sys.exit``; argparse's own usage errors still raise ``SystemExit`` from
+    inside ``parse_args``. Both are folded into one integer here.
 
     Args:
-        monkeypatch: Used to install ``argv`` for the duration of the call.
+        monkeypatch: Used to install ``argv`` too, so a code path that reads
+            ``sys.argv`` directly sees the same arguments.
         argv: The arguments after the program name.
 
     Returns:
-        The integer ``SystemExit.code``.
-
-    Raises:
-        Failed: ``main()`` returned without exiting, which none of the paths
-            under test may do.
+        The integer exit status.
     """
     monkeypatch.setattr(sys, "argv", ["sraverify", *argv])
-    with pytest.raises(SystemExit) as excinfo:
-        main()
-    assert isinstance(excinfo.value.code, int), (
-        f"exited with {excinfo.value.code!r}; a non-integer argument to "
-        f"sys.exit makes the process exit 1 and print that value to stderr, "
-        f"which loses the 1-versus-2 distinction the fan-out reads"
+    try:
+        status = main(argv)
+    except SystemExit as exc:
+        status = exc.code
+    assert isinstance(status, int), (
+        f"exited with {status!r}; a non-integer argument to sys.exit makes the "
+        f"process exit 1 and print that value to stderr, which loses the "
+        f"1-versus-2 distinction the fan-out reads"
     )
-    return excinfo.value.code
+    return status
 
 
 # --------------------------------------------------------------------------- #
@@ -378,7 +380,7 @@ def test_a_near_miss_check_id_is_offered_the_best_three_in_9_4_order(
     check ID order. ``difflib.get_close_matches`` would fill them from the other
     end -- it selects with ``heapq.nlargest`` over ``(ratio, key)`` tuples, so
     ties come back descending -- and would suggest ``13, 12`` here. That is why
-    ``main._near_misses`` scores the keys itself, and this is the assertion that
+    ``scanner._near_misses`` scores the keys itself, and this is the assertion that
     catches a future simplification back to the stdlib helper against the real
     catalog rather than a fixture.
 

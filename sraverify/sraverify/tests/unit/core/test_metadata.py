@@ -132,7 +132,7 @@ def test_remediation_cli_and_console_default_to_the_empty_string():
 
 
 def test_metadata_error_is_an_sraverify_error():
-    # main.py catches the package base; a MetadataError must be reachable
+    # cli.py catches the package base; a MetadataError must be reachable
     # through it rather than only through Exception.
     assert issubclass(MetadataError, SRAVerifyError)
 

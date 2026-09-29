@@ -85,7 +85,8 @@ from sraverify.core.enums import AccountType, Severity, Status
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.core.scan_context import ScanContext
-from sraverify import main as main_module
+from sraverify import cli as cli_module
+from sraverify import scanner as scanner_module
 from sraverify.utils.outputs import write_csv_output as real_write_csv_output
 
 # Reused verbatim from the task 20.1 module rather than re-derived. ``logged``
@@ -206,7 +207,7 @@ def _make_probe_check(index: int, execute: Any) -> type[SecurityCheck]:
     catalog to one test.
 
     The ``meta`` is a genuine ``CheckMeta`` because so much reads it --
-    ``_select`` reads two fields, ``passed()`` and ``failed()`` six,
+    ``select_checks`` reads two fields, ``passed()`` and ``failed()`` six,
     ``_synthetic_error`` eight -- that a stand-in object would only move the
     failure somewhere less obvious.
 
@@ -271,14 +272,14 @@ def _isolated_registry(classes: list[type[SecurityCheck]]) -> Iterator[None]:
 
 @contextlib.contextmanager
 def _seeded_scan_context(monkeypatch) -> Iterator[None]:
-    """Patch ``main.ScanContext`` with a factory that pre-seeds account identity.
+    """Patch ``scanner.ScanContext`` with a factory that pre-seeds account identity.
 
     ``get_account_info()`` checks ``_account_info`` first, under the lock, and
     returns it on a hit, so seeding it is what keeps ``sts:GetCallerIdentity``
     and ``account:GetAccountInformation`` out of the scan. The object built is
     still a real ``ScanContext``; only its identity cache is warm.
     """
-    original = main_module.ScanContext
+    original = scanner_module.ScanContext
 
     def factory(**kwargs: Any) -> ScanContext:
         ctx = original(**kwargs)
@@ -288,7 +289,7 @@ def _seeded_scan_context(monkeypatch) -> Iterator[None]:
         }
         return ctx
 
-    monkeypatch.setattr(main_module, "ScanContext", factory)
+    monkeypatch.setattr(scanner_module, "ScanContext", factory)
     yield
 
 
@@ -301,7 +302,7 @@ def probe_scan(monkeypatch) -> Iterator[_NoAwsSession]:
         which client builds were attempted.
     """
     session = _NoAwsSession()
-    monkeypatch.setattr(main_module, "get_session", lambda **kwargs: session)
+    monkeypatch.setattr(scanner_module, "get_session", lambda **kwargs: session)
 
     classes = [_make_probe_check(index, body) for index, body, _ in _PROBE_SHAPES]
     with _isolated_registry(classes), _seeded_scan_context(monkeypatch):
@@ -586,7 +587,7 @@ def test_an_unwritable_output_exits_1_naming_the_path_and_the_reason(
         write_calls.append(len(findings))
         return real_write_csv_output(findings, path)
 
-    monkeypatch.setattr(main_module, "write_csv_output", recording_write)
+    monkeypatch.setattr(cli_module, "write_csv_output", recording_write)
 
     status = _run_cli(
         monkeypatch,
@@ -685,7 +686,7 @@ def test_a_write_failure_at_the_default_output_path_names_the_resolved_path(
         attempted.append(path)
         raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), path)
 
-    monkeypatch.setattr(main_module, "write_csv_output", failing_write)
+    monkeypatch.setattr(cli_module, "write_csv_output", failing_write)
 
     status = _run_cli(monkeypatch, ["--regions", _PROBE_REGION])
 
@@ -694,7 +695,7 @@ def test_a_write_failure_at_the_default_output_path_names_the_resolved_path(
 
     resolved = attempted[0]
     # The resolved path is stamped, so it is not the default base name.
-    assert resolved != main_module.DEFAULT_OUTPUT, (
+    assert resolved != cli_module.DEFAULT_OUTPUT, (
         f"--output was omitted, so a timestamp should have been injected, but "
         f"the resolved path is the bare default {resolved!r} (9.12)"
     )
@@ -795,7 +796,7 @@ def test_no_error_level_records_without_error_rows(
     yields the record for anyone auditing the classification.
     """
     session = _NoAwsSession()
-    monkeypatch.setattr(main_module, "get_session", lambda **kwargs: session)
+    monkeypatch.setattr(scanner_module, "get_session", lambda **kwargs: session)
     probe = _make_probe_check(1, _execute_semantic_fail)
 
     def scan(argv_extra: list[str], name: str) -> tuple[list[str], list[str]]:

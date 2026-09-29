@@ -26,7 +26,7 @@ classifiers = [
 Homepage = "https://github.com/awslabs/sra-verify"
 
 [project.scripts]
-sraverify = "sraverify.main:main"
+sraverify = "sraverify.cli:main"
 
 # Kept as installable extras so `pip install sraverify[test]` keeps working.
 # pyyaml is for util/generate_iam_policy.py and its tests, not the scanner.
@@ -75,6 +75,12 @@ include = [
     "LICENSE",
     "NOTICE",
 ]
+
+[tool.uv]
+# The version is dynamic and read from __init__.py, so uv must treat that file as
+# a build input. Without it `uv sync` keeps the editable install's stale
+# dist-info and `uv pip list` reports the previous version after a bump.
+cache-keys = [{ file = "pyproject.toml" }, { file = "sraverify/__init__.py" }]
 
 [tool.pytest.ini_options]
 testpaths = ["sraverify/tests"]

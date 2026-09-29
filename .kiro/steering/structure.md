@@ -45,7 +45,9 @@ sra-verify/
 └── sraverify/                          # project root (pyproject.toml lives here)
     ├── pyproject.toml, uv.lock
     └── sraverify/                      # the Python package
-        ├── main.py                     # SRAVerify class, _select, CLI, exit codes
+        ├── scanner.py                  # library: SRAVerify, select_checks, _synthetic_error
+        ├── cli.py                      # CLI: parse_args, configure_logging, main() -> exit code
+        ├── __main__.py                 # `python -m sraverify` -> cli.main
         ├── core/
         │   ├── check.py                # SecurityCheck: meta, registration, finding helpers
         │   ├── metadata.py             # CheckMeta, Remediation (validated, frozen)
@@ -58,7 +60,7 @@ sra-verify/
         │   ├── aws_errors.py           # error-result shape, is_error, is_not_configured
         │   ├── aws_client.py           # AWSClient: AWS_EXCEPTIONS + aws_error
         │   ├── availability.py         # service_available_in_region (offline, cached)
-        │   ├── logging.py              # shared stderr-only logger
+        │   ├── logging.py              # shared `sraverify` logger + NullHandler only
         │   └── session.py              # profile + assume-role session builder
         ├── utils/
         │   ├── outputs.py              # write_csv_output
@@ -108,13 +110,13 @@ state, and the **registry** owns the catalog.
 ### Registration is automatic
 
 A check module's presence on disk is the whole of its registration. There is no
-`CHECKS` dict in any service `__init__.py`, no `ALL_CHECKS` in `main.py`, and no
+`CHECKS` dict in any service `__init__.py`, no `ALL_CHECKS` in `scanner.py`, and no
 decorator.
 
 - `services/<svc>/__init__.py` is three lines: a docstring, an import of
   `import_check_modules`, and `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is the aggregator: `import_service_packages(__name__)`.
-  `import sraverify.services` therefore registers all 182 checks. `main.py`
+  `import sraverify.services` therefore registers all 182 checks. `scanner.py`
   carries that import purely for its side effect — drop it and every scan
   selects nothing.
 - Discovery picks up only modules whose name starts with `sra_`, sorted
@@ -542,8 +544,16 @@ reorder.
 
 ## CLI exit codes
 
-`main.py` owns selection (`_select`), the synthetic ERROR row
-(`_synthetic_error`), and near-miss suggestions (`_near_misses`).
+The package is split along the library/application line. `scanner.py` is the
+library: `SRAVerify`, public selection (`select_checks`), the synthetic ERROR
+row (`_synthetic_error`), and near-miss suggestions (`_near_misses`). It writes
+nothing to stdout and configures no logging, and it is inside the stdout
+contract's static checks. `cli.py` is the application: `parse_args(argv)`,
+`configure_logging`, the output-path timestamp, the summary, and
+`main(argv=None) -> int`, which **returns** the exit status; the console script
+and `__main__.py` pass it to `sys.exit`. `cli.py`, `__main__.py`,
+`utils/banner.py` and `utils/progress.py` are the only modules allowed to write
+to stdout.
 
 | Exit | Meaning                                                                                                                                                                                             |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -562,7 +572,7 @@ comparison: `--service Security` matches nothing. Selection reads `cls.meta` onl
 and instantiates nothing.
 
 The exit-2 guard spans both the banner and the scan, because both resolve the
-filters — the banner's check count calls `_select` directly.
+filters — the banner's check count calls `select_checks` directly.
 
 `_near_misses` is hand-rolled rather than `difflib.get_close_matches` because
 that function selects with `heapq.nlargest` over `(ratio, key)` tuples, so
@@ -574,7 +584,7 @@ order ascending and reproducible.
 ## Tests
 
 The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collects
-**9459 tests**, with 598 skips and no xfails. It is no longer thin.
+**9464 tests**, with 597 skips and no xfails. It is no longer thin.
 
 - `tests/unit/core/` — `test_check_registration.py`, `test_enums.py`,
   `test_finding.py`, `test_metadata.py`, `test_registry.py`, `test_select.py`

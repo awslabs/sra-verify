@@ -91,7 +91,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 import sraverify
-import sraverify.main as main
+import sraverify.scanner as main
 import sraverify.services
 from sraverify.core.check import SecurityCheck
 from sraverify.core.finding import Finding
@@ -247,7 +247,7 @@ def test_registered_meta_is_deeply_immutable_and_hashable(
     meta = cls.meta
     assert isinstance(meta, CheckMeta), (
         f"{check_id}: meta is {type(meta).__name__}, not a CheckMeta. Every "
-        f"reader -- _select, the finding helpers, _synthetic_error, "
+        f"reader -- select_checks, the finding helpers, _synthetic_error, "
         f"--list-checks -- would still work against a look-alike, and none of "
         f"the validation rules would have run (Requirement 2.4)"
     )
@@ -351,7 +351,7 @@ class _StubSession:
 
 @contextlib.contextmanager
 def _seeded_scan_context(account_id: str, account_name: str) -> Iterator[list[Any]]:
-    """Patch ``main.ScanContext`` so every context it builds knows its account.
+    """Patch ``scanner.ScanContext`` so every context it builds knows its account.
 
     ``ScanContext.get_account_info()`` checks ``_account_info`` first and
     returns it on a hit, so pre-seeding is what keeps a full scan away from STS

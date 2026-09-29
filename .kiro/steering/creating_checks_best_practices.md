@@ -87,7 +87,7 @@ class SRA_GUARDDUTY_01(GuardDutyCheck):
                 )
 ```
 
-Note what is **not** there: no `__init__`, not even a metadata-only one. `SecurityCheck.__init__` accepts nothing beyond `self`, so a leftover `super().__init__(account_type=...)` raises `TypeError` naming the argument. There is no `CHECKS` dict edit and no `main.py` edit.
+Note what is **not** there: no `__init__`, not even a metadata-only one. `SecurityCheck.__init__` accepts nothing beyond `self`, so a leftover `super().__init__(account_type=...)` raises `TypeError` naming the argument. There is no `CHECKS` dict edit and no `scanner.py` edit.
 
 ## `CheckMeta`
 
@@ -127,13 +127,13 @@ Two rules deserve their own attention.
 
 ## Registration is automatic
 
-**A check module's presence on disk is the whole of its registration.** There is no `CHECKS` dict, no `ALL_CHECKS` in `main.py`, no decorator, and no list to keep in sync. The failure mode where a check is written, looks correct, and silently never runs cannot occur.
+**A check module's presence on disk is the whole of its registration.** There is no `CHECKS` dict, no `ALL_CHECKS` in `scanner.py`, no decorator, and no list to keep in sync. The failure mode where a check is written, looks correct, and silently never runs cannot occur.
 
 The chain:
 
 - `services/<svc>/__init__.py` is one call: `import_check_modules(f"{__name__}.checks")`.
 - `services/__init__.py` is one call: `import_service_packages(__name__)`.
-- `import sraverify.services` therefore registers all 182 checks. `main.py` carries that import with a `# noqa: F401` — it looks removable and is not; drop it and every scan selects nothing.
+- `import sraverify.services` therefore registers all 182 checks. `scanner.py` carries that import with a `# noqa: F401` — it looks removable and is not; drop it and every scan selects nothing.
 - Importing a check module executes its class body, which fires `SecurityCheck.__init_subclass__`, which cross-checks identity and calls `register()`.
 
 Only modules whose file name starts with `sra_` are discovered (`CHECK_MODULE_PREFIX` in `core/discovery.py`). Subpackages are skipped. Re-importing is a no-op via `sys.modules`, and `register()` is idempotent for the same class object; a *different* class claiming a live ID raises `DuplicateCheckIdError`.
@@ -340,8 +340,10 @@ The rules that matter when authoring:
 ## Logging, and the stdout contract
 
 Use the single shared logger. **Never `print()` from check, base, or client code**,
-and never add a stdout handler. `core/logging.py` strips the root logger's handlers
-at import and installs a **stderr-only** handler, with `propagate = False`.
+and never add a handler of any kind. `core/logging.py` gives the `sraverify`
+logger a `NullHandler` and nothing else; where records go is decided by the
+application — `sraverify.cli.configure_logging` sends them to **stderr only** for
+the CLI. See `tech.md`.
 
 ```python
 from sraverify.core.logging import logger

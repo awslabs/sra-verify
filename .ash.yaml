@@ -1,0 +1,152 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/v3.7.0/automated_security_helper/schemas/AshConfig.json
+# ---------------------------------------------------------------------------
+# ASH (Automated Security Helper) configuration
+#
+# Pinned version: ASH v3.7.0 (R12.3). Run it as:
+#     uv tool run --from automated-security-helper==3.7.0 ash --source-dir . --mode local
+# CI pins the same value via ASH_VERSION; an unpinned scanner means the
+# reviewer's results and ours differ (security-review.md §5).
+#
+# Four scanners accept an exact version pin and are pinned below to the versions
+# this repo's recorded findings came from. The other six accept none — see the
+# "Scanner versions" table under `scanners:` for what ran and why it is not
+# pinned. Scanners needing non-Python dependencies (cfn-nag/Ruby, grype, syft,
+# opengrep, cdk-nag) report MISSING when those are absent; see
+# `security-findings.md` for which ones ran on the delivered commit.
+#
+# Scope note: ASH builds its scan set from files **not** matching `.gitignore`,
+# and only then applies the `ignore_paths` below as scanner-level excludes. So
+# anything already gitignored (`.venv/`, `cdk.out/`, `dist/`, `build/`,
+# `.ash/`, `.tmp/`) never reaches a scanner in the
+# first place. The entries below are deliberate backstops, so that a run against
+# an exported tree or in container mode — where the root `.gitignore` may be
+# absent — excludes the same noise and produces the same finding set.
+#
+# Suppression policy (R12.5, security-review.md §4): the justification travels
+# with the suppression. Every `ignore_paths` entry below carries a `reason:`.
+# There is no global allowlist and no rule-level `suppressions:` block — a real
+# finding is remediated, or dispositioned in writing in `security-findings.md`
+# (R12.4, R12.6), never hidden here.
+# ---------------------------------------------------------------------------
+project_name: sraverify
+
+# CI gate: a finding at or above the threshold fails the build (R13.6).
+fail_on_findings: true
+
+global_settings:
+  # R12.3 / design "Security scanning": MEDIUM and above is actionable. Low and
+  # Info findings are still reported and still get a one-line disposition.
+  severity_threshold: MEDIUM
+
+  ignore_paths:
+    # --- Vendored third-party code -----------------------------------------
+    # Dependencies are covered by scanning the lockfile (grype), not by
+    # scanning the unpacked tree, which would attribute upstream findings to
+    # this repo.
+    - path: '**/.venv/**'
+      reason: 'Python virtualenv holding third-party packages; dependency risk is scanned via uv.lock instead. Glob covers the root .venv and any nested one.'
+
+    # --- Generated build output ---------------------------------------------
+    - path: 'dist/**'
+      reason: 'Build output compiled from sources that are themselves scanned.'
+    - path: 'build/**'
+      reason: 'Build output compiled from sources that are themselves scanned.'
+
+    # --- Test and type-check caches ----------------------------------------
+    - path: '.hypothesis/**'
+      reason: 'Hypothesis example database; generated binary test state, regenerated on every property-test run.'
+    - path: '**/.pytest_cache/**'
+      reason: "pytest's run cache, regenerated on every test run and never committed; its CACHEDIR.TAG signature is a fixed hex constant that detect-secrets reports as a high-entropy string."
+
+    # --- Scanner output -----------------------------------------------------
+    # Scoped to the output directory, not all of `.ash/`, so that an ASH config
+    # kept at `.ash/.ash.yaml` stays in scope for detect-secrets.
+    - path: '.ash/ash_output/**'
+      reason: "ASH's own SARIF and report output; scanning it re-reports every finding as a finding about the report that describes it."
+
+    # --- Local scratch ------------------------------------------------------
+    - path: '.tmp/**'
+      reason: 'Local scratch directory, gitignored and not part of the delivered repo.'
+
+# ---------------------------------------------------------------------------
+# Scanners
+#
+# Four scanners are disabled deliberately -- cdk-nag, npm-audit, semgrep and
+# syft -- each with its reason on its entry below, and listed with the rest in
+# `.kiro/steering/security_scanning.md`. A disabled scanner is reported as
+# SKIPPED, not PASSED, so the summary still shows it did not run. A scanner whose
+# dependencies are absent reports MISSING; that is never a clean scan.
+#
+# `tool_version` pins are exact (`==`) so a re-run installs the same analyzer and
+# reproduces the same finding set rather than picking up new or retired rules.
+#
+# Scanner versions (security-review.md §5, §8)
+# --------------------------------------------
+# ASH 3.7.0 declares a version option for only FOUR scanners: `tool_version` on
+# bandit, checkov and semgrep, and `version` on opengrep. The others have no
+# such field in AshConfig.json. Their option schemas set
+# `additionalProperties: true`, so writing `tool_version:` under them would
+# validate and then be SILENTLY IGNORED — pinned in review, unpinned in fact.
+# None is written for that reason. (`ScannerPluginBase.tool_version` in the schema
+# is runtime state, sitting alongside `exit_code` and `start_time`; it reports the
+# detected version rather than requesting one.)
+#
+# What ran, as read from each scanner's own SARIF `tool.driver` on 2026-09-23.
+# `ash.csv`'s `scanner_version` column reports 3.7.0 for every scanner — that is
+# ASH's version, not the analyzer's — so it cannot serve as this record.
+#
+#   pinned here          bandit 1.9.4 · checkov 3.3.19 · semgrep 1.177.0
+#                        opengrep 1.15.1
+#   recorded only        detect-secrets 1.5.0 · grype 0.119.0 · syft 1.52.0
+#                        cdk-nag → ash-cdk-nag-wrapper 3.7.0
+#                        cfn-nag → not reported by the tool
+#
+# detect-secrets is a Python dependency of ASH, so the
+# `automated-security-helper==3.7.0` pin fixes it transitively. grype and syft are
+# downloaded binaries whose versions track the ASH release.
+#
+# One caveat a version pin cannot fix: grype resolves against a vulnerability
+# database that updates independently of the tool, so pinning the binary does
+# not make its findings reproducible over time. `offline: true` is the schema
+# lever that would freeze grype's database, deliberately NOT set here because it
+# needs a pre-staged database and would otherwise turn a clean run into a
+# MISSING scanner, which §8 forbids. Dependency findings are instead recorded in
+# `security-findings.md` by advisory id and affected version, which are stable.
+# ---------------------------------------------------------------------------
+scanners:
+  bandit:
+    enabled: true
+    options:
+      tool_version: '==1.9.4'
+
+  checkov:
+    enabled: true
+    options:
+      tool_version: '==3.3.19'
+
+  opengrep:
+    enabled: true
+    options:
+      version: 'v1.15.1'
+
+  cfn-nag:
+    enabled: true
+
+  detect-secrets:
+    enabled: true
+
+  grype:
+    enabled: true
+
+  # Disabled deliberately. Omitting a scanner from this map does NOT disable it --
+  # every built-in scanner defaults to enabled -- so it must be listed as false.
+  # This repo has no CDK app; its CloudFormation templates are covered by checkov
+  # and cfn-nag above.
+  cdk-nag:
+    enabled: false
+  npm-audit:
+    enabled: false # no npm lockfile in this repo
+  syft:
+    enabled: false # SBOM only; grype handles vulnerability scanning
+  semgrep:
+    enabled: false # overlaps opengrep

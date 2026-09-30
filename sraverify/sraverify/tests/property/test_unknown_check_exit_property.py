@@ -341,7 +341,7 @@ def _mutated_catalog_ids(draw: st.DrawFn) -> str:
     if kind == "substitute":
         index = draw(st.integers(min_value=0, max_value=len(key) - 1))
         replacement = draw(
-            st.sampled_from("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+            st.sampled_from("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")  # pragma: allowlist secret -- Hypothesis alphabet
         )
         return key[:index] + replacement + key[index + 1:]
     if kind == "transpose":

@@ -64,3 +64,6 @@ coverage.xml
 generated*
 
 sratester/
+
+# ASH output
+.ash/

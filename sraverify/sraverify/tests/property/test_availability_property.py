@@ -476,8 +476,10 @@ def test_an_attempted_http_request_is_refused(monkeypatch: Any) -> None:
         "sts",
         region_name="us-east-1",
         config=Config(retries={"max_attempts": 1}),
-        aws_access_key_id="AKIAIOSFODNN7EXAMPLE",
-        aws_secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        # AWS's published documentation example credentials; the suite refuses
+        # all outbound HTTP, so they are never sent anywhere.
+        aws_access_key_id="AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+        aws_secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
     )
 
     with pytest.raises(Exception) as excinfo:

@@ -574,7 +574,7 @@ def test_passed_rejects_a_remediation_argument(remediation: Any) -> None:
 @given(
     name=st.sampled_from(HELPER_NAMES),
     unknown=st.text(
-        alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=16
+        alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=16  # pragma: allowlist secret -- Hypothesis alphabet
     ),
     value=st.one_of(st.none(), st.text(max_size=16), st.integers()),
 )

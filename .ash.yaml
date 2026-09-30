@@ -55,6 +55,8 @@ global_settings:
     # --- Test and type-check caches ----------------------------------------
     - path: '.hypothesis/**'
       reason: 'Hypothesis example database; generated binary test state, regenerated on every property-test run.'
+    - path: '**/.pytest_cache/**'
+      reason: "pytest's run cache, regenerated on every test run and never committed; its CACHEDIR.TAG signature is a fixed hex constant that detect-secrets reports as a high-entropy string."
 
     # --- Scanner output -----------------------------------------------------
     # Scoped to the output directory, not all of `.ash/`, so that an ASH config

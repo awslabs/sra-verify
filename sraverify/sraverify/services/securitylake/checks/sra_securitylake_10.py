@@ -106,7 +106,7 @@ class SRA_SECURITYLAKE_10(SecurityLakeCheck):
                 for account_id in active_ids:
                     resource_id = (
                         f"arn:aws:securitylake:{region}:{account_id}:"
-                        f"log-source/LAMBDA_EXECUTION"
+                        f"log-source/LAMBDA_EXECUTION"  # pragma: allowlist secret -- ARN segment, not a credential
                     )
                     if semantic:
                         yield self.failed(

@@ -37,6 +37,10 @@ Resources:
             reason: Star resource required for actions
           - id: W28
             reason: Explicit name used for role for easy identification.
+      checkov:
+        skip:
+          - id: CKV_AWS_111
+            comment: Star resource required for actions
     Type: AWS::IAM::Role
     Properties:
       RoleName: SRAVerifyCodeBuildServiceRole
@@ -97,6 +101,10 @@ Resources:
             reason: No bucket logging needed.
           - id: W41
             reason: Amazon S3 now applies server-side encryption with Amazon S3 managed keys (SSE-S3) as the base level of encryption for every bucket in Amazon S3.
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: No bucket logging needed.
     UpdateReplacePolicy: Retain
     DeletionPolicy: Retain
     Type: AWS::S3::Bucket
@@ -369,6 +377,10 @@ Resources:
         rules_to_suppress:
           - id: W84
             reason: CloudWatch Logs protects data at rest using encryption. All log groups are encrypted. By default, the CloudWatch Logs service manages the server-side encryption keys.
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: CloudWatch Logs protects data at rest using encryption. All log groups are encrypted. By default, the CloudWatch Logs service manages the server-side encryption keys.
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
     Type: AWS::Logs::LogGroup
@@ -386,6 +398,14 @@ Resources:
             reason: Lambda is not deployed inside of a VPC. The Lambda function is used to start the CodeBuild job as a custom CloudFormation resource.
           - id: W92
             reason: Reserved concurrent executions is not set.
+      checkov:
+        skip:
+          - id: CKV_AWS_115
+            comment: Runs once per stack create or update to start the first build, so a concurrency limit is not needed.
+          - id: CKV_AWS_116
+            comment: Invoked synchronously by CloudFormation as a custom resource; CloudFormation surfaces any failure, so there is no asynchronous event to send to a dead-letter queue.
+          - id: CKV_AWS_117
+            comment: Lambda is not deployed inside of a VPC. The Lambda function is used to start the CodeBuild job as a custom CloudFormation resource and only calls the CodeBuild API.
     Type: AWS::Lambda::Function
     Properties:
       Handler: index.lambda_handler

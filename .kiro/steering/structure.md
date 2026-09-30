@@ -15,22 +15,25 @@ sraverify/                          <- workspace root (not itself a git repo)
 ```
 
 The workspace root holds no `.kiro/` directory. The only one lives inside the
-scanner repo: the five-file steering set at `sra-verify/.kiro/steering/` and the
-specs at `sra-verify/.kiro/specs/`. The five steering files are `product.md`
+scanner repo: the six-file steering set at `sra-verify/.kiro/steering/` and the
+specs at `sra-verify/.kiro/specs/`. The six steering files are `product.md`
 (what the tool is and why), `tech.md` (stack, commands, logging, deployment),
 this file (layout, architecture, contracts),
 `creating_checks_best_practices.md` (authoritative for check-authoring detail),
-and `testing_checks.md` (authoritative for validating checks against live AWS).
+`testing_checks.md` (authoritative for validating checks against live AWS),
+and `security_scanning.md` (authoritative for the ASH scan every change passes
+before commit).
 
-`sra-verify/.kiro/` is tracked in git — 17 files, the five steering docs plus
-the three specs and their `.config.kiro` files. Edits to steering and specs are
+`sra-verify/.kiro/` is tracked in git — 22 files, the six steering docs plus
+the four specs (`check-contract-formalization`, `client-error-contract`,
+`iam-user-detection`, `scan-context-refactor`), each with its `.config.kiro`. Edits to steering and specs are
 therefore part of a commit like any other change.
 
 ## The scanner repo
 
 ```
 sra-verify/
-├── .kiro/steering/                     # the five steering docs
+├── .kiro/steering/                     # the six steering docs
 ├── .kiro/specs/                        # check-contract-formalization,
 │                                       #   scan-context-refactor, iam-user-detection
 ├── 1-sraverify-member-roles.yaml       # StackSet: SRAMemberRole + managed policies

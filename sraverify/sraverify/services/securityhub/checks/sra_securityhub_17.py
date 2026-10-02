@@ -72,7 +72,7 @@ class SRA_SECURITYHUB_17(SecurityHubCheck):
         # Organizations is global; the Region only picks a client endpoint.
         region = self.regions[0]
 
-        accounts_response = self.get_organization_accounts(region)
+        accounts_response = self.organization.accounts()
         if "Error" in accounts_response:
             error = accounts_response["Error"]
             yield self.error(

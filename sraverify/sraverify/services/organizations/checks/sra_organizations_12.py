@@ -74,7 +74,7 @@ class SRA_ORGANIZATIONS_12(OrganizationsCheck):
             f"Effective {BEDROCK_POLICY_TYPE} names at least one Guardrail"
         )
 
-        accounts_response = self.get_accounts()
+        accounts_response = self.organization.accounts()
 
         if "Error" in accounts_response:
             error = accounts_response["Error"]

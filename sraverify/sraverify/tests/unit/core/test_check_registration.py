@@ -929,6 +929,72 @@ def test_a_shadow_on_an_intermediate_base_class_raises(synthetic_service):
     assert "SRA-GUARDDUTY-01" not in registry.all_checks()
 
 
+# --------------------------------------------------------------------------
+# Shape rule: no shadowed context property (organizations-provider 5.3)
+# --------------------------------------------------------------------------
+
+def test_a_class_attribute_shadowing_the_organization_property_raises(
+    synthetic_service,
+):
+    # ``organization`` is a read-only property delegating to the scan context.
+    # A class attribute of that name would win over it, so ``self.organization``
+    # would stop being the scan's provider. The meta is valid on purpose: the
+    # meta-declared rule runs first, and this test is about the shadow rule.
+    before = dict(registry.all_checks())
+    pkg = synthetic_service(
+        {
+            "checks/sra_guardduty_01.py": _check_src(
+                "SRA_GUARDDUTY_01",
+                check_id="SRA-GUARDDUTY-01",
+                class_attrs="organization = None\n",
+            )
+        }
+    )
+
+    with pytest.raises(CheckIdentityError) as excinfo:
+        importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
+
+    rendered = str(excinfo.value)
+    assert "SRA_GUARDDUTY_01.organization" in rendered
+    assert "context property" in rendered
+    assert "sra_guardduty_01.py" in rendered
+    assert dict(registry.all_checks()) == before
+
+
+def test_an_organization_shadow_on_an_intermediate_base_class_raises(
+    synthetic_service,
+):
+    # The same MRO walk as the metadata names: a service base class in base.py
+    # cannot smuggle the shadow in either.
+    before = dict(registry.all_checks())
+    pkg = synthetic_service(
+        {
+            "base.py": _check_src(
+                "GuardDutyCheck",
+                check_id=None,
+                class_attrs=(
+                    'NAMESPACE = "guardduty"\n'
+                    "organization = None\n"
+                ),
+            ),
+            "checks/sra_guardduty_01.py": _check_src(
+                "SRA_GUARDDUTY_01",
+                check_id="SRA-GUARDDUTY-01",
+                bases="GuardDutyCheck",
+                extra="from ..base import GuardDutyCheck\n",
+            ),
+        }
+    )
+
+    with pytest.raises(CheckIdentityError) as excinfo:
+        importlib.import_module(f"{pkg}.checks.sra_guardduty_01")
+
+    rendered = str(excinfo.value)
+    assert "GuardDutyCheck.organization" in rendered
+    assert "context property" in rendered
+    assert dict(registry.all_checks()) == before
+
+
 def test_an_unrelated_class_attribute_is_fine(synthetic_service):
     # Only the four metadata names are forbidden. A service base class's
     # NAMESPACE, and a check's own private constants, must keep working.

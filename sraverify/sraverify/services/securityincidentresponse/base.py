@@ -134,21 +134,6 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         client = self._sir_client(self.discover_sir_region())
         return client.batch_get_member_account_details(membership_id, account_ids)
 
-    def get_organization_accounts(self) -> Dict[str, Any]:
-        """
-        Get all accounts in the organization.
-
-        Returns:
-            ``{"Accounts": [...]}`` on success, or an error result. A ``Mapping``
-            rather than a bare list, so "the organization is empty", "the call was
-            denied" and "there was no client" stay three distinct outcomes.
-        """
-        region = self._default_region()
-        client = self.get_client(region)
-        if not client:
-            return no_client_result(service=_SERVICE_NAME, region=region)
-        return client.list_accounts()
-
     def get_role(self, role_name: str) -> Dict[str, Any]:
         """
         Get IAM role details.

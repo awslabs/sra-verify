@@ -79,6 +79,7 @@ Resources:
           - Sid: AccountPermissions
             Effect: Allow
             Action:
+              - account:GetAccountInformation
               - account:GetAlternateContact
             Resource: '*'
           - Sid: AmplifyPermissions
@@ -145,6 +146,7 @@ Resources:
           - Sid: Ec2Permissions
             Effect: Allow
             Action:
+              - ec2:DescribeRegions
               - ec2:DescribeVerifiedAccessInstances
               - ec2:GetEbsEncryptionByDefault
               - ec2:GetVerifiedAccessInstanceWebAcl

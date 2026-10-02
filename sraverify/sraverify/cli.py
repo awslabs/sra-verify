@@ -15,7 +15,11 @@ import sys
 from typing import List, Optional, Sequence
 
 from sraverify.core.enums import AccountType, Status
-from sraverify.core.errors import NoChecksSelectedError, UnknownCheckError
+from sraverify.core.errors import (
+    NoChecksSelectedError,
+    PartitionUndeterminedError,
+    UnknownCheckError,
+)
 from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
 from sraverify.scanner import SRAVerify
@@ -126,7 +130,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='SRA Verify - Security Rule Assessment Verification Tool')
     parser.add_argument('--profile', type=str, help='AWS profile to use')
     parser.add_argument('--role', type=str, help='ARN of IAM role to assume')
-    parser.add_argument('--regions', type=str, help='Comma-separated list of AWS regions to check')
+    parser.add_argument('--regions', type=str,
+                        help='Comma-separated list of AWS regions to check. The first value '
+                             'also selects the AWS partition. Required unless the session has '
+                             'a Region (AWS_DEFAULT_REGION, or region = in the profile; '
+                             'boto3 does not read AWS_REGION by itself).')
     parser.add_argument('--output', type=str, default=DEFAULT_OUTPUT,
                         help=f'Output file name (default: {DEFAULT_OUTPUT})')
     parser.add_argument('--check', type=str, help='Run a specific check (e.g., SRA-GUARDDUTY-01)')
@@ -181,8 +189,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     Returns:
         0 when a report was written, regardless of FAIL and ERROR rows; 1 when
-        the scan ran but the report could not be written; 2 for a usage error,
-        with no file created.
+        the scan ran but the report could not be written; 2 for a usage error
+        (an unknown --check, an empty filter combination, or a scan Region
+        that cannot be determined), with no file created.
     """
     args = parse_args(argv)
 
@@ -191,15 +200,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     configure_logging(args.debug)
 
     regions = [r.strip() for r in args.regions.split(',')] if args.regions else None
-    sra = SRAVerify(
-        profile=args.profile,
-        role_arn=args.role,
-        regions=regions,
-        connect_timeout=args.connect_timeout,
-        read_timeout=args.read_timeout,
-        max_attempts=args.max_attempts,
-        max_pool_connections=args.max_pool_connections,
-    )
+    try:
+        sra = SRAVerify(
+            profile=args.profile,
+            role_arn=args.role,
+            regions=regions,
+            connect_timeout=args.connect_timeout,
+            read_timeout=args.read_timeout,
+            max_attempts=args.max_attempts,
+            max_pool_connections=args.max_pool_connections,
+        )
+    except PartitionUndeterminedError as exc:
+        # Only reachable with --role: get_session refuses to send AssumeRole to
+        # an unknown partition. No output path has been resolved yet, so no
+        # file can exist.
+        logger.error(str(exc))
+        return 2
 
     if args.list_checks:
         checks = sra.get_available_checks(args.account_type)
@@ -247,10 +263,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # argparse itself returns for a bad --account-type, so the CLI is
     # internally consistent (9.7).
     try:
+        # First: refuse a scan whose partition cannot be determined, ahead of
+        # the banner's check count and its STS call. When both the partition
+        # and the filters are bad, the partition error is the one reported.
+        scan_region = sra.resolve_scan_region()
+
         # Display banner with session information
         print_banner(
             profile=args.profile or 'default',
-            region=sra.session.region_name,
+            region=scan_region,
             session=sra.session,
             regions=regions,
             account_type=args.account_type,
@@ -270,11 +291,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             log_archive_accounts=log_archive_accounts,
             show_progress=True
         )
-    except (UnknownCheckError, NoChecksSelectedError) as exc:
+    except (UnknownCheckError, NoChecksSelectedError, PartitionUndeterminedError) as exc:
         # Usage error. UnknownCheckError composes a sentence carrying the
         # unmatched ID and its near-miss suggestions; NoChecksSelectedError
         # renders the three filter values through __str__ while keeping them as
-        # its args for a library caller. Either way ``str(exc)`` holds everything
+        # its args for a library caller; PartitionUndeterminedError names
+        # --regions and AWS_DEFAULT_REGION. Either way ``str(exc)`` holds everything
         # 9.7 requires be logged, and the phrasing belongs to the exception rather
         # than to the CLI so a library caller sees the same text.
         logger.error(str(exc))

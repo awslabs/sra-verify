@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """
-Derive the least-privilege member-role IAM policy from the client layer.
+Derive the least-privilege member-role IAM policy from the package's boto3 calls.
 
-Reads every ``services/*/client.py``, works out which boto3 service each
-``self.<attr>`` refers to, collects every call made on those attributes, and
-emits the action set as JSON and as a CloudFormation managed-policy snippet.
+Reads every module in the ``sraverify`` package -- not only ``services/*/client.py``:
+``core/`` issues calls too (``ScanContext``'s account, Region and organization
+lookups, and the relocated ``core/organizations_client.py``) -- works out which
+boto3 service each receiver refers to, collects every call made on those
+receivers, and emits the action set as JSON and as a CloudFormation
+managed-policy snippet.
+
+``tests/`` and dot-prefixed directories (``.venv``, ``.pytest_cache``,
+``.hypothesis``) are pruned, and the modules in :data:`EXCLUDED_MODULES` are
+skipped with their reason.
 
 Why this was rewritten
 ----------------------
@@ -41,6 +48,23 @@ That removed a class of warning, not a class of protection: a literal that
 disagreed with the call it labelled was invisible at runtime, which is precisely
 why it was dropped in favour of the value botocore already supplies.
 
+Warnings
+--------
+
+Two warnings go to stderr, and a clean run emits neither:
+
+* A module that declares an ``AWSClient`` subclass but binds no boto3 client.
+* Any ``<x>.get_client(...)`` or ``<x>.client(...)`` anywhere in the package --
+  ``core/`` included -- whose service id (first positional argument, else
+  ``service_name=``) is not a literal boto3 service id, reported as
+  ``<module>:<line>``. Without it, a refactor that passed the service id through
+  a variable would drop that client's calls from the policy silently. Two shapes
+  are exempt by shape, not by file: the SecurityCheck-family wrapper lookup
+  ``self.get_client(<region>)`` inside a ``*Check`` class (it returns a service
+  wrapper, not a boto3 client, and occurs in check modules as well as bases),
+  and the factory ``<recv>.client(<param>, ...)`` inside a function named
+  ``get_client`` whose parameter it forwards (``ScanContext.get_client``).
+
 Run from the repository root:
 
     python util/generate_iam_policy.py
@@ -50,6 +74,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import json
 import os
 import sys
@@ -57,7 +82,22 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
+import botocore.session
 import yaml
+
+#: Directory names pruned from the walk at any depth. Dot-prefixed directories
+#: and ``*.egg-info`` are pruned as well; see :func:`_pruned`.
+PRUNED_DIRS: frozenset[str] = frozenset({"tests", "__pycache__", "build", "dist"})
+
+#: Modules skipped by the walk, keyed by package-relative POSIX path, each with
+#: the reason it contributes no member-role action.
+EXCLUDED_MODULES: Dict[str, str] = {
+    "core/session.py": (
+        "its one call, sts:AssumeRole, is issued by the operator's principal to "
+        "*become* the member role; it is granted by the role's trust policy and "
+        "by the caller's own permissions, never by the member role itself"
+    ),
+}
 
 #: boto3/botocore service id -> IAM action prefix, where the two differ.
 #: Everything not listed uses the service id unchanged.
@@ -112,39 +152,108 @@ S3CONTROL_TO_S3: Dict[str, str] = {
 # CloudFormation template updated in the same commit.
 
 
-def find_client_files(base_dir: str = "./sraverify") -> List[str]:
-    """Return every ``client.py`` under ``base_dir``, sorted.
+def _pruned(name: str) -> bool:
+    """Return whether a directory of this name is pruned from the walk.
 
     Args:
-        base_dir: Directory to walk.
+        name: A directory name.
+
+    Returns:
+        ``True`` for :data:`PRUNED_DIRS`, dot-prefixed names and ``*.egg-info``.
+    """
+    return name in PRUNED_DIRS or name.startswith(".") or name.endswith(".egg-info")
+
+
+def package_dir(base_dir: str = "./sraverify") -> Path:
+    """Return the ``sraverify`` package directory under the project root.
+
+    Args:
+        base_dir: The project root (the directory holding ``pyproject.toml``).
+
+    Returns:
+        ``<base_dir>/sraverify``.
+
+    Raises:
+        FileNotFoundError: If that directory holds no ``__init__.py``.
+    """
+    package = Path(base_dir) / "sraverify"
+    if not (package / "__init__.py").is_file():
+        raise FileNotFoundError(
+            f"{package} is not the sraverify package (no __init__.py); pass the "
+            f"project root as --base-dir"
+        )
+    return package
+
+
+def find_python_modules(base_dir: str = "./sraverify") -> List[str]:
+    """Return every walked ``.py`` in the package, sorted.
+
+    Prunes :data:`PRUNED_DIRS`, dot-prefixed directories and ``*.egg-info`` at
+    any depth, and skips :data:`EXCLUDED_MODULES`.
+
+    Args:
+        base_dir: The project root.
 
     Returns:
         Paths, sorted so the output is reproducible.
     """
+    package = package_dir(base_dir)
     found: List[str] = []
-    for root, _, files in os.walk(base_dir):
-        if "__pycache__" in root:
-            continue
+    for root, dirs, files in os.walk(package):
+        dirs[:] = [d for d in dirs if not _pruned(d)]
         for name in files:
-            if name == "client.py":
-                found.append(os.path.join(root, name))
+            if not name.endswith(".py"):
+                continue
+            path = Path(root) / name
+            if path.relative_to(package).as_posix() in EXCLUDED_MODULES:
+                continue
+            found.append(str(path))
     return sorted(found)
 
 
-def extract_service_name(file_path: str) -> str:
-    """Return the service package name from a ``client.py`` path.
+def relative_module(path: str, base_dir: str = "./sraverify") -> str:
+    """Return ``path`` relative to the package directory, POSIX-style.
 
     Args:
-        file_path: Path of the form ``.../services/<service>/client.py``.
+        path: A walked module path.
+        base_dir: The project root.
 
     Returns:
-        The service directory name, or ``"unknown"``.
+        e.g. ``"core/scan_context.py"``.
     """
-    parts = file_path.split(os.sep)
-    for index, part in enumerate(parts):
-        if part == "services" and index + 1 < len(parts):
-            return parts[index + 1]
-    return "unknown"
+    return Path(path).relative_to(package_dir(base_dir)).as_posix()
+
+
+@functools.lru_cache(maxsize=1)
+def known_service_ids() -> frozenset[str]:
+    """Return every boto3 service id botocore ships with.
+
+    Read from botocore's bundled data, offline. A ``get_client(...)`` whose
+    literal first argument is not one of these -- ``self.get_client('us-east-1')``
+    on a service base, which is a Region lookup -- binds nothing.
+
+    Returns:
+        The service ids.
+    """
+    return frozenset(botocore.session.get_session().get_available_services())
+
+
+def declares_aws_client(tree: ast.Module) -> bool:
+    """Return whether the module declares a class whose bases name ``AWSClient``.
+
+    Args:
+        tree: A parsed module.
+
+    Returns:
+        ``True`` if such a class is declared.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", None)
+                if name == "AWSClient":
+                    return True
+    return False
 
 
 def _attribute_root(node: ast.AST) -> Tuple[str, ...]:
@@ -171,7 +280,9 @@ def bind_clients(tree: ast.Module) -> Dict[str, str]:
 
     Recognizes ``ctx.get_client('<svc>', ...)``, ``self.ctx.get_client(...)``, and
     the legacy ``session.client(...)`` -- the last only so the generator keeps
-    working if a module is ever written that way again.
+    working if a module is ever written that way again. The literal must be a
+    known boto3 service id (:func:`known_service_ids`), so a Region literal such
+    as ``self.get_client('us-east-1')`` binds nothing.
 
     Args:
         tree: A parsed ``client.py``.
@@ -195,7 +306,7 @@ def bind_clients(tree: ast.Module) -> Dict[str, str]:
                 continue
             if candidate.args and isinstance(candidate.args[0], ast.Constant):
                 value = candidate.args[0].value
-                if isinstance(value, str):
+                if isinstance(value, str) and value in known_service_ids():
                     service = value
                     break
         if service is None:
@@ -215,6 +326,121 @@ def bind_clients(tree: ast.Module) -> Dict[str, str]:
                 bindings[target.id] = service
 
     return bindings
+
+
+def _base_names(node: ast.ClassDef) -> List[str]:
+    """Return the simple names of a class's bases (``a.b.C`` -> ``C``)."""
+    names: List[str] = []
+    for base in node.bases:
+        if isinstance(base, ast.Attribute):
+            names.append(base.attr)
+        elif isinstance(base, ast.Name):
+            names.append(base.id)
+    return names
+
+
+def _call_service_arg(call: ast.Call) -> ast.AST | None:
+    """Return the service-id argument: the first positional, else ``service_name=``."""
+    if call.args:
+        return call.args[0]
+    return next((kw.value for kw in call.keywords if kw.arg == "service_name"), None)
+
+
+def _is_wrapper_lookup(call: ast.Call, classes: List[ast.ClassDef]) -> bool:
+    """Allowlist shape (A): the SecurityCheck-family wrapper lookup.
+
+    ``self.get_client(<x>)`` -- a bare ``self`` receiver, exactly one positional
+    argument and no keywords -- inside a class one of whose bases ends in
+    ``Check``. That is ``SecurityCheck.get_client(region)``, which returns the
+    service's own client *wrapper* for a Region and builds no boto3 client, so
+    there is no service id to attribute. Allowlisted by shape rather than by
+    file because it occurs in check modules as well as in service bases
+    (``sra_config_09`` looks up ``self.get_client(org_aggregator_region)``).
+    """
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "get_client"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "self"
+        and len(call.args) == 1
+        and not call.keywords
+        and bool(classes)
+        and any(name.endswith("Check") for name in _base_names(classes[-1]))
+    )
+
+
+def _is_client_factory(call: ast.Call, functions: List[ast.AST]) -> bool:
+    """Allowlist shape (B): the boto3 client factory itself.
+
+    ``<recv>.client(<Name>, ...)`` where ``<Name>`` is a parameter of an
+    enclosing function named ``get_client`` -- ``ScanContext.get_client``'s
+    ``self._session.client(service_name, ...)``. Its service id is whatever its
+    callers pass, and those callers are what this generator attributes.
+    """
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "client"):
+        return False
+    service = _call_service_arg(call)
+    if not isinstance(service, ast.Name):
+        return False
+    for function in functions:
+        if getattr(function, "name", None) != "get_client":
+            continue
+        args = function.args  # type: ignore[attr-defined]
+        params = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+        if service.id in params:
+            return True
+    return False
+
+
+def unbindable_sites(tree: ast.Module) -> List[Tuple[int, str]]:
+    """Return ``(line, callee)`` for every client binding with no service id.
+
+    A ``Call`` whose function is an attribute named ``get_client`` or ``client``
+    is bindable when its service id -- the first positional argument, else a
+    ``service_name=`` keyword -- is a string literal naming a boto3 service
+    (:func:`known_service_ids`). Anything else would bind a boto3 client this
+    generator cannot attribute, so every call made through it would silently
+    drop out of the policy. Two shapes are exempt, by shape rather than by
+    file: the SecurityCheck-family wrapper lookup (:func:`_is_wrapper_lookup`)
+    and the factory itself (:func:`_is_client_factory`).
+
+    Args:
+        tree: A parsed module.
+
+    Returns:
+        The offending sites, in source order.
+    """
+    found: List[Tuple[int, str]] = []
+
+    def visit(node: ast.AST, classes: List[ast.ClassDef], functions: List[ast.AST]) -> None:
+        if isinstance(node, ast.ClassDef):
+            classes = [*classes, node]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions = [*functions, node]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"get_client", "client"}
+        ):
+            service = _call_service_arg(node)
+            bindable = (
+                isinstance(service, ast.Constant)
+                and isinstance(service.value, str)
+                and service.value in known_service_ids()
+            )
+            if not (
+                bindable
+                or _is_wrapper_lookup(node, classes)
+                or _is_client_factory(node, functions)
+            ):
+                found.append((node.lineno, ast.unparse(node.func)))
+        for child in ast.iter_child_nodes(node):
+            visit(child, classes, functions)
+
+    visit(tree, [], [])
+    return found
 
 
 def collect_calls(
@@ -352,18 +578,21 @@ def convert_to_api_action(method_name: str) -> str:
 
 
 def build(base_dir: str = "./sraverify") -> Tuple[Dict[str, Set[str]], List[str]]:
-    """Attribute every client call in the tree.
+    """Attribute every boto3 call in the package.
 
     Args:
-        base_dir: Directory to walk for ``client.py`` files.
+        base_dir: The project root to walk.
 
     Returns:
-        ``(service_calls, warnings)``.
+        ``(service_calls, warnings)``. ``warnings`` holds one entry per
+        ``AWSClient`` module that binds nothing and one per unbindable
+        ``get_client`` / ``client`` site (:func:`unbindable_sites`); it is empty
+        on a clean tree.
     """
     service_calls: Dict[str, Set[str]] = defaultdict(set)
     warnings: List[str] = []
 
-    for path in find_client_files(base_dir):
+    for path in find_python_modules(base_dir):
         source = Path(path).read_text(encoding="utf-8")
         tree = ast.parse(source, filename=path)
 
@@ -372,10 +601,22 @@ def build(base_dir: str = "./sraverify") -> Tuple[Dict[str, Set[str]], List[str]
         for service, methods in calls.items():
             service_calls[service].update(methods)
 
-        if not bindings:
+        # Only a client module is expected to bind; most of the package binds
+        # nothing and that is normal.
+        if not bindings and declares_aws_client(tree):
             warnings.append(
-                f"{extract_service_name(path)}: no boto3 client binding found; "
-                f"every call in this module is unattributed"
+                f"{relative_module(path, base_dir)}: declares an AWSClient subclass "
+                f"but no boto3 client binding was found; every call in this module "
+                f"is unattributed"
+            )
+
+        # Anywhere in the package -- core/ included, not only AWSClient
+        # subclasses -- a binding whose service id is not a literal would drop
+        # its calls from the policy without a trace.
+        for line, callee in unbindable_sites(tree):
+            warnings.append(
+                f"{relative_module(path, base_dir)}:{line}: {callee}(...) does not "
+                f"name a boto3 service id; calls through it are unattributed"
             )
 
     return dict(service_calls), warnings
@@ -432,7 +673,7 @@ def main() -> int:
     parser.add_argument(
         "--base-dir",
         default="./sraverify",
-        help="directory to walk for client.py files (default: ./sraverify)",
+        help="project root to walk (default: ./sraverify)",
     )
     parser.add_argument(
         "--out-json",

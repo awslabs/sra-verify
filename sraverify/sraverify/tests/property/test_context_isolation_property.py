@@ -114,6 +114,7 @@ from sraverify.core.check import SecurityCheck
 from sraverify.core.enums import AccountType, Severity, Status
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
+from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.scan_context import ScanContext
 
 
@@ -770,9 +771,11 @@ def test_returned_findings_hold_no_scan_context(
 
     # ---- Nothing reachable from the findings refers to the context ---- #
     reached = _data_reachable(findings)
+    # OrganizationsProvider too: it holds the context (weakly) and the scan's
+    # account list, so a finding reaching it would carry per-scan state out.
     leaked = [
         obj for obj in reached.values()
-        if isinstance(obj, (ScanContext, SecurityCheck))
+        if isinstance(obj, (ScanContext, SecurityCheck, OrganizationsProvider))
     ]
     assert not leaked, (
         f"the returned findings reach {[type(o).__name__ for o in leaked]}; a "

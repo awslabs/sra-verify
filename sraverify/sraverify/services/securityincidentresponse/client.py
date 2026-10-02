@@ -20,7 +20,6 @@ this Region" from "could not ask" unless the failure is a value.
 from typing import Any, List, Mapping
 
 from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
-from sraverify.core.logging import logger
 from sraverify.core.scan_context import ScanContext
 
 
@@ -105,33 +104,6 @@ class SecurityIncidentResponseClient(AWSClient):
                 membershipId=membership_id,
                 accountIds=account_ids
             )
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_accounts(self) -> Mapping[str, Any]:
-        """
-        List all accounts in the organization, following pagination.
-
-        ``organizations:ListAccounts`` returns at most 20 accounts per page.
-        Reading only the first page would silently drop the remaining accounts,
-        and because SRA-SECURITYINCIDENTRESPONSE-04 asserts that *every* active
-        account is covered, a dropped account becomes an all-PASS result rather
-        than a visible failure. Matches the paginated approach already used by
-        the macie, securityhub and securitylake clients.
-
-        Returns:
-            ``{"Accounts": [...]}`` on success, or the error result. The whole
-            paginator loop is inside the ``try``: a failure on page three has to
-            arrive as an error result rather than as a short list, because a short
-            list is indistinguishable from a smaller organization.
-        """
-        try:
-            accounts: List[Mapping[str, Any]] = []
-            paginator = self.org_client.get_paginator('list_accounts')
-            for page in paginator.paginate():
-                accounts.extend(page.get('Accounts', []))
-            logger.debug(f"Found {len(accounts)} organization accounts")
-            return {"Accounts": accounts}
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

@@ -24,6 +24,8 @@ import botocore.config
 
 from sraverify.core.aws_errors import is_error
 from sraverify.core.logging import logger
+from sraverify.core.organization import OrganizationsProvider
+from sraverify.core.regions import resolve_scan_region
 
 
 # Documented defaults for the ``Client_Config`` (Requirement 2.2). Pulled out as
@@ -105,9 +107,20 @@ class ScanContext:
         max_attempts: Optional[int] = None,
         max_pool_connections: Optional[int] = None,
     ) -> None:
-        # Per-scan immutable inputs (Requirements 1.6, 1.7, 1.8, 1.9).
+        # Per-scan immutable inputs (Requirements 1.6, 1.7, 1.8, 1.9). The
+        # explicit Region list is copied, so a caller mutating its own list
+        # mid-scan cannot make ``scan_region(ctx)`` and ``ctx.scan_region``
+        # disagree.
         self._session: boto3.Session = session
-        self._explicit_regions: Optional[List[str]] = regions
+        self._explicit_regions: Optional[List[str]] = (
+            list(regions) if regions is not None else None
+        )
+        # The scan Region, which selects the partition. Raises
+        # ``PartitionUndeterminedError`` here -- before the lock, caches and
+        # provider exist -- when neither an explicit Region nor the session
+        # supplies one. ``SRAVerify`` refuses such a scan earlier; this is the
+        # backstop for a library caller that builds a context directly.
+        self._scan_region: str = resolve_scan_region(self._explicit_regions, session)
         self._resolved_regions: Optional[List[str]] = None
         self._audit_accounts: List[str] = (
             audit_accounts if audit_accounts is not None else []
@@ -158,6 +171,11 @@ class ScanContext:
         # (Requirement 1.11).
         self._lock: threading.Lock = threading.Lock()
 
+        # The Organizations provider, reached as ``ctx.organization`` and from a
+        # check as ``self.organization``. Last, because it holds this context
+        # (weakly). Constructing it issues no AWS call and binds no boto3 client.
+        self._organization: OrganizationsProvider = OrganizationsProvider(self)
+
     # ------------------------------------------------------------------ #
     # Typed read-only properties (public API).
     # ------------------------------------------------------------------ #
@@ -181,6 +199,16 @@ class ScanContext:
         return self._explicit_regions
 
     @property
+    def scan_region(self) -> str:
+        """The scan Region: the first explicit Region, else the session's.
+
+        Computed once at construction by ``resolve_scan_region`` and never
+        ``None``. It selects the partition for every client this context builds
+        without an explicit Region. Read-only; no setter.
+        """
+        return self._scan_region
+
+    @property
     def audit_accounts(self) -> List[str]:
         """Audit account IDs for the scan; ``[]`` when none were supplied."""
         return self._audit_accounts
@@ -189,6 +217,11 @@ class ScanContext:
     def log_archive_accounts(self) -> List[str]:
         """Log-archive account IDs for the scan; ``[]`` when none were supplied."""
         return self._log_archive_accounts
+
+    @property
+    def organization(self) -> OrganizationsProvider:
+        """The Organizations provider for this scan. Read-only; no setter."""
+        return self._organization
 
     @property
     def client_config(self) -> botocore.config.Config:
@@ -297,10 +330,12 @@ class ScanContext:
         timeouts, retry policy, and connection pool size documented on
         ``ScanContext``. Once a client has been built for a given
         ``(service_name, region)`` pair, the same instance is returned on every
-        subsequent call within the same scan (Requirement 2.10). When
-        ``region`` is ``None`` the cache key uses the literal error result
-        ``"__global__"`` so global services like IAM and Organizations stay
-        distinct from any specific region.
+        subsequent call within the same scan (Requirement 2.10). ``region=None``
+        means the scan Region, so ``get_client(svc)`` and
+        ``get_client(svc, region=ctx.scan_region)`` share one cache key and
+        return the same instance, and no client is ever built without a Region
+        (which would let botocore fall back to the commercial ``aws-global``
+        endpoint).
 
         Thread-safety contract (Requirement 2.11): callers racing on the same
         ``(service_name, region)`` key are guaranteed to receive the same
@@ -318,16 +353,16 @@ class ScanContext:
         Args:
             service_name: The AWS service name as understood by ``boto3``
                 (e.g., ``"s3"``, ``"guardduty"``, ``"organizations"``).
-            region: The AWS region for the client, or ``None`` for global
-                services. Forwarded as ``region_name=region`` to
-                ``session.client``; ``None`` lets boto3 pick the session's
-                default region (the same behavior as calling
-                ``session.client(service_name)`` directly).
+            region: The AWS region for the client. ``None`` means the scan
+                Region (``self.scan_region``); a partition-global service such
+                as IAM or Organizations then reaches the scan's partition.
+                Forwarded as ``region_name=region`` to ``session.client``.
 
         Returns:
             The cached boto3 client instance for the given key.
         """
-        cache_key: Tuple[str, str] = (service_name, region if region is not None else "__global__")
+        region = region if region is not None else self._scan_region
+        cache_key: Tuple[str, str] = (service_name, region)
 
         # First check: fast path under the lock for the common cache-hit case.
         with self._lock:
@@ -409,7 +444,7 @@ class ScanContext:
         # Lock released. Issue STS first -- this is the fatal call. Failure
         # here re-raises and leaves ``self._account_info`` unset so a later
         # caller can retry.
-        sts_client = self.get_client("sts")
+        sts_client = self.get_client("sts", region=self._scan_region)
         try:
             response = sts_client.get_caller_identity()
             account_id = response["Account"]
@@ -421,7 +456,7 @@ class ScanContext:
         # blank account name. This preserves the pre-refactor behavior.
         try:
             logger.debug("Getting AWS account name from Account API")
-            account_client = self.get_client("account")
+            account_client = self.get_client("account", region=self._scan_region)
             response = account_client.get_account_information()
             account_name = response["AccountName"]
             logger.debug(f"Retrieved account name: {account_name}")
@@ -469,7 +504,7 @@ class ScanContext:
         # retry.
         try:
             logger.debug("Getting AWS management account ID")
-            org_client = self.get_client("organizations")
+            org_client = self.get_client("organizations", region=self._scan_region)
             response = org_client.describe_organization()
             management_account_id = response["Organization"]["MasterAccountId"]
             logger.debug(f"Management account ID: {management_account_id}")
@@ -491,7 +526,8 @@ class ScanContext:
         When an explicit, non-empty region list was supplied at construction
         time, that list is returned as-is and no AWS call is issued. Otherwise
         this method calls ``ec2:DescribeRegions(AllRegions=False)`` once
-        (against ``us-east-1``) to enumerate the regions enabled for the
+        (against the scan Region, so it answers for the scan's partition) to
+        enumerate the regions enabled for the
         account, caches the result for the remainder of the scan, and returns
         it on every subsequent call (Requirement 1.4).
 
@@ -516,7 +552,7 @@ class ScanContext:
         # ``self._resolved_regions`` unset so a later caller can retry.
         try:
             logger.debug("Getting enabled AWS regions")
-            ec2_client = self.get_client("ec2", region="us-east-1")
+            ec2_client = self.get_client("ec2", region=self._scan_region)
             response = ec2_client.describe_regions(AllRegions=False)
             regions = [region["RegionName"] for region in response["Regions"]]
             logger.debug(f"Found {len(regions)} enabled regions")

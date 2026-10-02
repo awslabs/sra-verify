@@ -90,6 +90,7 @@ from sraverify.services.securityhub.base import SecurityHubCheck
 from sraverify.services.securitylake.base import SecurityLakeCheck
 from sraverify.services.shield.base import ShieldCheck
 from sraverify.services.waf.base import WAFCheck
+from sraverify.tests.property.test_organization_provider_property import stub_organization
 
 
 # --------------------------------------------------------------------------- #
@@ -190,6 +191,9 @@ def _make_mock_ctx(region: str = "us-east-1") -> MagicMock:
         it as part of a cache key.
     """
     ctx = MagicMock(spec=ScanContext)
+    # A case reaching ``ctx.organization`` must meet a stub, not an auto-specced
+    # mock whose ``accounts()`` is a truthy, non-error value.
+    stub_organization(ctx)
     ctx.regions = [region]
     ctx.audit_accounts = []
     ctx.log_archive_accounts = []

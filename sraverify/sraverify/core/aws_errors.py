@@ -42,7 +42,7 @@ than a scan.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, TypedDict
 
@@ -290,12 +290,51 @@ def is_not_configured(table: NotConfiguredTable, error: Mapping[str, str]) -> bo
     Returns:
         ``True`` if the pair is declared and any message needle matches.
     """
+    return is_not_configured_in((table,), error)
+
+
+def declared_fact(
+    table: NotConfiguredTable, error: Mapping[str, str]
+) -> NotConfigured | None:
+    """
+    Return the fact ``table`` declares for ``error``'s ``(Operation, Code)``.
+
+    Args:
+        table: A ``NOT_CONFIGURED_ERRORS`` table.
+        error: An error result's ``Error`` sub-dict.
+
+    Returns:
+        The declared ``NotConfigured``, or ``None`` if the pair is undeclared.
+        The message needle is **not** consulted here: a declared pair whose
+        needle does not match is still declared.
+    """
     by_code = table.get(error.get("Operation", ""))
-    if not by_code:
-        return False
-    fact = by_code.get(error.get("Code", ""))
-    if fact is None:
-        return False
-    if fact.message is None:
-        return True
-    return fact.message.lower() in error.get("Message", "").lower()
+    return by_code.get(error.get("Code", "")) if by_code else None
+
+
+def is_not_configured_in(
+    tables: Sequence[NotConfiguredTable], error: Mapping[str, str]
+) -> bool:
+    """
+    Classify ``error`` against several tables, in order.
+
+    The **first table to declare** ``(Operation, Code)`` decides, message needle
+    included. Precedence is "first to declare", not "first to answer ``True``":
+    a table that declares the pair with a needle the message does not contain has
+    classified the pair as *not* semantic for this message, and a later table
+    must not overrule it. A pair no table declares is ``False`` (ERROR).
+
+    Args:
+        tables: The tables to consult, highest precedence first.
+        error: An error result's ``Error`` sub-dict, which carries ``Operation``.
+
+    Returns:
+        ``True`` if the first declaring table's fact matches.
+    """
+    for table in tables:
+        fact = declared_fact(table, error)
+        if fact is not None:
+            if fact.message is None:
+                return True
+            return fact.message.lower() in error.get("Message", "").lower()
+    return False

@@ -6,30 +6,73 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-Organizations is a global service, so the client is pinned to ``us-east-1`` and the
-wrapper takes no region.
+Organizations is partition-global: there is one endpoint per partition, and the
+wrapper takes no Region. The Region the boto3 client is built for is derived from
+the scan by :func:`scan_region` rather than pinned to ``us-east-1``, which is a
+correct pin only in the ``aws`` partition -- in GovCloud or China it would build a
+client for the wrong partition's endpoint.
+
+This module lives under ``core/`` because the Organizations provider
+(``core/organization.py``) uses it, and ``core/`` never imports from
+``services/``. ``OrganizationsCheck`` imports it from here too.
 """
-from typing import Any, Mapping
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Mapping
 
 from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
-from sraverify.core.scan_context import ScanContext
+from sraverify.core.regions import resolve_scan_region
+
+if TYPE_CHECKING:
+    from sraverify.core.scan_context import ScanContext
+
+
+def scan_region(ctx: ScanContext) -> str:
+    """Return the Region an Organizations boto3 client should be built for.
+
+    The scan Region: the first explicit ``--regions`` value, else the session's
+    Region. Never ``None``. Applies ``resolve_scan_region`` to ``ctx.regions``
+    and ``ctx.session`` -- the same pure rule ``ScanContext`` used to compute
+    ``ctx.scan_region``, over the same inputs -- and never calls
+    ``ctx.get_enabled_regions()``, so deriving the Region issues no AWS call.
+
+    It reads the inputs rather than ``ctx.scan_region`` deliberately: the
+    catalog-wide harnesses hand clients a ``MagicMock`` context with a
+    non-empty ``regions``, on which ``ctx.scan_region`` would be a mock.
+
+    Args:
+        ctx: ScanContext for the current scan.
+
+    Returns:
+        A Region name.
+
+    Raises:
+        PartitionUndeterminedError: Neither input supplies a Region. A real
+            ``ScanContext`` cannot reach this, because its constructor raised
+            first; only a hand-built context can, and that is a programming
+            defect. Raised rather than asserted, because ``python -O`` strips
+            an ``assert`` and would restore the commercial ``aws-global``
+            fallback this function exists to remove.
+    """
+    return resolve_scan_region(ctx.regions, ctx.session)
 
 
 class OrganizationsClient(AWSClient):
     """Client for interacting with AWS Organizations."""
 
-    def __init__(self, ctx: ScanContext):
+    def __init__(self, ctx: ScanContext) -> None:
         """
         Initialize the Organizations client.
 
-        Organizations is a global service; the boto3 client is pinned to
-        ``us-east-1`` so every code path shares one cached instance.
+        Organizations is partition-global; the boto3 client is built for the
+        Region :func:`scan_region` derives, so it reaches the scan's partition.
 
         Args:
             ctx: ScanContext for the current scan.
         """
-        super().__init__("us-east-1", ctx)
-        self.client = ctx.get_client('organizations', region='us-east-1')
+        region = scan_region(ctx)
+        super().__init__(region, ctx)
+        self.client = ctx.get_client('organizations', region=region)
 
     def describe_organization(self) -> Mapping[str, Any]:
         """

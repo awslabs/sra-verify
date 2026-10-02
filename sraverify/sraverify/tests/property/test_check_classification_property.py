@@ -44,6 +44,10 @@ from sraverify.tests.property.test_accessor_cache_property import (
 from sraverify.tests.property.test_client_contract_property import (
     ADAPTERS as _CLIENT_ADAPTERS,
 )
+from sraverify.tests.property.test_organization_provider_property import (
+    PROVIDER_ADAPTERS,
+    stub_organization,
+)
 
 _TEST_REGION = "us-east-1"
 _TEST_ACCOUNT = "111122223333"
@@ -58,6 +62,15 @@ _DENIED_CODE = "TestDenied"
 #: ``{Operation} failed: {Code}: {Message}``. This is what lets a reader tell a
 #: permission gap from an unreachable endpoint without opening the build log.
 _ERROR_VALUE_RE = re.compile(rf"^\S+ failed: {_DENIED_CODE}: ")
+
+#: The Organizations provider's accessors, as the harness records them, and the
+#: operation each one's failure names. The provider is reached through
+#: ``ctx.organization`` rather than inherited, so it is stubbed on the mock
+#: context by ``stub_organization`` rather than patched on the check class; its
+#: own contract is held in ``test_organization_provider_property``.
+_PROVIDER_OPERATIONS: dict[str, str] = {
+    f"organization.{a.method}": a.operation for a in PROVIDER_ADAPTERS
+}
 
 #: ``(check_id, cls)`` for the real catalog, ascending. Snapshotted at import.
 _CATALOG: list[tuple[str, type[SecurityCheck]]] = sorted(all_checks().items())
@@ -132,6 +145,10 @@ def _make_context() -> MagicMock:
     ctx.get_enabled_regions.return_value = [_TEST_REGION]
     ctx._has.return_value = False
     ctx._get.return_value = None
+    # Without the stub, ``ctx.organization`` would be an auto-specced mock whose
+    # ``accounts()`` is a truthy, non-error value -- an empty *success*, the
+    # opposite of what this property simulates.
+    stub_organization(ctx)
     return ctx
 
 
@@ -155,6 +172,9 @@ def _prepare(
     service = _service_of(cls)
     check = cls()
     check._ctx = _make_context()
+    # Re-stub with this drive's ``returns`` and ``record``, so the provider's
+    # accessor is reached with the same value the service accessors get.
+    stub_organization(check._ctx, returns=returns, record=record)
 
     # A global service's base pins its client on a named attribute; give it
     # something non-None so a truthiness guard does not divert control flow before
@@ -408,6 +428,20 @@ _OPERATION_OF_ACCESSOR: dict[tuple[str, str], str] = {
 }
 
 
+def _operation_of(service: str, name: str) -> str | None:
+    """Return the operation a recorded accessor name issues.
+
+    Args:
+        service: The check's service package name.
+        name: A name recorded by the harness: a service accessor's method name,
+            or ``organization.<method>`` for a provider accessor.
+
+    Returns:
+        The operation name, or ``None`` if neither table maps it.
+    """
+    return _PROVIDER_OPERATIONS.get(name) or _OPERATION_OF_ACCESSOR.get((service, name))
+
+
 def _semantic_targets() -> list[Any]:
     """Return one param per (check, declared pair) over the whole catalog.
 
@@ -511,7 +545,7 @@ def test_a_declared_semantic_error_result_reaches_failed(
     if not calls:
         pytest.skip(f"{check_id} consulted no accessor for this error result")
 
-    first_operation = _OPERATION_OF_ACCESSOR.get((service, calls[0]))
+    first_operation = _operation_of(service, calls[0])
     if first_operation != operation:
         pytest.skip(
             f"{check_id} resolves on {calls[0]} ({first_operation or 'unmapped'}) "

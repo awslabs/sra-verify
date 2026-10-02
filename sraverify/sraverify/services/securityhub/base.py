@@ -28,6 +28,7 @@ from sraverify.core.aws_errors import (
 )
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
+from sraverify.core.organizations_client import scan_region
 from sraverify.services.securityhub.client import SecurityHubClient
 
 #: The EventBridge ``detail-type`` of a Security Hub (V2) finding event. Security
@@ -891,20 +892,6 @@ class SecurityHubCheck(SecurityCheck):
             "list_organization_admin_accounts",
         )
 
-    def get_organization_accounts(self, region: str) -> Mapping[str, Any]:
-        """
-        Get every account in the AWS Organization, with caching.
-
-        Args:
-            region: AWS region name
-
-        Returns:
-            ``{"Accounts": [...]}`` on success, or an error result.
-        """
-        return self._cached_call(
-            region, f"organization_accounts:{region}", "list_organization_accounts"
-        )
-
     def get_security_hub_members(self, region: str) -> Mapping[str, Any]:
         """
         Get Security Hub member accounts, with caching.
@@ -936,9 +923,11 @@ class SecurityHubCheck(SecurityCheck):
         would be replayed to every later Organizations check as well as every
         later Security Hub one.
 
-        Organizations is a global service, so the client is pinned to
-        ``us-east-1`` to match ``OrganizationsClient`` and populate the shared
-        slot with a value from the same boto3 instance.
+        The client's Region is derived from the scan through
+        :func:`~sraverify.core.organizations_client.scan_region`, exactly as
+        ``OrganizationsClient`` derives it, so it reaches the scan's partition
+        and shares that client's boto3 instance. The accessor itself is retired
+        in Phase 2 (Requirement 13.2).
 
         Returns:
             The ``DescribeOrganization`` response, or an error result.
@@ -958,7 +947,8 @@ class SecurityHubCheck(SecurityCheck):
             "SecurityHub: Fetching organization details and writing to "
             "shared 'organizations' namespace"
         )
-        org_client = self._ctx.get_client('organizations', region='us-east-1')
+        org_region = scan_region(self._ctx)
+        org_client = self._ctx.get_client('organizations', region=org_region)
         try:
             response = org_client.describe_organization()
         except AWS_EXCEPTIONS as e:
@@ -973,7 +963,7 @@ class SecurityHubCheck(SecurityCheck):
             # refusal from a broken scan. See that method for the full reasoning.
             logger.debug(
                 f"aws_call_failed operation=DescribeOrganization "
-                f"region={self.regions[0] if self.regions else 'global'} "
+                f"region={org_region} "
                 f"code={code} message={message!r}"
             )
             # Not cached: the shared namespace makes a cached failure reachable

@@ -269,20 +269,6 @@ class MacieCheck(SecurityCheck):
         """
         return self._cached_call(region, f"members:{region}", "list_members")
 
-    def get_organization_members(self, region: str) -> Mapping[str, Any]:
-        """
-        Get AWS Organization accounts, with caching.
-
-        Args:
-            region: AWS region name
-
-        Returns:
-            ``{"Accounts": [...]}``, or an error result.
-        """
-        return self._cached_call(
-            region, f"organization_members:{region}", "list_organization_accounts"
-        )
-
     def get_organization_configuration(self, region: str) -> Mapping[str, Any]:
         """
         Get Macie organization configuration, with caching.

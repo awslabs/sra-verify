@@ -7,15 +7,15 @@ import boto3
 from typing import Optional, List, Dict, Any
 
 
-def print_banner(profile: str, region: str, session: boto3.Session = None, 
+def print_banner(profile: str, region: str, session: boto3.Session = None,
                  regions: Optional[List[str]] = None, account_type: str = 'all',
                  checks_count: int = 0, output_file: str = None, role: Optional[str] = None):
     """
     Print the SRAVerify banner and initial execution information.
-    
+
     Args:
         profile: AWS profile name
-        region: AWS region name
+        region: The scan Region (also the Region the STS identity lookup uses)
         session: AWS session
         regions: List of AWS regions to check
         account_type: Type of accounts to run checks against
@@ -25,9 +25,9 @@ def print_banner(profile: str, region: str, session: boto3.Session = None,
     """
     # ASCII art banner - using raw string to avoid escape sequence issues
     print(fr"""
-                    _____ _____         ___       ___        _  __       
-                   / ____|  __ \     /\ \  \     /  /       (_)/ _|      
-                  | (___ | |__) |   /  \ \  \   /  /__  _ __ _| |_ _   _ 
+                    _____ _____         ___       ___        _  __
+                   / ____|  __ \     /\ \  \     /  /       (_)/ _|
+                  | (___ | |__) |   /  \ \  \   /  /__  _ __ _| |_ _   _
                    \___ \|  _  /   / /\ \ \   v   / _ \| '__| |  _| | | |
                    ____) | | \ \  / ____ \ \     /  __/| |  | | | | |_| |
                   |_____/|_|  \_\/_/    \_\ \___/ \___||_|  |_|_|  \__, |
@@ -42,17 +42,19 @@ def print_banner(profile: str, region: str, session: boto3.Session = None,
     print("-> Using the AWS credentials below:")
     print(f"  · AWS-CLI Profile: {profile or 'default'}")
     print(f"  · AWS Region: {region}")
-    
+
     if session:
         try:
-            sts = session.client('sts')
+            # Bound to the scan Region, so the identity lookup reaches the
+            # scan's partition rather than botocore's aws-global default.
+            sts = session.client('sts', region_name=region)
             caller_identity = sts.get_caller_identity()
             print(f"  · AWS Account: {caller_identity['Account']}")
             print(f"  · User Id: {caller_identity['UserId']}")
             print(f"  · Caller Identity ARN: {caller_identity['Arn']}")
         except Exception as e:
             print(f"  · Unable to retrieve identity information: {str(e)}")
-    
+
     # Print scan information
     print("\n-> Starting SRA Verify scan...")
     if role:

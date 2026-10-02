@@ -194,7 +194,11 @@ In this step you will clone the Github repository and run the tool.
       -h, --help            show this help message and exit
       --profile PROFILE     AWS profile to use
       --role ROLE           ARN of IAM role to assume
-      --regions REGIONS     Comma-separated list of AWS regions to check
+      --regions REGIONS     Comma-separated list of AWS regions to check. The
+                            first value also selects the AWS partition. Required
+                            unless the session has a Region
+                            (AWS_DEFAULT_REGION, or region = in the profile;
+                            boto3 does not read AWS_REGION by itself).
       --output OUTPUT       Output file name (default: sraverify_findings.csv)
       --check CHECK         Run a specific check (e.g., SRA-GUARDDUTY-01)
       --service SERVICE     Run checks for a specific service (e.g., GuardDuty)
@@ -253,11 +257,11 @@ that path unchanged.
 ### Exit codes
 Wrap `sraverify` in automation using these codes rather than by parsing its output.
 
-| Code  | Meaning                                                                                                                                                                                                                                                    |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0** | A report was written. This holds regardless of how many FAIL or ERROR rows it contains — a FAIL is the tool working, not the tool failing.                                                                                                                 |
-| **1** | The scan ran but the output file could not be written. The path and reason are logged, and no scan summary is printed. Often transient (a full disk, a stale working directory) and worth a retry.                                                         |
-| **2** | Usage error, raised before any AWS call. **No file is created.** Either `--check` named an unknown ID (up to three near-miss suggestions are logged) or the filter combination matched no checks, for example `--account-type audit --service CloudTrail`. |
+| Code  | Meaning                                                                                                                                                                                                                                                                                                                                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** | A report was written. This holds regardless of how many FAIL or ERROR rows it contains — a FAIL is the tool working, not the tool failing.                                                                                                                                                                                                |
+| **1** | The scan ran but the output file could not be written. The path and reason are logged, and no scan summary is printed. Often transient (a full disk, a stale working directory) and worth a retry.                                                                                                                                        |
+| **2** | Usage error, raised before any AWS call. **No file is created.** Either `--check` named an unknown ID (up to three near-miss suggestions are logged), the filter combination matched no checks (for example `--account-type audit --service CloudTrail`), or the scan Region cannot be determined (no `--regions` and no session Region). |
 
 Exit 0 on a report full of FAILs is deliberate. The CodeBuild deployment fans `sraverify`
 out across every active account with GNU `parallel`, so a non-zero status from one member

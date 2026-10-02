@@ -65,7 +65,7 @@ class SRA_SECURITYLAKE_09(SecurityLakeCheck):
             logger.debug(f"Checking if EKS Audit logs are enabled in {region}")
 
             # Get all organization accounts
-            accounts_response = self.get_organization_accounts(region)
+            accounts_response = self.organization.accounts()
 
             if "Error" in accounts_response:
                 error = accounts_response['Error']

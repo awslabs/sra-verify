@@ -84,9 +84,9 @@ NEAR_MISS_CHECK_ID = "SRA-CLOUDTRAL-01"
 class _RefusingSession:
     """A boto3 ``Session`` stand-in that records and refuses every client build.
 
-    ``region_name`` is a real attribute because ``main()`` reads
-    ``sra.session.region_name`` while evaluating ``print_banner``'s arguments,
-    which happens before ``select_checks`` raises.
+    ``region_name`` is a real attribute because ``main()`` resolves the scan
+    Region -- falling back to the session's Region without ``--regions`` --
+    before the banner and before ``select_checks`` raises.
 
     ``client()`` records the call and *then* raises, so the recording survives a
     caller that swallows the exception -- which ``print_banner`` does, in a bare
@@ -410,3 +410,281 @@ def test_a_near_miss_check_id_is_offered_the_best_three_in_9_4_order(
     ) in hinted[0], (
         f"suggestions are not the best three in 9.4 order: {hinted[0]!r}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Exit 2, no file, no AWS call: the scan Region cannot be determined
+# (failfast tests 19-23a; Requirement 2.8, Property 33)
+# --------------------------------------------------------------------------- #
+
+ROLE = "arn:aws:iam::999988887777:role/SRAMemberRole"
+
+
+class _RegionlessRefusingSession(_RefusingSession):
+    """A refusing session with no Region, so only ``--regions`` could supply one."""
+
+    region_name = None
+
+
+class _RecordingSession(_RefusingSession):
+    """Records and refuses every client build; carries a configurable Region."""
+
+    def __init__(self, region_name: str) -> None:
+        super().__init__()
+        self.region_name = region_name  # type: ignore[assignment]
+
+
+def _install_session(monkeypatch, session) -> None:
+    """Hand ``session`` to ``SRAVerify`` in place of the real session builder."""
+    monkeypatch.setattr("sraverify.scanner.get_session", lambda **kwargs: session)
+
+
+def _install_regionless_boto3(monkeypatch) -> list[tuple]:
+    """Replace ``boto3.Session`` as the real ``get_session`` sees it.
+
+    Every session it builds has ``region_name = None`` and records and refuses
+    every client build, so the real ``get_session`` -- including its AssumeRole
+    path -- runs without credentials or network.
+
+    Returns:
+        The shared list of recorded ``client()`` calls.
+    """
+    import sraverify.core.session as session_module
+
+    calls: list[tuple] = []
+
+    class _FakeSession:
+        def __init__(self, **kwargs) -> None:
+            self.region_name = kwargs.get("region_name")
+
+        def client(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError(f"no client may be built; asked for {args!r} {kwargs!r}")
+
+    monkeypatch.setattr(session_module.boto3, "Session", _FakeSession)
+    return calls
+
+
+def _errors(logged: list[logging.LogRecord]) -> list[str]:
+    return [r.getMessage() for r in logged if r.levelno >= logging.ERROR]
+
+
+# 19
+def test_an_undetermined_scan_region_exits_2_with_no_file_and_no_call(
+    logged: list[logging.LogRecord], tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """No ``--regions`` and no session Region: exit 2 before the banner."""
+    session = _RegionlessRefusingSession()
+    _install_session(monkeypatch, session)
+    output_file = tmp_path / "findings.csv"
+
+    status = _run_cli(monkeypatch, ["--output", str(output_file)])
+
+    assert status == 2
+    assert not output_file.exists()
+    assert list(tmp_path.iterdir()) == []
+    assert session.client_calls == []
+    assert "Starting SRA Verify scan" not in capsys.readouterr().out
+    errors = _errors(logged)
+    assert len(errors) == 1, errors
+    assert "--regions" in errors[0] and "AWS_DEFAULT_REGION" in errors[0]
+
+
+def _real_boto3_env(monkeypatch, tmp_path: Path, **env: str) -> list[tuple]:
+    """Run the real ``boto3.Session`` against a hermetic AWS environment.
+
+    Clears every variable that could supply a Region or a profile, points the
+    shared config and credentials files at empty files, then applies ``env``,
+    so the result does not depend on the developer's shell or ``~/.aws``.
+    ``Session.client`` records and refuses every build: no client is needed on
+    the paths under test, and a refused banner build is swallowed by
+    ``print_banner`` after being recorded.
+
+    Returns:
+        The list of recorded ``client()`` calls.
+    """
+    import boto3.session
+
+    for name in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    aws_dir = tmp_path / "aws"
+    aws_dir.mkdir()
+    (aws_dir / "config").write_text("", encoding="utf-8")
+    (aws_dir / "credentials").write_text("", encoding="utf-8")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(aws_dir / "config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(aws_dir / "credentials"))
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    calls: list[tuple] = []
+
+    def _refuse(self, *args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError(f"no client may be built; asked for {args!r} {kwargs!r}")
+
+    monkeypatch.setattr(boto3.session.Session, "client", _refuse)
+    return calls
+
+
+# 19a
+def test_aws_region_alone_does_not_supply_a_scan_region(
+    logged: list[logging.LogRecord], tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """boto3 does not read ``AWS_REGION``, so it alone is exit 2.
+
+    Observed live: with ``AWS_REGION=us-west-2``, no ``AWS_DEFAULT_REGION``, no
+    profile ``region =`` and no ``--regions``, the scan was refused while the
+    message then in place advised setting ``AWS_REGION``. botocore maps
+    ``region`` to ``AWS_DEFAULT_REGION`` only, and the library deliberately
+    takes the Region exactly as boto3 resolves it, so the guard and the
+    clients cannot disagree. The pinned behaviour is the refusal; the message
+    must name the variable that does work.
+    """
+    calls = _real_boto3_env(monkeypatch, tmp_path, AWS_REGION="us-west-2")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    output_file = out_dir / "findings.csv"
+
+    status = _run_cli(monkeypatch, ["--output", str(output_file)])
+
+    assert status == 2
+    assert not output_file.exists()
+    assert list(out_dir.iterdir()) == []
+    assert calls == []
+    assert "Starting SRA Verify scan" not in capsys.readouterr().out
+    errors = _errors(logged)
+    assert len(errors) == 1, errors
+    assert "--regions" in errors[0] and "AWS_DEFAULT_REGION" in errors[0]
+    # The remedy that did not work must not be offered again, and the trap is named.
+    assert "set AWS_REGION" not in errors[0]
+    assert "does not read AWS_REGION" in errors[0]
+
+
+# 19b
+def test_aws_default_region_supplies_the_scan_region(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``AWS_DEFAULT_REGION`` reaches the scan through the real ``boto3.Session``."""
+    calls = _real_boto3_env(monkeypatch, tmp_path, AWS_DEFAULT_REGION="us-west-2")
+    monkeypatch.setattr(
+        "sraverify.scanner.SRAVerify.run_checks", lambda self, **kwargs: []
+    )
+
+    status = _run_cli(monkeypatch, ["--output", str(tmp_path / "findings.csv")])
+
+    assert status == 0
+    assert [kw.get("region_name") for args, kw in calls if args[:1] == ("sts",)] == [
+        "us-west-2"
+    ]
+
+
+# 20
+def test_the_partition_error_is_reported_ahead_of_a_bad_check_id(
+    logged: list[logging.LogRecord], tmp_path: Path, monkeypatch
+) -> None:
+    """Both the partition and ``--check`` are bad: the partition error wins."""
+    session = _RegionlessRefusingSession()
+    _install_session(monkeypatch, session)
+    output_file = tmp_path / "findings.csv"
+
+    status = _run_cli(
+        monkeypatch, [f"--check={UNKNOWN_CHECK_ID}", "--output", str(output_file)]
+    )
+
+    assert status == 2
+    assert not output_file.exists()
+    assert session.client_calls == []
+    errors = _errors(logged)
+    assert len(errors) == 1, errors
+    assert "Cannot determine the AWS partition" in errors[0]
+    assert UNKNOWN_CHECK_ID not in errors[0]
+
+
+# 21
+def test_role_without_a_region_exits_2_before_assume_role(
+    logged: list[logging.LogRecord], tmp_path: Path, monkeypatch
+) -> None:
+    """``--role`` with no Region: the real ``get_session`` refuses before STS."""
+    calls = _install_regionless_boto3(monkeypatch)
+    output_file = tmp_path / "findings.csv"
+
+    status = _run_cli(monkeypatch, ["--role", ROLE, "--output", str(output_file)])
+
+    assert status == 2
+    assert not output_file.exists()
+    assert list(tmp_path.iterdir()) == []
+    assert calls == []
+    errors = _errors(logged)
+    assert len(errors) == 1, errors
+    assert "--regions" in errors[0]
+
+
+# 22
+def test_listing_checks_needs_no_region(monkeypatch, capsys) -> None:
+    """``--list-checks`` without ``--role`` stays region-free and credential-free."""
+    calls = _install_regionless_boto3(monkeypatch)
+
+    status = _run_cli(monkeypatch, ["--list-checks"])
+
+    assert status == 0
+    assert calls == []
+    assert "Available checks:" in capsys.readouterr().out
+
+
+# 22a
+def test_listing_checks_with_a_role_and_no_region_exits_2(
+    logged: list[logging.LogRecord], monkeypatch, capsys
+) -> None:
+    """``--list-checks --role R`` would AssumeRole, so with no Region it is refused."""
+    calls = _install_regionless_boto3(monkeypatch)
+
+    status = _run_cli(monkeypatch, ["--list-checks", "--role", ROLE])
+
+    assert status == 2
+    assert calls == []
+    assert capsys.readouterr().out == ""
+    assert len(_errors(logged)) == 1
+
+
+def _stub_scan(monkeypatch) -> None:
+    """Stop the scan after the banner: ``run_checks`` returns no findings."""
+    monkeypatch.setattr(
+        "sraverify.scanner.SRAVerify.run_checks", lambda self, **kwargs: []
+    )
+
+
+def _banner_sts_regions(session: _RefusingSession) -> list:
+    return [kw.get("region_name") for args, kw in session.client_calls if args[:1] == ("sts",)]
+
+
+# 23
+def test_the_session_region_is_the_scan_region_without_regions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Precedence (b) at the CLI: the banner's STS build uses the session Region."""
+    session = _RecordingSession("us-west-2")
+    _install_session(monkeypatch, session)
+    _stub_scan(monkeypatch)
+
+    status = _run_cli(monkeypatch, ["--output", str(tmp_path / "findings.csv")])
+
+    assert status == 0
+    assert _banner_sts_regions(session) == ["us-west-2"]
+
+
+# 23a
+def test_the_first_explicit_region_beats_the_session_region(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Precedence (a) at the CLI: ``--regions us-gov-west-1`` over a ``us-east-1`` session."""
+    session = _RecordingSession("us-east-1")
+    _install_session(monkeypatch, session)
+    _stub_scan(monkeypatch)
+
+    status = _run_cli(
+        monkeypatch,
+        ["--regions", "us-gov-west-1", "--output", str(tmp_path / "findings.csv")],
+    )
+
+    assert status == 0
+    assert _banner_sts_regions(session) == ["us-gov-west-1"]

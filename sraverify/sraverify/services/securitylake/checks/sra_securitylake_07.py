@@ -66,7 +66,7 @@ class SRA_SECURITYLAKE_07(SecurityLakeCheck):
             logger.debug(f"Checking if CloudTrail S3 data events are enabled in {region}")
 
             # Get all organization accounts
-            accounts_response = self.get_organization_accounts(region)
+            accounts_response = self.organization.accounts()
 
             if "Error" in accounts_response:
                 error = accounts_response['Error']

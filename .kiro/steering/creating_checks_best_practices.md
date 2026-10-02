@@ -294,7 +294,7 @@ deciding it first. An error result can, and is per-resource.
 
 ## Account lists
 
-Always `self.audit_accounts` and `self.log_archive_accounts`. Both are read-only properties delegating to `ScanContext`, and both return `[]` when the flag was not supplied.
+Always `self.audit_accounts` and `self.log_archive_accounts`. Both are read-only properties delegating to `ScanContext`, and both return `[]` when the flag was not supplied. The organization's own account list is a different thing, read through `self.organization.accounts()`; see Organizations data below.
 
 **Never** any of these:
 
@@ -306,19 +306,49 @@ This is a fixed defect, not a hypothetical. 22 modules did exactly this and sile
 
 **Both flags are documented as lists — prefer iterating.** Seven checks resolve their verdict from element `[0]` alone and silently drop additional comma-separated values: `securitylake_15` and `config_06` on `log_archive_accounts[0]`, and `securitylake_16`, `securitylake_17`, `securityhub_07`, `securityhub_08`, `guardduty_14` on `audit_accounts[0]`. Interpolating `audit_accounts[0]` into a *remediation string* while comparing against the whole list is fine — `config_08` and `macie_06` do that.
 
+## Organizations data
+
+Organization data is per-scan, cross-service state, so it lives on the `ScanContext` and a check reads it through the eighth context property, `self.organization` — the scan's `OrganizationsProvider` (`core/organization.py`). Today it has one accessor:
+
+```python
+for region in self.regions:
+    accounts = self.organization.accounts()
+    if "Error" in accounts:
+        error = accounts["Error"]
+        if self.is_not_configured(error):
+            yield self.failed(region=region, resource_id=None, actual_value="...")
+        else:
+            yield self.error(
+                region=region,
+                resource_id=None,
+                actual_value=f"{error['Operation']} failed: {error['Code']}: {error['Message']}",
+                remediation=self._remediation_for(error),
+            )
+        continue
+    active = [a for a in accounts.get("Accounts", []) if is_active_account(a)]
+    ...
+```
+
+- `accounts()` takes no Region: the answer is organization-wide, every page is merged, and one `ListAccounts` sweep serves the whole scan when checks run sequentially, as `run_checks` does (the cache is not single-flight; per-key in-flight coordination is a Phase 2 item). A failure is returned unchanged and never cached, so the next caller re-issues it.
+- Filter with `is_active_account` (`core/accounts.py`) in the check. The provider returns every account.
+- **Never add an `org_client` to a service client, or an Organizations accessor to a service base.** No base inherits anything between itself and `SecurityCheck`, and only `OrganizationsCheck` binds `OrganizationsClient`; `test_layering_property.py` fails otherwise.
+- The error branch is the standard two-arm shape above. `self.is_not_configured(error)` consults the service's `NOT_CONFIGURED_ERRORS` first and then `OrganizationsProvider.NOT_CONFIGURED_ERRORS`; the first table to *declare* the `(Operation, Code)` pair decides. The provider's table is empty in Phase 1, so a `ListAccounts` failure is an ERROR unless the service's own table declares the pair.
+
 ## Initialization and the context properties
 
 `initialize(ctx: ScanContext)` is the single initialization path. It assigns `self._ctx`, then calls `self._setup_clients()`.
 
 A fresh `ScanContext` is built per `run_checks()` call and `del`'d in a `finally` block so its boto3 clients become collectible. That is what gives the long-running MCP server per-scan isolation. Never stash per-scan state anywhere else.
 
-Seven properties delegate to the context, all read-only — assigning to any of them raises `AttributeError`:
+Eight properties delegate to the context, all read-only — assigning to any of them raises `AttributeError`:
 
-`session`, `regions`, `account_info`, `account_id`, `account_name`, `audit_accounts`, `log_archive_accounts`
+`session`, `regions`, `account_info`, `account_id`, `account_name`, `audit_accounts`, `log_archive_accounts`, `organization`
+
+A class attribute named `organization` on a check or an intermediate base raises `CheckIdentityError` at import: it would shadow the property and silently win.
 
 Each routes through `_require_ctx`, so a read before `initialize(ctx)` raises `RuntimeError` naming the check ID and the property rather than surfacing `AttributeError: 'NoneType' object has no attribute ...`. **Caveat:** that clean error is not universal. For the 22 checks whose base-class accessor touches `self._ctx._has(...)` before anything else, the first thing to fail is the `None` dereference, so they raise `AttributeError` instead.
 
-`self.regions` returns the explicit `--regions` list when one was supplied, and otherwise lazily resolves enabled regions via `ctx.get_enabled_regions()` (one `ec2:DescribeRegions` per scan, cached).
+`self.regions` returns the explicit `--regions` list when one was supplied, and otherwise lazily resolves enabled regions via `ctx.get_enabled_regions()` (one `ec2:DescribeRegions` per scan, cached). That lookup, and every client built without a Region, uses the **scan Region**: the first `--regions` value, else the session's Region. A scan with neither is refused before it starts (`PartitionUndeterminedError`, CLI exit 2), so a check never runs against botocore's commercial `aws-global` default. Shield, WAF for CloudFront, Firewall Manager's admin API and CloudFront stay `us-east-1`-only.
 
 `self.get_management_accountId()` takes no argument. The legacy `session` parameter is still accepted but ignored, and passing it logs a debug line.
 
@@ -330,7 +360,7 @@ Every service base class declares a `NAMESPACE` class constant and stores cached
 
 The rules that matter when authoring:
 
-- `_has` / `_get` / `_set` are for **service base classes only**. A check class never touches them; it calls the typed accessor on its base class.
+- `_has` / `_get` / `_set` are for **service base classes and providers**. A check class never touches them; it calls the typed accessor on its base class, or `self.organization`.
 - Cache keys are `"<thing>:<discriminator>"`. No account-ID or session-region prefix — the context is already per-scan and per-account.
 - **Never cache a failure, and return it unchanged.** If the client returns an error result, leave the slot empty *and* hand the error result back. Both halves matter: an accessor that swallowed it and returned `[]` would satisfy "did not cache a failure" while handing the check exactly the ambiguous value this contract removes.
 - `_set` refuses an error result and logs a warning, as a backstop. Do not rely on it — the accessor is the control, and the contract tests hold it per accessor.
@@ -542,7 +572,7 @@ Each of these is real and deliberately still here. The "why" matters, so nobody 
 - **`sra_firewallmanager_01` hardcodes `region = "us-east-1"` and has no region loop at all.** Firewall Manager's admin API is genuinely single-region, but the literal means `--regions` has no effect on the row's `Region` cell.
 - **`sra_securityincidentresponse_01` labels its four real rows with `self.regions[0]`** (falling back to `us-east-1`), so the same org-wide fact gets a different `Region` depending on `--regions` ordering — an **unstable row key**. Only its missing-input row is `global`. Deferred because relabelling moves the `Region` cell on genuine verdicts, which changes rows a consumer may already be diffing.
 - **`sra_macie_07` builds its `ActualValue` by joining a `set`** (`missing_accounts` is a set difference), so the cell's ordering is non-deterministic across runs and undiffable.
-- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_delegated_administrators()`, `get_organization_accounts()` and `get_role()` all pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which makes the change impossible to separate from a regression when diffing two scans.
+- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_delegated_administrators()` and `get_role()` both pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which makes the change impossible to separate from a regression when diffing two scans.
 - **`ShieldClient.list_protections` reads the first page only.** Paginating would change which resources the per-resource fan-out covers, and a row-count change cannot be separated from a verdict change when diffing two scans.
 - **`IAMCheck._validate_metadata` is dead and unusable.** It validates `check_name`, `description`, and `check_logic` as instance attributes; `check_name` no longer exists on a check at all, and the other two live on `meta`. Nothing calls it.
 - **`SRA-CONFIG-08`'s ex-WARN branch is reachable but has never been observed.** It fires when the audit account is the Config delegated administrator for exactly one of `config.amazonaws.com` and `config-multiaccountsetup.amazonaws.com`. Exercising it needs an org configured that way.

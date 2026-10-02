@@ -118,10 +118,12 @@ _PROBE_REGION = "us-east-1"
 class _NoAwsSession:
     """A ``boto3.Session`` stand-in that records and refuses every client build.
 
-    ``region_name`` is a real attribute because ``main()`` reads
-    ``sra.session.region_name`` while evaluating ``print_banner``'s arguments.
+    ``region_name`` is a real attribute because ``main()`` resolves the scan
+    Region before the banner, and with no ``--regions`` the session's Region
+    is what it falls back to.
 
-    ``print_banner`` asks for an ``sts`` client and swallows the failure in a
+    ``print_banner`` asks for an ``sts`` client (bound to the scan Region) and
+    swallows the failure in a
     bare ``except Exception``, printing "Unable to retrieve identity
     information" instead of the account line. That is expected here and is why
     ``client()`` records before it raises: the recording survives a caller that

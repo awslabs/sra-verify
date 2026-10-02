@@ -58,12 +58,13 @@ from sraverify.core.aws_errors import (
     TRANSPORT_ERROR_CODES,
     NotConfiguredTable,
 )
-from sraverify.core.aws_errors import is_not_configured as _is_not_configured
+from sraverify.core.aws_errors import is_not_configured_in
 from sraverify.core.enums import AccountType, Severity, Status
 from sraverify.core.errors import CheckIdentityError
 from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
 from sraverify.core.metadata import CheckMeta
+from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.registry import all_checks, register
 from sraverify.core.scan_context import ScanContext
 
@@ -91,6 +92,13 @@ _CHECK_MODULE_PREFIX: Final = "sra_"
 #: class attribute of any of these names would shadow the property and silently
 #: win, so identity and account type would no longer come only from ``meta``.
 _SHADOWED_META_NAMES: Final = ("check_id", "service", "severity", "account_type")
+
+#: Context-delegating properties a class attribute may not shadow. Same reason
+#: as the metadata names: a class attribute of this name would silently win over
+#: the read-only property, so ``self.organization`` would no longer be the scan's
+#: provider. Holds ``organization`` only; widening it to the seven older
+#: context properties is a separate change.
+_SHADOWED_CONTEXT_NAMES: Final = ("organization",)
 
 #: Attribute names removed by this change. Re-creating any of them would
 #: silently restore the accumulator defect: `self.findings = []` followed by
@@ -421,6 +429,14 @@ class SecurityCheck(ABC):
                         f"metadata field shadowed by a class attribute: "
                         f"{klass.__name__}.{name} shadows the read-only "
                         f"property that delegates to meta ({module_file})"
+                    )
+            for name in _SHADOWED_CONTEXT_NAMES:
+                if name in klass_vars:
+                    raise CheckIdentityError(
+                        f"context property shadowed by a class attribute: "
+                        f"{klass.__name__}.{name} shadows the read-only "
+                        f"property that delegates to the scan context "
+                        f"({module_file})"
                     )
 
         # ---- Shape rule: the discriminator table belongs to the service - #
@@ -804,7 +820,12 @@ class SecurityCheck(ABC):
 
     def is_not_configured(self, error: Mapping[str, str]) -> bool:
         """
-        Classify an error result's ``Error`` sub-dict against this service's table.
+        Classify an error result's ``Error`` sub-dict against the declared tables.
+
+        Consults this service's table first, then the Organizations provider's
+        (``OrganizationsProvider.NOT_CONFIGURED_ERRORS``), always both and in
+        that order. The first table to *declare* the ``(Operation, Code)`` pair
+        decides; a pair neither declares is ``False``.
 
         ``True`` means AWS answered and the answer is that the control is
         absent, so the check should yield ``failed()``. ``False`` means the
@@ -826,9 +847,16 @@ class SecurityCheck(ABC):
             error: An error result's ``Error`` sub-dict.
 
         Returns:
-            ``True`` if the pair is declared semantic for this service.
+            ``True`` if the first table declaring the pair classifies it as
+            semantic.
         """
-        return _is_not_configured(type(self).NOT_CONFIGURED_ERRORS, error)
+        return is_not_configured_in(
+            (
+                type(self).NOT_CONFIGURED_ERRORS,
+                OrganizationsProvider.NOT_CONFIGURED_ERRORS,
+            ),
+            error,
+        )
 
     def _remediation_for(self, error: Mapping[str, str]) -> str:
         """
@@ -1032,6 +1060,15 @@ class SecurityCheck(ABC):
     def log_archive_accounts(self) -> list[str]:
         """Log-archive account IDs for the current scan; ``[]`` when none supplied."""
         return self._require_ctx("log_archive_accounts").log_archive_accounts
+
+    @property
+    def organization(self) -> OrganizationsProvider:
+        """The Organizations provider for the current scan, from the context.
+
+        Organization data -- the account list today -- is read through it, as
+        ``self.organization.accounts()``, never through a service client.
+        """
+        return self._require_ctx("organization").organization
 
     def get_management_accountId(self, session: Optional[boto3.Session] = None) -> str:
         """

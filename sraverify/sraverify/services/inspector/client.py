@@ -6,10 +6,8 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-``list_organization_accounts`` reads only the **first page** of ``ListAccounts``,
-so it caps at 20 accounts. Paginating would change which accounts the callers see
-and therefore move verdicts, so it is a recorded deferred correction rather than
-part of the error contract.
+Organization accounts are not listed here. ``InspectorCheck`` reads them through
+``self.organization.accounts()``.
 """
 from typing import Any, List, Mapping
 
@@ -32,7 +30,6 @@ class InspectorClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('inspector2', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
 
     def batch_get_account_status(
         self, account_ids: List[str]
@@ -75,23 +72,5 @@ class InspectorClient(AWSClient):
         """
         try:
             return self.client.describe_organization_configuration()
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_organization_accounts(self) -> Mapping[str, Any]:
-        """
-        List accounts in the AWS Organization.
-
-        Returns:
-            ``{"Accounts": [...]}`` on success, or the error result.
-
-            **First page only.** ``ListAccounts`` returns at most 20 accounts per
-            page and this makes one call, so an organization larger than 20
-            accounts is silently truncated. Left as-is on purpose: pagination
-            would change which accounts the dependent checks see and therefore
-            their verdicts, which is out of scope for an error-contract migration.
-        """
-        try:
-            return self.org_client.list_accounts()
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)

@@ -59,7 +59,7 @@ Requirement 6.9 says a context-delegating property read before
 ``initialize(ctx)`` raises ``RuntimeError`` naming the property and the check ID,
 rather than an opaque ``AttributeError`` on ``None``.
 ``test_uninitialized_context_read_is_attributable`` asserts exactly that, over
-all seven properties and every registered check.
+all eight properties and every registered check.
 
 It does **not** assert it by calling ``execute()`` on an uninitialized instance,
 which was the more direct-looking route. Two reasons, both measured against the
@@ -77,7 +77,7 @@ Asserting the ``RuntimeError`` through ``execute()`` would therefore be a test
 that fails on 22 checks for a reason outside this task's scope: the fix belongs
 in those service base classes, which task 17.5 does not touch, and the design's
 non-goals do not include routing base-class cache reads through ``_require_ctx``.
-Scoping the assertion to the seven properties keeps it exhaustive and true rather
+Scoping the assertion to the eight properties keeps it exhaustive and true rather
 than flaky or selectively skipped. The narrower claim is also the one requirement
 6.9 actually makes -- it is written about the properties, not about ``execute()``.
 
@@ -135,7 +135,8 @@ _over_catalog = pytest.mark.parametrize(
     ("check_id", "cls"), _CATALOG, ids=_CATALOG_IDS
 )
 
-#: The seven read-only properties that delegate to the ``ScanContext`` (6.9).
+#: The eight read-only properties that delegate to the ``ScanContext`` (6.9),
+#: ``organization`` being the eighth (organizations-provider Property 13).
 #: ``account_info`` is included even though ``account_id`` and ``account_name``
 #: read through the same context call, because each is a separate property with
 #: its own ``_require_ctx`` argument and the message names that argument.
@@ -147,6 +148,7 @@ _CONTEXT_PROPERTIES: tuple[str, ...] = (
     "account_name",
     "audit_accounts",
     "log_archive_accounts",
+    "organization",
 )
 
 
@@ -403,7 +405,7 @@ def test_uninitialized_context_read_is_attributable(
 ) -> None:
     """Reading a context property before ``initialize(ctx)`` names the check.
 
-    Scoped to the seven properties rather than driven through ``execute()``: see
+    Scoped to the eight properties rather than driven through ``execute()``: see
     the module docstring. The claim is requirement 6.9's own, and it holds for
     every registered check, which is what makes it worth asserting exhaustively.
 
@@ -423,3 +425,50 @@ def test_uninitialized_context_read_is_attributable(
             f"the RuntimeError from reading {check_id}.{name} uninitialized "
             f"does not name the property: {message!r}"
         )
+
+
+class _InertSession:
+    """A session stand-in: a Region, and clients that are inert mocks.
+
+    Building a boto3 client issues no request, and these are ``MagicMock``s, so
+    nothing here can reach AWS.
+    """
+
+    region_name = "us-east-1"
+
+    def client(self, *args: Any, **kwargs: Any) -> Any:
+        from unittest.mock import MagicMock
+
+        return MagicMock(name=f"client:{args[0] if args else '?'}")
+
+
+@_over_catalog
+def test_the_organization_property_is_read_only(
+    check_id: str, cls: type[SecurityCheck]
+) -> None:
+    """Assigning ``check.organization`` raises ``AttributeError`` (Property 13).
+
+    Validates: Requirements 5.1
+    """
+    instance = cls()
+    with pytest.raises(AttributeError):
+        instance.organization = object()  # type: ignore[misc]
+
+
+@_over_catalog
+def test_the_organization_property_is_the_scan_provider(
+    check_id: str, cls: type[SecurityCheck]
+) -> None:
+    """After ``initialize(ctx)``, ``check.organization is ctx.organization`` (Property 13).
+
+    A real ``ScanContext``; ``initialize`` builds the check's client wrappers
+    over inert mocks and the property issues no call.
+
+    Validates: Requirements 5.1
+    """
+    from sraverify.core.scan_context import ScanContext
+
+    ctx = ScanContext(session=_InertSession(), regions=["us-east-1"])  # type: ignore[arg-type]
+    instance = cls()
+    instance.initialize(ctx)
+    assert instance.organization is ctx.organization

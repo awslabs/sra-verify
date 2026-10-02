@@ -35,7 +35,10 @@ import sraverify
 #: Repository root: .../sra-verify, two levels above the package directory.
 _REPO_ROOT: Path = Path(sraverify.__file__).resolve().parent.parent.parent
 _GENERATOR_PATH: Path = _REPO_ROOT / "util" / "generate_iam_policy.py"
-_SERVICES_ROOT: Path = Path(sraverify.__file__).resolve().parent / "services"
+_PACKAGE_ROOT: Path = Path(sraverify.__file__).resolve().parent
+_SERVICES_ROOT: Path = _PACKAGE_ROOT / "services"
+#: The project root the generator is pointed at (``--base-dir``).
+_PROJECT_ROOT: Path = _PACKAGE_ROOT.parent
 
 
 def _load_generator() -> Any:
@@ -202,6 +205,17 @@ def test_a_multi_service_client_does_not_collapse_shared_method_names(
 # --------------------------------------------------------------------------- #
 
 
+def _client_modules(generator: Any) -> list[Path]:
+    """Return every walked module that declares an ``AWSClient`` subclass."""
+    out: list[Path] = []
+    for name in generator.find_python_modules(str(_PROJECT_ROOT)):
+        path = Path(name)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=name)
+        if generator.declares_aws_client(tree):
+            out.append(path)
+    return out
+
+
 def test_every_client_module_binds_at_least_one_boto3_client(
     generator: Any,
 ) -> None:
@@ -210,15 +224,21 @@ def test_every_client_module_binds_at_least_one_boto3_client(
     This is the exact failure the rewrite fixes: the previous generator bound
     nothing anywhere and emitted an empty policy. Asserting per module means a
     single client changing its acquisition form is caught, rather than only the
-    all-or-nothing case.
+    all-or-nothing case. The client modules are found by AST over the walked set
+    -- every module declaring an ``AWSClient`` subclass -- so the relocated
+    ``core/organizations_client.py`` is one of them.
     """
+    modules = _client_modules(generator)
+    relative = {p.resolve().relative_to(_PACKAGE_ROOT).as_posix() for p in modules}
+    assert "core/organizations_client.py" in relative
+    assert "services/organizations/client.py" not in relative
+    assert len(modules) == 18, sorted(relative)
+
     unbound: list[str] = []
-    for path in sorted(_SERVICES_ROOT.rglob("client.py")):
-        if "__pycache__" in path.parts:
-            continue
+    for path in modules:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         if not generator.bind_clients(tree):
-            unbound.append(path.parent.name)
+            unbound.append(path.resolve().relative_to(_PACKAGE_ROOT).as_posix())
 
     assert unbound == [], (
         f"these client modules bind no boto3 client, so every call in them is "
@@ -228,7 +248,9 @@ def test_every_client_module_binds_at_least_one_boto3_client(
 
 def test_the_generator_attributes_the_whole_tree(generator: Any) -> None:
     """The end-to-end result is non-trivial and covers the expected services."""
-    service_calls, _ = generator.build(str(_SERVICES_ROOT.parent.parent))
+    service_calls, warnings = generator.build(str(_PROJECT_ROOT))
+
+    assert warnings == []
 
     assert len(service_calls) >= 25, (
         f"only {len(service_calls)} boto3 services attributed across the tree; "
@@ -236,7 +258,10 @@ def test_the_generator_attributes_the_whole_tree(generator: Any) -> None:
     )
     # A spread across all four kinds of client: the service's own API, an
     # organizations call, an STS call, and a call on a service borrowed by another.
-    for expected in ("guardduty", "organizations", "sts", "wafv2", "s3control", "sqs"):
+    # ``ec2`` and ``account`` are reached from ``core/scan_context.py`` too.
+    for expected in (
+        "guardduty", "organizations", "sts", "wafv2", "s3control", "sqs", "ec2", "account",
+    ):
         assert expected in service_calls, (
             f"{expected} was not attributed anywhere in the tree"
         )
@@ -261,7 +286,7 @@ def test_the_generated_policy_reproduces_the_committed_artefact(
     if not committed_path.is_file():
         pytest.skip("no committed policy artefact to compare against")
 
-    service_calls, _ = generator.build(str(_SERVICES_ROOT.parent.parent))
+    service_calls, _ = generator.build(str(_PROJECT_ROOT))
     derived = generator.generate_iam_policy(service_calls)
     committed = json.loads(committed_path.read_text(encoding="utf-8"))
 
@@ -508,3 +533,216 @@ def test_the_legacy_session_client_form_is_still_recognized(generator: Any) -> N
     calls = generator.collect_calls(tree, generator.bind_clients(tree))
 
     assert calls == {"iam": {"list_users"}}
+
+
+# --------------------------------------------------------------------------- #
+# The package-wide walk
+# --------------------------------------------------------------------------- #
+
+#: The seven operations ``OrganizationsClient`` issues.
+_ORGANIZATIONS_OPERATIONS = {
+    "describe_organization",
+    "list_roots",
+    "list_organizational_units_for_parent",
+    "list_policies",
+    "list_accounts",
+    "describe_effective_policy",
+    "list_accounts_for_parent",
+}
+
+
+def _module_calls(generator: Any, path: Path) -> dict[str, set[str]]:
+    """Return the attributed calls for one module."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return generator.collect_calls(tree, generator.bind_clients(tree))
+
+
+def test_the_relocated_organizations_client_is_attributed_from_core(
+    generator: Any,
+) -> None:
+    """``core/organizations_client.py`` contributes its seven operations.
+
+    And nothing under ``services/organizations/`` contributes an Organizations
+    action: ``OrganizationsCheck`` reaches AWS only through the relocated client.
+    """
+    core = _module_calls(generator, _PACKAGE_ROOT / "core" / "organizations_client.py")
+    assert core == {"organizations": _ORGANIZATIONS_OPERATIONS}
+
+    walked = [Path(p) for p in generator.find_python_modules(str(_PROJECT_ROOT))]
+    for path in walked:
+        relative = path.resolve().relative_to(_PACKAGE_ROOT).as_posix()
+        if relative.startswith("services/organizations/"):
+            assert "organizations" not in _module_calls(generator, path), relative
+        if relative != "core/organizations_client.py":
+            assert "list_accounts" not in _module_calls(generator, path).get(
+                "organizations", set()
+            ), relative
+
+
+def test_a_region_literal_does_not_bind(generator: Any) -> None:
+    """Property 24: only a known boto3 service id binds a receiver.
+
+    ``client = self.get_client('us-east-1')`` on a service base is a Region
+    lookup of the base's own wrapper. Binding it would emit a
+    ``Us-east-1Permissions`` statement granting ``us-east-1:GetAdminAccount``.
+    """
+    region_shape = (
+        "class B:\n"
+        "    def go(self):\n"
+        "        client = self.get_client('us-east-1')\n"
+        "        return client.get_admin_account()\n"
+    )
+    tree = ast.parse(region_shape)
+    assert generator.bind_clients(tree) == {}
+    assert generator.collect_calls(tree, generator.bind_clients(tree)) == {}
+
+    service_shape = region_shape.replace("'us-east-1'", "'fms'")
+    tree = ast.parse(service_shape)
+    assert generator.collect_calls(tree, generator.bind_clients(tree)) == {
+        "fms": {"get_admin_account"}
+    }
+
+    for relative in ("services/firewallmanager/base.py", "services/waf/base.py"):
+        assert _module_calls(generator, _PACKAGE_ROOT / relative) == {}, relative
+
+
+def test_the_session_builder_is_excluded_and_assume_role_is_not_an_action(
+    generator: Any,
+) -> None:
+    """``core/session.py`` is not walked, so ``sts:AssumeRole`` is never granted.
+
+    The operator's principal assumes the member role; the member role does not
+    assume itself. ``sts:GetCallerIdentity`` is still derived, from ``core/``.
+    """
+    assert "core/session.py" in generator.EXCLUDED_MODULES
+    assert generator.EXCLUDED_MODULES["core/session.py"].strip()
+    walked = {
+        Path(p).resolve().relative_to(_PACKAGE_ROOT).as_posix()
+        for p in generator.find_python_modules(str(_PROJECT_ROOT))
+    }
+    assert "core/session.py" not in walked
+    assert "core/scan_context.py" in walked
+
+    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    policy = generator.generate_iam_policy(service_calls)
+    actions = {a for s in policy["Statement"] for a in s["Action"]}
+    assert "sts:AssumeRole" not in actions
+    assert "sts:GetCallerIdentity" in actions
+    assert {"ec2:DescribeRegions", "account:GetAccountInformation"} <= actions
+
+
+def test_tests_are_not_walked(generator: Any, tmp_path: Path) -> None:
+    """A binding under ``tests/`` or a dot-prefixed directory contributes nothing."""
+    package = tmp_path / "sraverify"
+    (package / "tests" / "unit").mkdir(parents=True)
+    (package / ".venv" / "lib").mkdir(parents=True)
+    (package / "core").mkdir()
+    (package / "__init__.py").write_text("")
+    binding = (
+        "class C:\n"
+        "    def __init__(self, session):\n"
+        "        self.client = session.client('securitylake', region_name='us-east-1')\n"
+        "    def go(self):\n"
+        "        return self.client.list_log_sources()\n"
+    )
+    (package / "tests" / "unit" / "fixture.py").write_text(binding)
+    (package / ".venv" / "lib" / "client.py").write_text(binding)
+    (package / "core" / "plain.py").write_text("X = 1\n")
+
+    walked = [
+        Path(p).relative_to(package).as_posix()
+        for p in generator.find_python_modules(str(tmp_path))
+    ]
+    assert walked == ["__init__.py", "core/plain.py"]
+    assert generator.build(str(tmp_path)) == ({}, [])
+
+    real = generator.find_python_modules(str(_PROJECT_ROOT))
+    assert not any("/tests/" in p.replace("\\", "/") for p in real)
+
+
+# --------------------------------------------------------------------------- #
+# Property 35 -- an unbindable client site warns, wherever it is
+# --------------------------------------------------------------------------- #
+
+
+def _synthetic_package(tmp_path: Path, modules: dict[str, str]) -> Path:
+    """Write a minimal ``sraverify`` package under ``tmp_path`` and return the project root."""
+    package = tmp_path / "sraverify"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    for relative, source in modules.items():
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+    return tmp_path
+
+
+def test_the_real_tree_has_no_unbindable_site(generator: Any) -> None:
+    """Property 35: a clean tree produces no warning of either kind."""
+    _, warnings = generator.build(str(_PROJECT_ROOT))
+    assert warnings == []
+
+
+def test_a_variable_service_id_in_core_warns_with_its_location(
+    generator: Any, tmp_path: Path
+) -> None:
+    """Property 35: a ``core/`` binding through a variable is reported as ``file:line``.
+
+    Not an ``AWSClient`` subclass, so the older warning could not have seen it.
+    """
+    root = _synthetic_package(
+        tmp_path,
+        {
+            "core/x.py": (
+                "class Lookup:\n"
+                "    def __init__(self, ctx, some_var, r):\n"
+                "        self.client = ctx.get_client(some_var, region=r)\n"
+            )
+        },
+    )
+
+    _, warnings = generator.build(str(root))
+
+    assert len(warnings) == 1, warnings
+    assert warnings[0].startswith("core/x.py:3: ")
+    assert "does not name a boto3 service id" in warnings[0]
+
+
+def test_the_two_allowlisted_shapes_do_not_warn(generator: Any, tmp_path: Path) -> None:
+    """Property 35: the wrapper lookup and the factory are exempt by shape."""
+    root = _synthetic_package(
+        tmp_path,
+        {
+            "core/x.py": (
+                "class FooCheck(SecurityCheck):\n"
+                "    def f(self, region):\n"
+                "        return self.get_client(region)\n"
+                "\n"
+                "class Ctx:\n"
+                "    def get_client(self, service_name, region=None):\n"
+                "        return self._session.client(service_name, region_name=region)\n"
+            )
+        },
+    )
+
+    assert generator.build(str(root)) == ({}, [])
+
+
+def test_the_wrapper_lookup_is_exempt_only_inside_a_check_class(
+    generator: Any, tmp_path: Path
+) -> None:
+    """Property 35: the same call outside a ``*Check`` class is not the wrapper lookup."""
+    root = _synthetic_package(
+        tmp_path,
+        {
+            "core/x.py": (
+                "class Helper:\n"
+                "    def f(self, region):\n"
+                "        return self.get_client(region)\n"
+            )
+        },
+    )
+
+    _, warnings = generator.build(str(root))
+
+    assert [w.split(" ", 1)[0] for w in warnings] == ["core/x.py:3:"]

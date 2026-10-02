@@ -1,13 +1,17 @@
 """Typed errors for catalog and selection failures.
 
 The first three errors below are import-time failures -- a catalog defect that
-no invocation can work around. The last two are usage failures, and are the
+no invocation can work around. The last three are usage failures, and are the
 ones ``sraverify.cli.main()`` catches to exit non-zero. Keeping them in one
 module lets ``scanner.py`` and ``cli.py`` import every ``except`` clause from a
 single place.
 """
 
 from __future__ import annotations
+
+from typing import Final, Literal
+
+_UNSET: Final = object()  # private sentinel: "no bad value was supplied"
 
 
 class SRAVerifyError(Exception):
@@ -76,3 +80,40 @@ class NoChecksSelectedError(SRAVerifyError):
             f"No checks matched {', '.join(parts)}. "
             "Run --list-checks to see which checks exist for that account type."
         )
+
+
+class PartitionUndeterminedError(SRAVerifyError):
+    """The scan Region, and so the partition, could not be determined.
+
+    Attributes:
+        reason: "absent" when neither --regions nor the session supplied a
+            Region; "invalid" when the first --regions value was supplied but
+            is not a usable Region string.
+        bad_value: The rejected first --regions value when reason is
+            "invalid" (which may itself be None, e.g. regions=[None]);
+            None when reason is "absent". Read reason, not bad_value, to tell
+            the two cases apart.
+    """
+
+    reason: Literal["absent", "invalid"]
+    bad_value: object | None
+
+    def __init__(self, bad_value: object = _UNSET) -> None:
+        if bad_value is _UNSET:
+            self.reason = "absent"
+            self.bad_value = None
+            msg = (
+                "Cannot determine the AWS partition: no --regions value was given "
+                "and the session has no Region. Pass --regions (for example "
+                "--regions us-east-1), or set AWS_DEFAULT_REGION or region = in "
+                "the AWS profile. boto3 does not read AWS_REGION by itself."
+            )
+        else:
+            self.reason = "invalid"
+            self.bad_value = bad_value
+            msg = (
+                "Cannot determine the AWS partition: the first --regions value "
+                f"{bad_value!r} is not a Region name. Pass a Region name as the "
+                "first --regions value."
+            )
+        super().__init__(msg)

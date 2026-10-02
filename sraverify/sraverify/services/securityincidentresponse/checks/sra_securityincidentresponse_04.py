@@ -54,7 +54,7 @@ class SRA_SECURITYINCIDENTRESPONSE_04(SecurityIncidentResponseCheck):
         region = self.discover_sir_region()
 
         # Get all organization accounts.
-        accounts_response = self.get_organization_accounts()
+        accounts_response = self.organization.accounts()
         if "Error" in accounts_response:
             error = accounts_response["Error"]
             if self.is_not_configured(error):

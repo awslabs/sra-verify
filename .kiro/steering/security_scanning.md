@@ -75,6 +75,7 @@ Each of these has been checked and is not a secret:
 
 - **`.pytest_cache/CACHEDIR.TAG`**: pytest's fixed signature constant. Handled by the `**/.pytest_cache/**` ignore path.
 - **The access key and secret key in `test_availability_property.py`**: AWS's published documentation example credentials, both ending in `EXAMPLE`. Deliberately not quoted here, because quoting them would make this file a detect-secrets finding too. `tests/conftest.py` refuses all outbound HTTP, so they are never sent.
+- **The stub STS `SecretAccessKey` in `test_session_region.py`**: a fake value the test's stand-in `assume_role` returns, so the real `get_session` can be driven without credentials. Carries `# pragma: allowlist secret` on that line.
 - **Hypothesis alphabets** (`"abcdef...z_"`, `"ABC...Z0123456789-_"`): these trip the high-entropy detectors.
 - **ARN segments** such as `log-source/LAMBDA_EXECUTION`: also high-entropy by the detector's measure.
 

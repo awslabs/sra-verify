@@ -59,7 +59,7 @@ class SRA_MACIE_07(MacieCheck):
 
         for region in self.regions:
             # Get organization members using the base class method with caching
-            org_response = self.get_organization_members(region)
+            org_response = self.organization.accounts()
 
             if "Error" in org_response:
                 error = org_response['Error']

@@ -5,9 +5,9 @@ Per-scan cached AWS responses live on the attached :class:`ScanContext` under th
 ``"organizations"`` namespace. Every accessor returns the client's response dict unchanged,
 or an error result, and none caches a failure.
 
-Organizations is a global service, so a single :class:`OrganizationsClient` --
-pinned to ``us-east-1`` inside the client itself -- is constructed per check
-instance and ``self._clients`` is cleared. Cache keys carry no account prefix
+Organizations is partition-global, so a single :class:`OrganizationsClient` --
+whose Region is derived from the scan inside the client itself -- is constructed
+per check instance and ``self._clients`` is cleared. Cache keys carry no account prefix
 because the context is already scoped to one account scan.
 """
 import json
@@ -21,15 +21,15 @@ from sraverify.core.aws_errors import (
 )
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
-from sraverify.services.organizations.client import OrganizationsClient
+from sraverify.core.organizations_client import OrganizationsClient
 
 
 class OrganizationsCheck(SecurityCheck):
     """Base class for all AWS Organizations security checks.
 
-    Organizations is a global AWS service, so a single
-    :class:`OrganizationsClient` (pinned to ``us-east-1`` inside the client
-    itself) is constructed per check instance. All cached AWS-API responses
+    Organizations is a partition-global AWS service, so a single
+    :class:`OrganizationsClient` (its Region derived from the scan inside the
+    client itself) is constructed per check instance. All cached AWS-API responses
     live on the per-scan :class:`ScanContext` under the ``"organizations"``
     namespace; nothing is stored at class or instance level.
     """
@@ -96,8 +96,8 @@ class OrganizationsCheck(SecurityCheck):
         per-scan bounded ``Client_Config`` and the ``(service, region)``
         client cache.
         """
-        # Organizations is a global service: one client pinned to us-east-1
-        # inside the wrapper is enough.
+        # Organizations is partition-global: one client, whose Region the
+        # wrapper derives from the scan, is enough.
         self._org_client = OrganizationsClient(ctx=self._ctx)
         # Clear inherited per-region clients dict since Organizations
         # doesn't use it.
@@ -262,35 +262,6 @@ class OrganizationsCheck(SecurityCheck):
 
         self._ctx._set(self.NAMESPACE, cache_key, response)
         logger.debug(f"Organizations: Cached accounts for parent {parent_id}")
-
-        return response
-
-    def get_accounts(self) -> Dict[str, Any]:
-        """
-        Get every account in the organization, with caching.
-
-        Returns:
-            Dictionary with Accounts key containing every account,
-            or Error key if failed.
-        """
-        cache_key = "all_accounts"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug("Organizations: Using cached organization accounts")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        logger.debug("Organizations: Fetching organization accounts")
-        if self._org_client is None:
-            logger.warning("Organizations: No client available")
-            return no_client_result(service="Organizations", region="global")
-
-        response = self._org_client.list_accounts()
-
-        if is_error(response):
-            # Never cached: a retry has to be able to re-issue the call.
-            return response
-
-        self._ctx._set(self.NAMESPACE, cache_key, response)
-        logger.debug("Organizations: Cached organization accounts")
 
         return response
 

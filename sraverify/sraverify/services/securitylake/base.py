@@ -226,20 +226,6 @@ class SecurityLakeCheck(SecurityCheck):
             "list_delegated_administrators",
         )
 
-    def get_organization_accounts(self, region: str) -> Mapping[str, Any]:
-        """
-        Get every account in the AWS Organization, with caching.
-
-        Args:
-            region: AWS region name
-
-        Returns:
-            ``{"Accounts": [...]}``, or an error result.
-        """
-        return self._cached_call(
-            region, f"organization_accounts:{region}", "list_organization_accounts"
-        )
-
     def get_sqs_queue_encryption(
         self, region: str, queue_url: str
     ) -> Mapping[str, Any]:
@@ -480,9 +466,13 @@ class SecurityLakeCheck(SecurityCheck):
             )
             return
 
-        org_accounts = (
-            self._ctx._get(self.NAMESPACE, f"organization_accounts:{region}") or {}
-        )
+        org_accounts = self.organization.accounts()
+        if is_error(org_accounts):
+            logger.debug(
+                f"SecurityLake: could not list organization accounts to prime "
+                f"{region}; seeding nothing ({org_accounts['Error']['Code']})"
+            )
+            return
         account_ids = [
             a.get("Id")
             for a in org_accounts.get("Accounts", [])

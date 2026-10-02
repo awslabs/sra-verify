@@ -18,7 +18,7 @@ a complete one, and an account missing from it would read as "not enrolled".
 :meth:`caller_is_delegated_admin` handles a third category of error, neither
 transport nor not-configured; see its docstring.
 """
-from typing import Any, ClassVar, Dict, List, Mapping, Optional
+from typing import Any, ClassVar, Dict, Final, List, Mapping, Optional
 
 from sraverify.core.aws_errors import (
     NotConfigured,
@@ -29,6 +29,14 @@ from sraverify.core.aws_errors import (
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
 from sraverify.services.inspector.client import InspectorClient
+
+#: ``BatchGetAccountStatus`` accepts up to 100 account IDs per request
+#: (https://docs.aws.amazon.com/inspector/v2/APIReference/API_BatchGetAccountStatus.html).
+#: The batch actually issued is 10, because 10 is what both reference trees issue
+#: and changing it would move the per-scan ``aws_call_failed`` count that the
+#: verdict-stability gate compares between scans.
+BATCH_GET_ACCOUNT_STATUS_CAP: Final = 100
+BATCH_GET_ACCOUNT_STATUS_BATCH: Final = 10
 
 
 class InspectorCheck(SecurityCheck):
@@ -66,8 +74,8 @@ class InspectorCheck(SecurityCheck):
     def _setup_clients(self):
         """Set up Inspector clients for each region.
 
-        Each wrapper obtains its underlying boto3 ``inspector2`` and
-        ``organizations`` clients from ``self._ctx.get_client(...)``.
+        Each wrapper obtains its underlying boto3 ``inspector2`` client from
+        ``self._ctx.get_client(...)``.
         """
         self._clients.clear()
         if hasattr(self, 'regions') and self.regions:
@@ -244,32 +252,16 @@ class InspectorCheck(SecurityCheck):
             region, f"delegated_admin:{region}", "get_delegated_admin_account"
         )
 
-    def get_organization_members(self, region: str) -> Mapping[str, Any]:
-        """
-        Get accounts in the AWS Organization, with caching.
-
-        The cache key carries no Region because the answer is organization-wide,
-        which is the pre-existing behaviour and is correct.
-
-        Args:
-            region: AWS region name, used only to select a client.
-
-        Returns:
-            ``{"Accounts": [...]}``, or an error result. First page only; see
-            ``InspectorClient.list_organization_accounts``.
-        """
-        return self._cached_call(
-            region, "organization_members", "list_organization_accounts"
-        )
-
     def batch_get_account_status(
         self, region: str, account_ids: List[str]
     ) -> Mapping[str, Any]:
         """
         Get the Inspector status for many accounts, with caching.
 
-        ``BatchGetAccountStatus`` accepts at most 10 accounts, so this issues one
-        call per batch of 10 and merges the ``accounts`` members.
+        ``BatchGetAccountStatus`` accepts at most
+        ``BATCH_GET_ACCOUNT_STATUS_CAP`` (100) accounts per request. This issues
+        one call per batch of ``BATCH_GET_ACCOUNT_STATUS_BATCH`` (10), within that
+        cap, and merges the ``accounts`` members.
 
         **A failing batch fails the whole call**, rather than being skipped. A
         partial map is indistinguishable from a complete one, and an account
@@ -298,8 +290,8 @@ class InspectorCheck(SecurityCheck):
         # the accessor contract is that a check receives the client's response
         # dict unchanged, so a single-batch call must not rebuild it.
         responses: List[Mapping[str, Any]] = []
-        for start in range(0, len(account_ids), 10):
-            batch = account_ids[start:start + 10]
+        for start in range(0, len(account_ids), BATCH_GET_ACCOUNT_STATUS_BATCH):
+            batch = account_ids[start:start + BATCH_GET_ACCOUNT_STATUS_BATCH]
             response = client.batch_get_account_status(batch)
             if is_error(response):
                 # Not cached, and not partially returned: a short map is

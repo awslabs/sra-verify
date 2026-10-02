@@ -91,8 +91,20 @@ def _service_names() -> list[str]:
     )
 
 
+#: Service key -> the module that declares its client. Every service's client is
+#: ``services/<svc>/client.py`` except Organizations', which lives in
+#: ``core/organizations_client.py`` because the Organizations provider in
+#: ``core/`` uses it and ``core/`` never imports ``services/``. Keyed by service
+#: so the relocated client is enumerated exactly once, under ``organizations``.
+_CLIENT_MODULES: dict[str, str] = {
+    svc: f"sraverify.services.{svc}.client"
+    for svc in _service_names()
+    if (_SERVICES_ROOT / svc / "client.py").exists()
+} | {"organizations": "sraverify.core.organizations_client"}
+
+
 def _client_classes(service: str) -> list[type]:
-    """Return the ``*Client`` classes declared in a service's ``client`` module.
+    """Return the ``*Client`` classes declared in a service's client module.
 
     Filtered to classes whose ``__module__`` is that module, so an imported name
     is not mistaken for a declaration. The name test is a suffix rather than
@@ -104,7 +116,7 @@ def _client_classes(service: str) -> list[type]:
     Returns:
         The declared client classes.
     """
-    module = importlib.import_module(f"sraverify.services.{service}.client")
+    module = importlib.import_module(_CLIENT_MODULES[service])
     return [
         obj
         for name, obj in vars(module).items()
@@ -547,17 +559,6 @@ _INSPECTOR = (
         operation="GetDelegatedAdminAccount",
         success={"delegatedAdmin": {"accountId": _TEST_ACCOUNT, "relationshipStatus": "ENABLED"}},
     ),
-    # First page only (Requirement 1.13): <=20 accounts. Recorded as a deferred
-    # correction, not fixed here -- adding pagination changes the success path's
-    # call count and could surface accounts the first page omitted, which would
-    # move verdicts, which this feature holds fixed.
-    ClientAdapter(
-        method="list_organization_accounts",
-        boto_service="organizations",
-        boto_method="list_accounts",
-        operation="ListAccounts",
-        success={"Accounts": [{"Id": _TEST_ACCOUNT, "Status": "ACTIVE"}]},
-    ),
 )
 
 _MACIE = (
@@ -612,14 +613,6 @@ _MACIE = (
         boto_method="list_members",
         operation="ListMembers",
         success=({"members": [{"accountId": _TEST_ACCOUNT, "relationshipStatus": "Enabled"}]},),
-        paginated=True,
-    ),
-    ClientAdapter(
-        method="list_organization_accounts",
-        boto_service="organizations",
-        boto_method="list_accounts",
-        operation="ListAccounts",
-        success=({"Accounts": [{"Id": _TEST_ACCOUNT, "Status": "ACTIVE"}]},),
         paginated=True,
     ),
 )
@@ -831,13 +824,6 @@ _SECURITYHUB = (
         success={"Members": [{"AccountId": _TEST_ACCOUNT, "MemberStatus": "Enabled"}]},
     ),
     ClientAdapter(
-        method="list_organization_accounts",
-        boto_service="organizations",
-        boto_method="list_accounts",
-        operation="ListAccounts",
-        success={"Accounts": [{"Id": _TEST_ACCOUNT, "Status": "ACTIVE"}]},
-    ),
-    ClientAdapter(
         method="list_organization_admin_accounts",
         boto_service="securityhub",
         boto_method="list_organization_admin_accounts",
@@ -1025,14 +1011,6 @@ _SECURITYINCIDENTRESPONSE = (
         success={"Role": {"RoleName": "AWSServiceRoleForSecurityIncidentResponse"}},
     ),
     ClientAdapter(
-        method="list_accounts",
-        boto_service="organizations",
-        boto_method="list_accounts",
-        operation="ListAccounts",
-        success=({"Accounts": [{"Id": _TEST_ACCOUNT, "Status": "ACTIVE"}]},),
-        paginated=True,
-    ),
-    ClientAdapter(
         method="list_delegated_administrators",
         boto_service="organizations",
         boto_method="list_delegated_administrators",
@@ -1120,13 +1098,6 @@ _SECURITYLAKE = (
                 }
             ]
         },
-    ),
-    ClientAdapter(
-        method="list_organization_accounts",
-        boto_service="organizations",
-        boto_method="list_accounts",
-        operation="ListAccounts",
-        success={"Accounts": [{"Id": _TEST_ACCOUNT, "Status": "ACTIVE"}]},
     ),
     # The measured masked-FAIL path. Returns [] on AccessDeniedException today,
     # the base caches the [], and SRA-SECURITYLAKE-16/17 report a confident
@@ -1415,6 +1386,10 @@ def _build_wrapper(target: _Target) -> tuple[Any, MagicMock]:
 
     ctx = MagicMock(spec=ScanContext)
     ctx.get_client.side_effect = _get_client
+    # Organizations derives its Region from the scan (``scan_region``); pin both
+    # inputs so the derivation is deterministic over the mock.
+    ctx.regions = [_TEST_REGION]
+    ctx.session.region_name = _TEST_REGION
 
     # iam and organizations take (ctx); everyone else takes (region, ctx).
     parameters = list(inspect.signature(target.cls.__init__).parameters)
@@ -1801,13 +1776,18 @@ def test_every_client_method_returns_a_non_error_mapping_on_success(
 
 
 def _client_module_paths() -> list[Path]:
-    """Return every ``services/*/client.py``, sorted.
+    """Return every client module's path, sorted.
+
+    The 17 ``services/*/client.py`` files and ``core/organizations_client.py``,
+    derived from the imported modules so the AST rules scan exactly what
+    :func:`_client_classes` enumerates.
 
     Returns:
         Absolute paths.
     """
     return sorted(
-        _SERVICES_ROOT / service / "client.py" for service in _SERVICE_NAMES
+        Path(importlib.import_module(module).__file__).resolve()
+        for module in _CLIENT_MODULES.values()
     )
 
 
@@ -1828,7 +1808,7 @@ def _client_params(property_key: str) -> list[Any]:
         ``pytest.param`` values, one per client module.
     """
     return [
-        pytest.param(path, id=f"{path.parent.name}/client.py")
+        pytest.param(path, id=f"{path.parent.name}/{path.name}")
         for path in _client_module_paths()
     ]
 
@@ -1846,7 +1826,7 @@ def _all_client_params() -> list[Any]:
         ``pytest.param`` values, one per client module, no marks.
     """
     return [
-        pytest.param(path, id=f"{path.parent.name}/client.py")
+        pytest.param(path, id=f"{path.parent.name}/{path.name}")
         for path in _client_module_paths()
     ]
 
@@ -1901,7 +1881,7 @@ def test_every_client_except_clause_catches_exactly_the_aws_exceptions(
                 offenders.append(f"L{handler.lineno}: except {spelled}")
 
     assert offenders == [], (
-        f"{path.parent.name}/client.py has an except clause that is not exactly "
+        f"{path.parent.name}/{path.name} has an except clause that is not exactly "
         f"the AWS pair:\n  " + "\n  ".join(offenders)
         + "\nEvery client handler must be `except AWS_EXCEPTIONS as e:` and return "
         "`self.aws_error(e)`. A narrower catch lets "
@@ -1956,7 +1936,7 @@ def test_every_client_except_body_is_exactly_return_self_aws_error(
                 )
 
     assert offenders == [], (
-        f"{path.parent.name}/client.py has an except body that is not exactly "
+        f"{path.parent.name}/{path.name} has an except body that is not exactly "
         f"`{_LEGAL_HANDLER_BODY}`:\n  " + "\n  ".join(offenders)
     )
 
@@ -1995,7 +1975,7 @@ def test_no_client_method_names_an_operation_or_region_in_its_handler(
             )
 
     assert offenders == [], (
-        f"{path.parent.name}/client.py passes more than the exception to "
+        f"{path.parent.name}/{path.name} passes more than the exception to "
         f"aws_error:\n  " + "\n  ".join(offenders)
     )
 
@@ -2034,7 +2014,7 @@ def test_every_client_acquires_its_boto3_clients_only_in_init(path: Path) -> Non
     ]
 
     assert offenders == [], (
-        f"{path.parent.name}/client.py acquires a boto3 client outside "
+        f"{path.parent.name}/{path.name} acquires a boto3 client outside "
         f"__init__ at {offenders}; assign it to an instance attribute in "
         f"__init__ instead (Requirement 1.11)"
     )
@@ -2091,7 +2071,7 @@ def test_every_client_class_inherits_the_aws_client_base(path: Path) -> None:
             )
 
     assert offenders == [], (
-        f"{path.parent.name}/client.py:\n  " + "\n  ".join(offenders)
+        f"{path.parent.name}/{path.name}:\n  " + "\n  ".join(offenders)
     )
 
 
@@ -2116,7 +2096,7 @@ def test_no_client_method_is_annotated_as_returning_a_bool(path: Path) -> None:
     ]
 
     assert offenders == [], (
-        f"{path.parent.name}/client.py declares a bool-returning method at "
+        f"{path.parent.name}/{path.name} declares a bool-returning method at "
         f"{offenders}; return the named-key response dict and answer the boolean "
         f"in the base accessor, after the error test"
     )

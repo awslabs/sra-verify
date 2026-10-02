@@ -6,14 +6,17 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-IAM is a global service, so the boto3 client is requested with ``region=None`` and
-the context caches it under the ``"__global__"`` sentinel key. The Organizations
+IAM is a global service, so the boto3 client is requested with ``region=None``,
+which the context binds to the scan Region; IAM is partition-global, so the
+Region selects only the partition. The Organizations
 client, used for the IAM delegated administrator and the management account ID,
-is pinned to ``us-east-1`` like ``OrganizationsClient``.
+derives its Region from the scan through ``scan_region``, like
+``OrganizationsClient``.
 """
 from typing import Any, Mapping
 
 from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
+from sraverify.core.organizations_client import scan_region
 from sraverify.core.scan_context import ScanContext
 
 #: The service principal the IAM delegated administrator is registered under,
@@ -32,10 +35,11 @@ class IAM_Client(AWSClient):
             ctx: ScanContext for the current scan.
         """
         super().__init__("us-east-1", ctx)
-        # IAM is a global service; request the client without a region so the
-        # context caches it under the "__global__" sentinel.
+        # IAM is a global service; requested with region=None, which the
+        # context binds to the scan Region. IAM is partition-global, so the
+        # Region selects only the partition.
         self.client = ctx.get_client('iam', region=None)
-        self.org_client = ctx.get_client('organizations', region='us-east-1')
+        self.org_client = ctx.get_client('organizations', region=scan_region(ctx))
 
     def list_users(self) -> Mapping[str, Any]:
         """

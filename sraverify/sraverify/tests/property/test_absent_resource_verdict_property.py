@@ -35,6 +35,7 @@ import pytest
 from sraverify.core.enums import Status
 from sraverify.core.registry import all_checks
 from sraverify.core.scan_context import ScanContext
+from sraverify.tests.property.test_organization_provider_property import stub_organization
 
 _TEST_REGION = "us-east-1"
 _TEST_ACCOUNT = "111122223333"
@@ -55,6 +56,9 @@ def _context() -> MagicMock:
         The mock context.
     """
     ctx = MagicMock(spec=ScanContext)
+    # A case reaching ``ctx.organization`` must meet a stub, not an auto-specced
+    # mock whose ``accounts()`` is a truthy, non-error value.
+    stub_organization(ctx)
     ctx.regions = [_TEST_REGION]
     ctx.audit_accounts = [_TEST_ACCOUNT]
     ctx.log_archive_accounts = [_TEST_ACCOUNT]

@@ -47,13 +47,17 @@ botocore has it, and is a placeholder where it does not:
 from __future__ import annotations
 
 import json
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from sraverify.core.aws_errors import UNKNOWN_OPERATION, ErrorResult, error_result
 from sraverify.core.logging import logger
-from sraverify.core.scan_context import ScanContext
+
+if TYPE_CHECKING:
+    # Annotation only. A run-time import would close the import cycle
+    # scan_context -> organization -> organizations_client -> aws_client.
+    from sraverify.core.scan_context import ScanContext
 
 #: The exception families a client method catches. Exactly these two, named as a
 #: tuple so an ``except`` clause cannot narrow the pair by accident -- writing

@@ -35,6 +35,7 @@ import inspect
 import pkgutil
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from hypothesis import given, settings
@@ -47,10 +48,13 @@ from sraverify.core.aws_errors import (
     NotConfigured,
     error_result,
     is_not_configured,
+    is_not_configured_in,
 )
 from sraverify.core.check import SecurityCheck
+from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.registry import all_checks
 from sraverify.tests.property.strategies import cell_text
+from sraverify.tests.property.test_accessor_cache_property import _concrete
 
 _SERVICES_ROOT: Path = Path(sraverify.services.__file__).resolve().parent
 
@@ -100,12 +104,26 @@ def _base_class(service: str) -> type[SecurityCheck]:
 
 _SERVICE_NAMES: list[str] = _service_names()
 
-#: ``(service, operation, code, NotConfigured)`` for every declared entry, in a
+#: The key the Organizations provider's table is listed under, beside the
+#: eighteen service keys. Not a service package name, so it cannot collide.
+_PROVIDER_KEY = "organization-provider"
+
+#: Every declared discriminator table: the eighteen service base tables and the
+#: Organizations provider's, which ``SecurityCheck.is_not_configured`` consults
+#: after the service's. Each table is held to the same shape, evidence and
+#: conservatism rules.
+_TABLES: dict[str, Any] = {
+    service: _base_class(service).NOT_CONFIGURED_ERRORS for service in _SERVICE_NAMES
+} | {_PROVIDER_KEY: OrganizationsProvider.NOT_CONFIGURED_ERRORS}
+
+_TABLE_KEYS: list[str] = list(_TABLES)
+
+#: ``(table key, operation, code, NotConfigured)`` for every declared entry, in a
 #: stable order. Snapshotted at import so collection does not vary.
 _ENTRIES: list[tuple[str, str, str, NotConfigured]] = [
     (service, operation, code, fact)
-    for service in _SERVICE_NAMES
-    for operation, by_code in _base_class(service).NOT_CONFIGURED_ERRORS.items()
+    for service, table in _TABLES.items()
+    for operation, by_code in table.items()
     for code, fact in by_code.items()
 ]
 
@@ -135,7 +153,7 @@ def test_eighteen_services_declare_a_table_attribute() -> None:
     what makes the migration landable in batches.
     """
     for service in _SERVICE_NAMES:
-        table = _base_class(service).NOT_CONFIGURED_ERRORS
+        table = _TABLES[service]
         assert isinstance(table, dict), (
             f"{service}: NOT_CONFIGURED_ERRORS is {type(table).__name__}, "
             f"expected a mapping"
@@ -184,7 +202,7 @@ def test_a_declared_entry_classifies_as_not_configured(
     message = fact.message if fact.message else "any message at all"
     error = error_result(code=code, message=message, operation=operation)["Error"]
 
-    assert is_not_configured(_base_class(service).NOT_CONFIGURED_ERRORS, error) is True, (
+    assert is_not_configured(_TABLES[service], error) is True, (
         f"{service}.{operation}.{code} is declared but did not classify"
     )
 
@@ -217,7 +235,7 @@ def test_the_same_code_from_an_undeclared_operation_does_not_classify(
     )["Error"]
 
     assert (
-        is_not_configured(_base_class(service).NOT_CONFIGURED_ERRORS, error) is False
+        is_not_configured(_TABLES[service], error) is False
     ), (
         f"{service}: {code} classified as not-configured through an operation it "
         f"is not declared for"
@@ -243,7 +261,7 @@ def test_an_undeclared_code_from_a_declared_operation_does_not_classify(
     )["Error"]
 
     assert (
-        is_not_configured(_base_class(service).NOT_CONFIGURED_ERRORS, error) is False
+        is_not_configured(_TABLES[service], error) is False
     )
 
 
@@ -294,14 +312,14 @@ def test_an_overloaded_code_without_its_needle_does_not_classify(
     )["Error"]
 
     assert (
-        is_not_configured(_base_class(service).NOT_CONFIGURED_ERRORS, error) is False
+        is_not_configured(_TABLES[service], error) is False
     ), (
         f"{service}.{operation}.{code} classified a message lacking its declared "
         f"needle {fact.message!r} as not-configured"
     )
 
 
-@pytest.mark.parametrize("service", _SERVICE_NAMES)
+@pytest.mark.parametrize("service", _TABLE_KEYS)
 @pytest.mark.parametrize(
     "error",
     [
@@ -324,11 +342,11 @@ def test_the_predicate_is_total_over_every_service_table(
     ``is_error`` should have rejected upstream anyway.
     """
     assert (
-        is_not_configured(_base_class(service).NOT_CONFIGURED_ERRORS, error) is False
+        is_not_configured(_TABLES[service], error) is False
     )
 
 
-@pytest.mark.parametrize("service", _SERVICE_NAMES)
+@pytest.mark.parametrize("service", _TABLE_KEYS)
 @pytest.mark.parametrize(
     "code", sorted(TRANSPORT_ERROR_CODES | {NO_CLIENT_CODE})
 )
@@ -345,7 +363,7 @@ def test_no_service_classifies_a_transport_or_no_client_code(
     Swept across every declared operation of every service, so a future table
     entry cannot introduce one by accident.
     """
-    table = _base_class(service).NOT_CONFIGURED_ERRORS
+    table = _TABLES[service]
 
     for operation in list(table) + ["AnyOperation"]:
         error = error_result(
@@ -518,3 +536,81 @@ def test_the_default_table_on_security_check_is_empty() -> None:
     The safe default, and the reason a batch can land without the others.
     """
     assert SecurityCheck.NOT_CONFIGURED_ERRORS == {}
+
+
+# --------------------------------------------------------------------------- #
+# The Organizations provider's table (Properties 16 and 17)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_provider_table_is_a_mapping_and_empty_in_phase_one() -> None:
+    """Property 17: the provider's table is enumerated with the service tables.
+
+    Empty in Phase 1 on purpose: no service declares ``ListAccounts``, so
+    ``AWSOrganizationsNotInUseException`` from it stays ERROR until an entry has
+    A/B evidence of the rows it would move.
+    """
+    table = OrganizationsProvider.NOT_CONFIGURED_ERRORS
+    assert isinstance(table, dict)
+    assert table == {}
+    assert "ListAccounts" not in table
+
+
+#: The pair every precedence case classifies.
+_PAIR_OPERATION = "ListAccounts"
+_PAIR_CODE = "AWSOrganizationsNotInUseException"
+_NEEDLE = "not a member"
+_EVIDENCE = (
+    "synthetic entry for test_discriminator_property precedence cases only; "
+    "patched in for the test's duration and never committed to a real table"
+)
+
+
+def _table(message: str | None) -> dict[str, dict[str, NotConfigured]]:
+    """Return a one-entry table declaring the pair, with an optional needle."""
+    return {
+        _PAIR_OPERATION: {_PAIR_CODE: NotConfigured(evidence=_EVIDENCE, message=message)}
+    }
+
+
+def _precedence_check() -> SecurityCheck:
+    """Return an instance of a throwaway check whose service table is patchable."""
+    return _concrete(SecurityCheck)()
+
+
+@pytest.mark.parametrize(
+    "service,provider,message,expected",
+    [
+        # The service table declares the pair: its verdict wins, whatever the
+        # provider's table says.
+        pytest.param(_table(None), _table("absent from message"), "anything", True,
+                     id="service-no-needle-beats-provider-mismatch"),
+        pytest.param(_table(_NEEDLE), _table(None), "access denied", False,
+                     id="service-needle-mismatch-is-not-overruled"),
+        pytest.param(_table(_NEEDLE), _table("absent from message"),
+                     f"account is {_NEEDLE.upper()} of an org", True,
+                     id="service-needle-match-beats-provider-mismatch"),
+        # Only the provider declares: the provider's verdict.
+        pytest.param({}, _table(None), "anything", True, id="provider-only-no-needle"),
+        pytest.param({}, _table(_NEEDLE), "access denied", False,
+                     id="provider-only-needle-mismatch"),
+        pytest.param({}, _table(_NEEDLE), f"is {_NEEDLE}", True,
+                     id="provider-only-needle-match"),
+        # Neither declares.
+        pytest.param({}, {}, "anything", False, id="neither"),
+    ],
+)
+def test_the_first_table_to_declare_the_pair_decides(
+    service: dict, provider: dict, message: str, expected: bool
+) -> None:
+    """Property 16: service table first, provider table second, first declarer wins."""
+    error = error_result(code=_PAIR_CODE, message=message, operation=_PAIR_OPERATION)["Error"]
+    check = _precedence_check()
+
+    with patch.object(OrganizationsProvider, "NOT_CONFIGURED_ERRORS", provider), patch.object(
+        type(check), "NOT_CONFIGURED_ERRORS", service
+    ):
+        assert check.is_not_configured(error) is expected
+        assert is_not_configured_in((service, provider), error) is expected
+
+    assert OrganizationsProvider.NOT_CONFIGURED_ERRORS == {}

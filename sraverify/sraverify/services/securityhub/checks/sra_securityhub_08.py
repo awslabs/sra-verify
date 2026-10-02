@@ -55,7 +55,7 @@ class SRA_SECURITYHUB_08(SecurityHubCheck):
         # Check each region separately
         for region in self.regions:
             # Get all organization accounts
-            accounts_response = self.get_organization_accounts(region)
+            accounts_response = self.organization.accounts()
 
             # Get Security Hub members
             members_response = self.get_security_hub_members(region)

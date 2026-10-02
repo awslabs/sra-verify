@@ -123,22 +123,6 @@ class MacieClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
-    def list_organization_accounts(self) -> Mapping[str, Any]:
-        """
-        List all accounts in the AWS Organization.
-
-        Returns:
-            ``{"Accounts": [...]}`` with every page merged, on success, or the
-            error result.
-        """
-        try:
-            accounts: list[Any] = []
-            for page in self.org_client.get_paginator('list_accounts').paginate():
-                accounts.extend(page.get('Accounts', []))
-            return {"Accounts": accounts}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
     def describe_organization_configuration(self) -> Mapping[str, Any]:
         """
         Describe the Macie organization configuration.

@@ -15,6 +15,7 @@ from sraverify.core.check import SecurityCheck
 from sraverify.core.errors import NoChecksSelectedError, UnknownCheckError
 from sraverify.core.enums import Status
 from sraverify.core.finding import GLOBAL_REGION, Finding
+from sraverify.core.regions import resolve_scan_region
 from sraverify.core.registry import all_checks
 from sraverify.core.session import get_session
 from sraverify.core.logging import logger
@@ -164,9 +165,22 @@ class SRAVerify:
         Logging is not configured here. The ``sraverify`` logger carries only a
         ``NullHandler``, so the host application decides where records go and
         at what level; the CLI does that in ``sraverify.cli``.
+
+        Raises:
+            PartitionUndeterminedError: ``role_arn`` was given and neither
+                ``regions`` nor the base session supplies a Region, so the
+                role cannot be assumed in a known partition. Raised before any
+                STS call.
         """
         self.regions = regions
-        self.session = session if session else get_session(profile=profile, role_arn=role_arn)
+        # The first explicit Region is the base session's Region, so the scan
+        # Region and the session Region agree by construction, and AssumeRole
+        # goes to that Region's STS.
+        self.session = session if session else get_session(
+            region=regions[0] if regions else None,
+            profile=profile,
+            role_arn=role_arn,
+        )
         self._connect_timeout = connect_timeout
         self._read_timeout = read_timeout
         self._max_attempts = max_attempts
@@ -243,6 +257,21 @@ class SRAVerify:
 
         return candidates
 
+    def resolve_scan_region(self) -> str:
+        """Return the Region, and so the partition, this scan will address.
+
+        Public so a host can refuse an undetermined scan before starting it --
+        the CLI calls it ahead of the banner -- using exactly the rule
+        ``run_checks`` and ``ScanContext`` apply. Issues no AWS call.
+
+        Returns:
+            The first explicit Region, else the session's Region.
+
+        Raises:
+            PartitionUndeterminedError: Neither supplies a usable Region.
+        """
+        return resolve_scan_region(self.regions, self.session)
+
     def get_available_checks(self, account_type: str = 'all') -> Dict[str, Dict[str, str]]:
         """
         Get all available checks, optionally filtered by account type.
@@ -309,7 +338,16 @@ class SRAVerify:
             UnknownCheckError: ``check_id`` names an ID absent from the
                 registry.
             NoChecksSelectedError: The filter combination matched no check.
+            PartitionUndeterminedError: Neither ``regions`` nor the session
+                supplies a Region. Raised before selection and before any AWS
+                call, so an undetermined scan never reaches botocore's
+                commercial ``aws-global`` default.
         """
+        # First: refuse a scan whose partition cannot be determined, before any
+        # selection, context, or AWS call. The value is discarded; ScanContext
+        # recomputes it from the same inputs.
+        self.resolve_scan_region()
+
         # Resolve the filters against the registered classes. This raises on a
         # mistyped check ID or an empty filter combination rather than
         # returning an empty list, so a usage error cannot masquerade as a

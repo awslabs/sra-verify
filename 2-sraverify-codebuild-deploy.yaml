@@ -19,7 +19,7 @@ Parameters:
 
   IncludeRegions:
     Type: String
-    Description: Comma-separated list of AWS regions to include in the scan
+    Description: Comma-separated list of AWS regions to include in the scan. The first Region also selects the AWS partition and the STS endpoint used to assume SRAMemberRole, so it must be enabled in every account (the default us-east-1 is).
     Default: 'us-east-1,us-east-2,us-west-2'
 
   GitBranch:

@@ -304,29 +304,6 @@ class SecurityHubClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
-    def list_organization_accounts(self) -> Mapping[str, Any]:
-        """
-        List all accounts in the AWS Organization.
-
-        Returns:
-            ``{"Accounts": [...]}`` with every page merged, on success, or the
-            error result.
-        """
-        try:
-            response = self.org_client.list_accounts()
-            accounts = list(response.get('Accounts', []))
-            while response.get('NextToken'):
-                response = self.org_client.list_accounts(
-                    NextToken=response['NextToken']
-                )
-                accounts.extend(response.get('Accounts', []))
-            logger.debug(
-                f"SecurityHub: Found {len(accounts)} organization accounts"
-            )
-            return {"Accounts": accounts}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
     # ------------------------------------------------------------------ #
     # Unified Security Hub (V2) organization surface
     # ------------------------------------------------------------------ #

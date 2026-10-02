@@ -445,13 +445,6 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             cache_key=f"delegated_admin:{_TEST_REGION}",
         ),
         A(
-            "get_organization_members",
-            "accessor",
-            args=(_TEST_REGION,),
-            client_method="list_organization_accounts",
-            cache_key="organization_members",
-        ),
-        A(
             "batch_get_account_status",
             "accessor",
             args=(_TEST_REGION, [_TEST_ACCOUNT]),
@@ -500,13 +493,6 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             cache_key=f"members:{_TEST_REGION}",
         ),
         A(
-            "get_organization_members",
-            "accessor",
-            args=(_TEST_REGION,),
-            client_method="list_organization_accounts",
-            cache_key=f"organization_members:{_TEST_REGION}",
-        ),
-        A(
             "get_organization_configuration",
             "accessor",
             args=(_TEST_REGION,),
@@ -551,12 +537,6 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             args=("ou-abc-123",),
             client_method="list_accounts_for_parent",
             cache_key="accounts:ou-abc-123",
-        ),
-        A(
-            "get_accounts",
-            "accessor",
-            client_method="list_accounts",
-            cache_key="all_accounts",
         ),
         A(
             "get_effective_policy",
@@ -626,13 +606,6 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             args=(_TEST_REGION,),
             client_method="list_organization_admin_accounts",
             cache_key=f"organization_admin_accounts:{_TEST_REGION}",
-        ),
-        A(
-            "get_organization_accounts",
-            "accessor",
-            args=(_TEST_REGION,),
-            client_method="list_organization_accounts",
-            cache_key=f"organization_accounts:{_TEST_REGION}",
         ),
         A(
             "get_security_hub_members",
@@ -889,12 +862,6 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             error_bearing=True,
         ),
         A(
-            "get_organization_accounts",
-            "derived",
-            why="builds a throwaway client via _sir_client; no NAMESPACE cache",
-            error_bearing=True,
-        ),
-        A(
             "get_role",
             "derived",
             why="builds a throwaway client via _sir_client; no NAMESPACE cache",
@@ -943,13 +910,6 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             args=(_TEST_REGION,),
             client_method="list_delegated_administrators",
             cache_key=f"delegated_administrators:{_TEST_REGION}",
-        ),
-        A(
-            "get_organization_accounts",
-            "accessor",
-            args=(_TEST_REGION,),
-            client_method="list_organization_accounts",
-            cache_key=f"organization_accounts:{_TEST_REGION}",
         ),
         A(
             "get_sqs_queue_encryption",

@@ -189,26 +189,6 @@ class SecurityLakeClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
-    def list_organization_accounts(self) -> Mapping[str, Any]:
-        """
-        List all accounts in the AWS Organization, with pagination.
-
-        Returns:
-            ``{"Accounts": [...]}`` with every page merged, on success, or the
-            error result.
-        """
-        try:
-            response = self.org_client.list_accounts()
-            accounts = list(response.get('Accounts', []))
-            while response.get('NextToken'):
-                response = self.org_client.list_accounts(
-                    NextToken=response['NextToken']
-                )
-                accounts.extend(response.get('Accounts', []))
-            return {"Accounts": accounts}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
     def get_data_lake_sources(
         self, account_id: Optional[str] = None
     ) -> Mapping[str, Any]:

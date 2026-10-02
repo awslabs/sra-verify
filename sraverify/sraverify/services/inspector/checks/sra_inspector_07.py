@@ -56,7 +56,7 @@ class SRA_INSPECTOR_07(InspectorCheck):
         # Check each region separately
         for region in self.regions:
             # Get organization members
-            members_response = self.get_organization_members(region)
+            members_response = self.organization.accounts()
 
             if "Error" in members_response:
                 error = members_response['Error']

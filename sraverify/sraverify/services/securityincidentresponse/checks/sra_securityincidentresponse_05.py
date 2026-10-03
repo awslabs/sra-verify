@@ -3,6 +3,7 @@ Check if the Security Incident Response triage service linked role exists.
 """
 from collections.abc import Iterable
 
+from sraverify.core.aws_errors import is_error
 from sraverify.core.enums import AccountType, Severity
 from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
@@ -53,7 +54,19 @@ class SRA_SECURITYINCIDENTRESPONSE_05(SecurityIncidentResponseCheck):
         """
         region = "global"  # IAM is global
         role_name = "AWSServiceRoleForSecurityIncidentResponse_Triage"
-        management_account_id = self.get_management_accountId(self.session)
+        management_account_id = self.get_management_accountId()
+        if is_error(management_account_id):
+            error = management_account_id["Error"]
+            yield self.error(
+                region=region,
+                resource_id=None,
+                actual_value=(
+                    f"{error['Operation']} failed: {error['Code']}: "
+                    f"{error['Message']}"
+                ),
+                remediation=self._remediation_for(error),
+            )
+            return
         is_management_account = self.account_id == management_account_id
 
         response = self.get_role(role_name)

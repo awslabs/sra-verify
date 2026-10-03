@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 import botocore.config
 
-from sraverify.core.aws_errors import is_error
+from sraverify.core.aws_client import AWS_EXCEPTIONS, AWSClient
+from sraverify.core.aws_errors import ErrorResult, is_error
 from sraverify.core.logging import logger
 from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.regions import resolve_scan_region
@@ -164,7 +165,6 @@ class ScanContext:
         self._clients: Dict[Tuple[str, str], Any] = {}
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._account_info: Optional[Dict[str, str]] = None
-        self._management_account_id: Optional[str] = None
 
         # Single lock guards all mutable state above so the future Phase 3.1
         # concurrent-execution work does not need a second refactor
@@ -392,77 +392,83 @@ class ScanContext:
     # Lazy typed accessors for per-scan AWS lookups.
     # ------------------------------------------------------------------ #
     #
-    # ``get_account_info``, ``get_management_account_id``, and
-    # ``get_enabled_regions`` each issue an AWS call the first time they are
-    # invoked in a scan and cache the result for the remainder of the scan
-    # (Requirements 1.2, 1.3, 1.4). All three follow the same double-checked
-    # locking shape used by ``get_client``:
+    # ``get_account_info`` and ``get_enabled_regions`` each issue an AWS call the
+    # first time they are invoked in a scan and cache a success for the
+    # remainder of the scan (Requirements 1.2, 1.4); ``get_management_account_id``
+    # reads the Organizations provider, which owns that cache. Both of the first
+    # two follow the double-checked locking shape used by ``get_client``:
     #
     # 1. Acquire ``self._lock``, peek at the cache field. On hit, release and
     #    return the cached value.
-    # 2. Lock released. Issue the AWS call(s) -- this is where the work
-    #    happens, and we deliberately do not hold the lock across the call so
-    #    threads racing on different lazy accessors don't serialize behind
-    #    each other.
+    # 2. Lock released. Issue the AWS call(s), so threads racing on different
+    #    lazy accessors don't serialize behind each other.
     # 3. Re-acquire ``self._lock`` and double-check. If another thread won the
-    #    race and populated the cache while we were calling AWS, return its
-    #    result and discard ours so every caller observes the same object.
-    #    Otherwise store ours and return it.
+    #    race, return its result and discard ours so every caller observes the
+    #    same object. Otherwise store ours and return it.
     #
-    # None of these methods caches a failure: if the AWS call raises, the
-    # cache field stays ``None`` and the next call retries. This matches the
-    # pre-refactor behavior where each call site issued the lookup directly
-    # and a transient failure followed by a retry would re-issue the call.
-    # All three obtain underlying boto3 clients via ``self.get_client(...)``
-    # so the bounded ``Client_Config`` is applied (Requirement 2.12 spirit).
+    # They follow the client-error contract (Requirement 13.3): an AWS failure is
+    # returned as an error result, logged once as ``aws_call_failed`` at
+    # ``debug`` by ``AWSClient.aws_error``, and never cached, so the next call
+    # re-issues. Nothing here raises for an AWS outcome or logs one at
+    # ``error``. Each boto3 client is acquired *before* its ``try``: acquisition
+    # reads bundled endpoint data and is a defect if it fails, so a construction
+    # failure propagates rather than becoming an error result describing a call
+    # that was never made. A non-AWS exception (a defect) propagates too.
 
-    def get_account_info(self) -> Dict[str, str]:
-        """Return the account ID and name for the scan, cached after first call.
+    def _call_failed(self, e: Exception) -> ErrorResult:
+        """The error result for a failed lookup, through the one shared formatter.
+
+        Args:
+            e: A ``ClientError`` or ``BotoCoreError``.
+
+        Returns:
+            The error result, after exactly one ``aws_call_failed`` record.
+        """
+        return AWSClient(self._scan_region, self).aws_error(e)
+
+    def get_account_info(self) -> Dict[str, str] | ErrorResult:
+        """Return the account ID and name for the scan, cached after first success.
 
         Issues ``sts:GetCallerIdentity`` to resolve the account ID, then
         ``account:GetAccountInformation`` to resolve the human-readable
-        account name. The result is cached for the remainder of the scan and
+        account name. A success is cached for the remainder of the scan and
         every subsequent call returns the same dict object (Requirement 1.2).
 
-        STS failure is fatal: it is re-raised to the caller and nothing is
-        cached, so a retry will re-issue the STS call. The Account API call
-        is best-effort -- when it fails (commonly because the calling
-        principal lacks ``account:GetAccountInformation``), this method falls
-        back to a blank ``account_name`` and still caches the result, which
-        matches the pre-refactor ``SecurityCheck._get_account_info`` behavior.
+        An STS failure is returned as an error result and nothing is cached, so
+        a retry re-issues the STS call. The Account API call is best-effort for
+        an AWS outcome: when it fails (commonly because the calling principal
+        lacks ``account:GetAccountInformation``), or answers without an
+        ``AccountName``, the name is ``""`` and the identity is still cached.
 
         Returns:
-            A dict with keys ``"account_id"`` and ``"account_name"``. The
-            ``account_name`` value is ``""`` when the Account API was
-            unavailable.
+            ``{"account_id": ..., "account_name": ...}`` (``account_name`` is
+            ``""`` when the Account API was unavailable), or the STS error
+            result.
         """
         # First check: fast path under the lock for the common cache-hit case.
         with self._lock:
             if self._account_info is not None:
                 return self._account_info
 
-        # Lock released. Issue STS first -- this is the fatal call. Failure
-        # here re-raises and leaves ``self._account_info`` unset so a later
-        # caller can retry.
+        # Both clients are acquired before their try: a construction failure is
+        # a defect, not an AWS outcome, and propagates unchanged.
         sts_client = self.get_client("sts", region=self._scan_region)
+        account_client = self.get_client("account", region=self._scan_region)
         try:
             response = sts_client.get_caller_identity()
-            account_id = response["Account"]
-        except Exception as e:
-            logger.error(f"Failed to get account ID from STS: {str(e)}")
-            raise Exception(f"Failed to get account ID: {str(e)}")
+        except AWS_EXCEPTIONS as e:
+            return self._call_failed(e)  # never cached; the next caller re-issues
+        account_id = response["Account"]
 
-        # Account API is best-effort: a failure means we keep going with a
-        # blank account name. This preserves the pre-refactor behavior.
+        logger.debug("Getting AWS account name from Account API")
         try:
-            logger.debug("Getting AWS account name from Account API")
-            account_client = self.get_client("account", region=self._scan_region)
             response = account_client.get_account_information()
-            account_name = response["AccountName"]
-            logger.debug(f"Retrieved account name: {account_name}")
-        except Exception as e:
-            logger.warning(f"Failed to get account name from Account API: {str(e)}")
+        except AWS_EXCEPTIONS as e:
+            self._call_failed(e)  # one debug record; the name is best-effort
             account_name = ""
+        else:
+            account_name = response.get("AccountName", "")
+            logger.debug(f"Retrieved account name: {account_name}")
 
         new_info: Dict[str, str] = {
             "account_id": account_id,
@@ -479,63 +485,36 @@ class ScanContext:
             logger.debug(f"Cached account information for {account_id}")
             return new_info
 
-    def get_management_account_id(self) -> str:
-        """Return the AWS Organizations management account ID, cached for the scan.
+    def get_management_account_id(self) -> str | ErrorResult:
+        """Return the AWS Organizations management account ID.
 
-        Issues ``organizations:DescribeOrganization`` on the first call and
-        returns the value of ``Organization.MasterAccountId``. Subsequent
-        calls within the same scan return the cached string without issuing
-        another AWS call (Requirement 1.3).
-
-        Failures are propagated to the caller; nothing is cached on failure,
-        so a retry will re-issue the AWS call. This matches the pre-refactor
-        ``SecurityCheck.get_management_accountId`` behavior.
+        Delegates to ``self.organization.management_account_id()``, which reads
+        the provider's cached ``DescribeOrganization`` answer, so the context
+        keeps no field of its own and binds no Organizations client.
 
         Returns:
-            The AWS account ID of the organization's management account.
+            The management account's ID, or the ``DescribeOrganization`` error
+            result unchanged (never cached).
         """
-        # First check: fast path under the lock for the common cache-hit case.
-        with self._lock:
-            if self._management_account_id is not None:
-                return self._management_account_id
+        return self.organization.management_account_id()
 
-        # Lock released. Issue the Organizations call. Failure re-raises and
-        # leaves ``self._management_account_id`` unset so a later caller can
-        # retry.
-        try:
-            logger.debug("Getting AWS management account ID")
-            org_client = self.get_client("organizations", region=self._scan_region)
-            response = org_client.describe_organization()
-            management_account_id = response["Organization"]["MasterAccountId"]
-            logger.debug(f"Management account ID: {management_account_id}")
-        except Exception as e:
-            logger.error(f"Failed to get AWS management account ID: {str(e)}")
-            raise Exception(f"Failed to get AWS management account ID: {str(e)}")
-
-        # Second check: another thread may have populated the cache while we
-        # were calling AWS.
-        with self._lock:
-            if self._management_account_id is not None:
-                return self._management_account_id
-            self._management_account_id = management_account_id
-            return management_account_id
-
-    def get_enabled_regions(self) -> List[str]:
+    def get_enabled_regions(self) -> List[str] | ErrorResult:
         """Return the list of AWS regions for the scan.
 
         When an explicit, non-empty region list was supplied at construction
         time, that list is returned as-is and no AWS call is issued. Otherwise
         this method calls ``ec2:DescribeRegions(AllRegions=False)`` once
         (against the scan Region, so it answers for the scan's partition) to
-        enumerate the regions enabled for the
-        account, caches the result for the remainder of the scan, and returns
-        it on every subsequent call (Requirement 1.4).
+        enumerate the regions enabled for the account, caches a success for
+        the remainder of the scan, and returns it on every subsequent call
+        (Requirement 1.4).
 
-        Failures are propagated; nothing is cached on failure so a retry
-        will re-issue the AWS call.
+        A failure is returned as an error result and not cached, so a retry
+        re-issues the call.
 
         Returns:
-            A list of region name strings (e.g., ``["us-east-1", "us-west-2"]``).
+            A list of region name strings (e.g., ``["us-east-1", "us-west-2"]``),
+            or the ``DescribeRegions`` error result.
         """
         # If the caller supplied an explicit, non-empty region list at
         # construction, honor it without ever calling EC2. An empty list or
@@ -548,17 +527,16 @@ class ScanContext:
             if self._resolved_regions is not None:
                 return self._resolved_regions
 
-        # Lock released. Issue the EC2 call. Failure re-raises and leaves
-        # ``self._resolved_regions`` unset so a later caller can retry.
+        logger.debug("Getting enabled AWS regions")
+        # Acquired outside the try, like STS and Account above: a construction
+        # failure (e.g. PartialCredentialsError) propagates unchanged.
+        ec2_client = self.get_client("ec2", region=self._scan_region)
         try:
-            logger.debug("Getting enabled AWS regions")
-            ec2_client = self.get_client("ec2", region=self._scan_region)
             response = ec2_client.describe_regions(AllRegions=False)
-            regions = [region["RegionName"] for region in response["Regions"]]
-            logger.debug(f"Found {len(regions)} enabled regions")
-        except Exception as e:
-            logger.error(f"Failed to get enabled regions: {str(e)}")
-            raise Exception(f"Failed to get enabled regions: {str(e)}")
+        except AWS_EXCEPTIONS as e:
+            return self._call_failed(e)  # never cached; the next caller re-issues
+        regions = [region["RegionName"] for region in response["Regions"]]
+        logger.debug(f"Found {len(regions)} enabled regions")
 
         # Second check: another thread may have populated the cache while we
         # were calling AWS.

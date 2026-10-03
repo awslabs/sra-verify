@@ -6,8 +6,8 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-``get_delegated_admin`` and ``is_security_lake_enabled`` return whole responses
-rather than an extracted value or a ``bool``. A ``bool`` in particular has nowhere
+``is_security_lake_enabled`` returns a whole response rather than an extracted
+value or a ``bool``. A ``bool`` in particular has nowhere
 to carry an error, so the base class answers the predicate *after* the error test.
 
 No method here catches a typed ``self.client.exceptions.*`` code. Classifying a
@@ -35,7 +35,6 @@ class SecurityLakeClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('securitylake', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
         # Moved out of get_sqs_queue_encryption, which acquired it per call
         # (Requirement 1.11).
         self.sqs_client = ctx.get_client('sqs', region=region)
@@ -132,41 +131,6 @@ class SecurityLakeClient(AWSClient):
                 )
                 subscribers.extend(response.get("subscribers", []))
             return {"subscribers": subscribers}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def get_delegated_admin(self) -> Mapping[str, Any]:
-        """
-        Get the Organizations delegated administrator for Security Lake.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` on success, or the error
-            result. The caller reads element ``[0]`` after the error test.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal="securitylake.amazonaws.com"
-            )
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_delegated_administrators(
-        self, service_principal: str = "securitylake.amazonaws.com"
-    ) -> Mapping[str, Any]:
-        """
-        List Organizations delegated administrators for a service principal.
-
-        Args:
-            service_principal: Service principal to check.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` on success, or the error
-            result.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal=service_principal
-            )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

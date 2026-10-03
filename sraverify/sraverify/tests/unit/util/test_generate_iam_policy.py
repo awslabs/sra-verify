@@ -539,7 +539,7 @@ def test_the_legacy_session_client_form_is_still_recognized(generator: Any) -> N
 # The package-wide walk
 # --------------------------------------------------------------------------- #
 
-#: The seven operations ``OrganizationsClient`` issues.
+#: The ten operations ``OrganizationsClient`` issues.
 _ORGANIZATIONS_OPERATIONS = {
     "describe_organization",
     "list_roots",
@@ -548,6 +548,9 @@ _ORGANIZATIONS_OPERATIONS = {
     "list_accounts",
     "describe_effective_policy",
     "list_accounts_for_parent",
+    "list_delegated_administrators",
+    "list_policies_for_target",
+    "describe_policy",
 }
 
 
@@ -560,7 +563,7 @@ def _module_calls(generator: Any, path: Path) -> dict[str, set[str]]:
 def test_the_relocated_organizations_client_is_attributed_from_core(
     generator: Any,
 ) -> None:
-    """``core/organizations_client.py`` contributes its seven operations.
+    """``core/organizations_client.py`` contributes its ten operations.
 
     And nothing under ``services/organizations/`` contributes an Organizations
     action: ``OrganizationsCheck`` reaches AWS only through the relocated client.

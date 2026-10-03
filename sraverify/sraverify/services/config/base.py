@@ -47,25 +47,14 @@ class ConfigCheck(SecurityCheck):
 
     #: The ``(operation, code)`` pairs that mean "the control is not configured".
     #:
-    #: Both entries are about a resource whose *absence is the finding*: no
-    #: organization, or a bucket with no policy. Nothing is declared for the
-    #: ``describe_*`` operations, because Config having no recorder or no delivery
-    #: channel is a **successful** response with an empty list, not an error -- so
-    #: any error from those is an inability to determine.
+    #: The one entry is about a resource whose *absence is the finding*: a
+    #: bucket with no policy. ``DescribeOrganization`` (and every other
+    #: Organizations operation this base reaches) is classified by
+    #: ``OrganizationsProvider.NOT_CONFIGURED_ERRORS``. Nothing is declared for
+    #: the ``describe_*`` operations, because Config having no recorder or no
+    #: delivery channel is a **successful** response with an empty list, not an
+    #: error -- so any error from those is an inability to determine.
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
-        "DescribeOrganization": {
-            "AWSOrganizationsNotInUseException": NotConfigured(
-                evidence=(
-                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
-                    "API_DescribeOrganization.html -- "
-                    "AWSOrganizationsNotInUseException is returned when the "
-                    "account is not a member of an organization, which is the "
-                    "control being absent rather than an inability to determine. "
-                    "This is the pair product.md names as the canonical example of "
-                    "a semantic AWS code."
-                ),
-            ),
-        },
         "GetBucketPolicy": {
             "NoSuchBucketPolicy": NotConfigured(
                 evidence=(
@@ -83,8 +72,8 @@ class ConfigCheck(SecurityCheck):
     def _setup_clients(self):
         """Set up Config clients for each region.
 
-        Each wrapper obtains its underlying boto3 ``config``, ``organizations``,
-        ``s3`` and ``sts`` clients from ``self._ctx.get_client(...)``.
+        Each wrapper obtains its underlying boto3 ``config``, ``s3`` and ``sts``
+        clients from ``self._ctx.get_client(...)``.
         """
         self._clients.clear()
         if hasattr(self, 'regions') and self.regions:
@@ -243,7 +232,8 @@ class ConfigCheck(SecurityCheck):
 
         Config can be delegated under either ``config.amazonaws.com`` or
         ``config-multiaccountsetup.amazonaws.com``, so both are consulted unless
-        one is named. Each principal's response is cached in its own slot.
+        one is named. Each principal is read through the scan's Organizations
+        provider, which caches each principal's answer once per scan.
 
         **The first failure wins.** A merged list assembled from one successful
         principal and one denied one would be indistinguishable from a complete
@@ -257,41 +247,18 @@ class ConfigCheck(SecurityCheck):
             ``{"DelegatedAdministrators": [...]}`` merged across principals, or the
             first error result encountered.
         """
-        if not self.regions:
-            logger.warning("Config: No regions specified")
-            return no_client_result(service="Config", region="global")
-
-        account_id = self.account_id
         principals = (
             [service_principal] if service_principal
             else list(self.CONFIG_SERVICE_PRINCIPALS)
         )
-        region = self.regions[0]
         merged: List[Dict[str, Any]] = []
 
         for principal in principals:
-            cache_key = f"delegated_admin:{account_id}:{principal}"
-            if self._ctx._has(self.NAMESPACE, cache_key):
-                logger.debug(f"Config: Using cached {cache_key}")
-                merged.extend(
-                    self._ctx._get(self.NAMESPACE, cache_key).get(
-                        'DelegatedAdministrators', []
-                    )
-                )
-                continue
-
-            client = self.get_client(region)
-            if client is None:
-                logger.warning(f"Config: No client available for region {region}")
-                return no_client_result(service="Config", region=region)
-
-            result = client.list_delegated_administrators(principal)
+            result = self.organization.delegated_administrators(principal)
             if is_error(result):
-                # Not cached, and not merged around: a partial answer here would
-                # be read as a complete one.
+                # Not merged around: a partial answer here would be read as a
+                # complete one.
                 return result
-
-            self._ctx._set(self.NAMESPACE, cache_key, result)
             merged.extend(result.get('DelegatedAdministrators', []))
 
         return {"DelegatedAdministrators": merged}

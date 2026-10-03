@@ -21,6 +21,10 @@ from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
 from sraverify.services.iam.client import IAM_Client
 
+#: The service principal the IAM delegated administrator is registered under,
+#: for centralized root access management.
+IAM_SERVICE_PRINCIPAL = "iam.amazonaws.com"
+
 
 class IAMCheck(SecurityCheck):
     """Base class for all AWS IAM security checks.
@@ -53,9 +57,13 @@ class IAMCheck(SecurityCheck):
     #: from the API reference (it carries an ``Exception`` suffix), so they are
     #: left undeclared and read as an honest ERROR.
     #:
-    #: ``DescribeOrganization`` is absent too: SRA-IAM-05 only uses it to
-    #: recognise the management account, and a standalone account is not a
-    #: member account the control can be judged for.
+    #: The Organizations operations this base's accessors reach
+    #: (``ListDelegatedAdministrators``, ``DescribeOrganization``) are classified
+    #: by ``OrganizationsProvider.NOT_CONFIGURED_ERRORS``, not here. The provider
+    #: declares ``DescribeOrganization`` / ``AWSOrganizationsNotInUseException``,
+    #: so ``is_not_configured`` answers ``True`` for it; SRA-IAM-05 still yields
+    #: ERROR on that branch because it has no FAIL arm there (moved-verdict
+    #: ledger row "stays ERROR").
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
         "ListOrganizationsFeatures": {
             "ServiceAccessNotEnabledException": NotConfigured(
@@ -77,16 +85,6 @@ class IAMCheck(SecurityCheck):
                     "2026-09-29 in three test-org accounts with no custom policy: "
                     "'The Password Policy with domain name <account-id> cannot be "
                     "found.'"
-                ),
-            ),
-        },
-        "ListDelegatedAdministrators": {
-            "AWSOrganizationsNotInUseException": NotConfigured(
-                evidence=(
-                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
-                    "API_ListDelegatedAdministrators.html -- returned when the "
-                    "account is not a member of an organization, so no IAM "
-                    "delegated administrator can exist."
                 ),
             ),
         },
@@ -212,22 +210,25 @@ class IAMCheck(SecurityCheck):
         """
         Get the delegated administrators registered for ``iam.amazonaws.com``.
 
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal.
+
         Returns:
             ``{"DelegatedAdministrators": [...]}`` on success, or an error result.
         """
-        return self._cached_call("delegated_admins", "list_delegated_administrators")
+        return self.organization.delegated_administrators(IAM_SERVICE_PRINCIPAL)
 
     def get_organization(self) -> Dict[str, Any]:
         """
         Describe the organization the current account belongs to.
 
-        Used instead of ``get_management_accountId()``, which raises on failure
-        and so would turn a denied call into a synthetic ERROR row.
+        Delegates to ``self.organization.describe()``, the scan's one cached
+        ``DescribeOrganization`` answer.
 
         Returns:
             ``{"Organization": {...}}`` on success, or an error result.
         """
-        return self._cached_call("organization", "describe_organization")
+        return self.organization.describe()
 
     def _validate_metadata(self):
         """

@@ -44,6 +44,7 @@ from sraverify.tests.property.test_accessor_cache_property import (
 from sraverify.tests.property.test_client_contract_property import (
     ADAPTERS as _CLIENT_ADAPTERS,
 )
+from sraverify.core.organization import OrganizationsProvider
 from sraverify.tests.property.test_organization_provider_property import (
     PROVIDER_ADAPTERS,
     stub_organization,
@@ -268,11 +269,28 @@ def test_every_check_has_at_least_one_accessor_to_patch(
 
     Reported rather than assumed: if a service legitimately had none, Property 14
     would pass vacuously for all of its checks and nobody would know.
+
+    A base whose accessors all delegate to the Organizations provider
+    (``OrganizationsCheck``) has no patched accessor: its checks are driven
+    through the provider stub on the context instead. For those the property is
+    shown behaviourally -- the drive must reach at least one provider accessor.
     """
     accessors = _accessor_names(_service_of(cls))
-    assert accessors, (
-        f"{check_id}: service {_service_of(cls)!r} declares no accessor adapters, "
-        f"so Property 14 cannot drive this check"
+    if accessors:
+        return
+
+    record: list[str] = []
+    check, patchers = _prepare(cls, record=record)
+    try:
+        list(check.execute())
+    finally:
+        for patcher in patchers:
+            patcher.stop()
+    reached = [name for name in record if name in _PROVIDER_OPERATIONS]
+    assert reached, (
+        f"{check_id}: service {_service_of(cls)!r} declares no accessor adapters "
+        f"and the drive reached no provider accessor, so Property 14 cannot "
+        f"drive this check"
     )
 
 
@@ -453,22 +471,46 @@ def _semantic_targets() -> list[Any]:
 
     Returns:
         ``pytest.param`` values of ``(check_id, cls, operation, code, fact)``.
+
+    The provider's table is enumerated for every check too: after task 26 it
+    alone classifies the operations the provider owns, and any check can reach
+    one through ``self.organization``. A pair a service table also declared
+    would be listed once, under the service table that decides it.
     """
     out = []
     for check_id, cls in _CATALOG:
-        for operation, by_code in cls.NOT_CONFIGURED_ERRORS.items():
-            for code, fact in by_code.items():
-                out.append(
-                    pytest.param(
-                        check_id,
-                        cls,
-                        operation,
-                        code,
-                        fact,
-                        id=f"{check_id}-{operation}-{code}",
+        seen: set[tuple[str, str]] = set()
+        tables = (
+            ("", cls.NOT_CONFIGURED_ERRORS),
+            ("provider-", OrganizationsProvider.NOT_CONFIGURED_ERRORS),
+        )
+        for prefix, table in tables:
+            for operation, by_code in table.items():
+                for code, fact in by_code.items():
+                    if (operation, code) in seen:
+                        continue
+                    seen.add((operation, code))
+                    out.append(
+                        pytest.param(
+                            check_id,
+                            cls,
+                            operation,
+                            code,
+                            fact,
+                            id=f"{check_id}-{prefix}{operation}-{code}",
+                        )
                     )
-                )
     return out
+
+
+#: Provider pairs a check reaches first but routes to ERROR by design
+#: (design-phase2.md, moved-verdict ledger: the "stays ERROR" rows reached
+#: first by the classification harness). For these the
+#: property asserts error() and never failed(), instead of skipping.
+_PROVIDER_PAIRS_WITHOUT_FAIL_ARM = frozenset({
+    ("SRA-SECURITYHUB-17", "ListAccounts"),
+    ("SRA-IAM-05", "DescribeOrganization"),
+})
 
 
 @pytest.mark.parametrize(
@@ -561,12 +603,53 @@ def test_a_declared_semantic_error_result_reaches_failed(
         f"{check_id} PASSed on a semantic error result: {passed}. A declared "
         f"'not configured' code means AWS reported the control absent."
     )
+    if (check_id, operation) in _PROVIDER_PAIRS_WITHOUT_FAIL_ARM:
+        # No FAIL arm on this branch, by design: the ledger's "stays ERROR".
+        assert {f.status for f in findings} == {Status.ERROR}, (
+            f"{check_id} has no FAIL arm for {operation}/{code} and must yield "
+            f"only ERROR; got {sorted({f.status.value for f in findings})}"
+        )
+        return
     assert any(f.status is Status.FAIL for f in findings), (
         f"{check_id} never reached failed() for the declared semantic pair "
         f"{operation}/{code}; every row was "
         f"{sorted({f.status.value for f in findings})}. The discriminator's True "
         f"is not changing the verdict."
     )
+
+
+def test_the_exemption_set_is_the_ledgers_stays_error_rows_reached_first() -> None:
+    """``_PROVIDER_PAIRS_WITHOUT_FAIL_ARM`` is derived from the ledger, not asserted.
+
+    A "stays ERROR" ledger row is in the set exactly when this harness, with every
+    accessor returning that row's semantic error, reaches the row's operation
+    first. ``SRA-SECURITYINCIDENTRESPONSE-05`` is the ledger's third "stays ERROR"
+    row and is excluded by that qualifier: ``_prepare`` answers
+    ``ctx.get_management_account_id`` with a success, so its first recorded
+    accessor is ``get_role``.
+    """
+    # Imported here, not at module level: the ledger module imports this one.
+    from sraverify.tests.unit.core.test_provider_classification import LEDGER
+
+    reached_first = set()
+    stays_error = [row for row in LEDGER if row.outcome == "stays ERROR"]
+    assert len(stays_error) == 3
+    for row in stays_error:
+        cls = dict(_CATALOG)[row.check_id]
+        fact = OrganizationsProvider.NOT_CONFIGURED_ERRORS[row.operation]
+        code = next(iter(fact))
+        result = error_result(code=code, message="probe", operation=row.operation)
+        calls: list[str] = []
+        check, patchers = _prepare(cls, returns=result, record=calls)
+        try:
+            list(check.execute())
+        finally:
+            for patcher in patchers:
+                patcher.stop()
+        if calls and _operation_of(_service_of(cls), calls[0]) == row.operation:
+            reached_first.add((row.check_id, row.operation))
+
+    assert reached_first == _PROVIDER_PAIRS_WITHOUT_FAIL_ARM
 
 
 # --------------------------------------------------------------------------- #

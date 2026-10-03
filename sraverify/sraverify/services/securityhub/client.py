@@ -34,7 +34,6 @@ class SecurityHubClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('securityhub', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
         # SRA-SECURITYHUB-20 reads the EventBridge rules that route Security Hub
         # findings. Acquired here, not in the method, so the IAM generator can
         # attribute events:ListRules / events:ListTargetsByRule to this client.
@@ -241,46 +240,6 @@ class SecurityHubClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
-    def list_delegated_administrators(
-        self, service_principal: str = "securityhub.amazonaws.com"
-    ) -> Mapping[str, Any]:
-        """
-        List Organizations delegated administrators for a service principal.
-
-        Args:
-            service_principal: Service principal to check for delegated
-                administrators.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` with every page merged, on
-            success, or the error result.
-
-            This reaches ``organizations``, not ``securityhub``, so its errors are
-            Organizations errors and mean something different from Security Hub
-            not being subscribed. That is why the discriminator table declares
-            nothing for ``ListDelegatedAdministrators``.
-        """
-        try:
-            response = self.org_client.list_delegated_administrators(
-                ServicePrincipal=service_principal
-            )
-            delegated_admins = list(response.get('DelegatedAdministrators', []))
-            while response.get('NextToken'):
-                response = self.org_client.list_delegated_administrators(
-                    ServicePrincipal=service_principal,
-                    NextToken=response['NextToken'],
-                )
-                delegated_admins.extend(
-                    response.get('DelegatedAdministrators', [])
-                )
-            logger.debug(
-                f"SecurityHub: Found {len(delegated_admins)} delegated "
-                f"administrators for {service_principal}"
-            )
-            return {"DelegatedAdministrators": delegated_admins}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
     def list_members(self) -> Mapping[str, Any]:
         """
         List Security Hub member accounts.
@@ -410,92 +369,6 @@ class SecurityHubClient(AWSClient):
             ):
                 findings.extend(page.get('Findings', []))
             return {"Findings": findings}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    # ------------------------------------------------------------------ #
-    # Organizations: the SECURITYHUB_POLICY management policy type
-    # ------------------------------------------------------------------ #
-
-    def list_roots(self) -> Mapping[str, Any]:
-        """
-        List the organization roots, with their enabled policy types.
-
-        Returns:
-            ``{"Roots": [...]}`` with every page merged, on success, or the error
-            result.
-        """
-        try:
-            roots = []
-            for page in self.org_client.get_paginator('list_roots').paginate():
-                roots.extend(page.get('Roots', []))
-            return {"Roots": roots}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_policies_for_target(
-        self, target_id: str, policy_type: str
-    ) -> Mapping[str, Any]:
-        """
-        List the policies of one type attached directly to a target.
-
-        Args:
-            target_id: A root, OU or account ID.
-            policy_type: e.g. ``"SECURITYHUB_POLICY"``.
-
-        Returns:
-            ``{"Policies": [...]}`` with every page merged, on success, or the
-            error result. Summaries only; the content needs
-            :meth:`describe_policy`.
-        """
-        try:
-            policies = []
-            for page in self.org_client.get_paginator(
-                'list_policies_for_target'
-            ).paginate(TargetId=target_id, Filter=policy_type):
-                policies.extend(page.get('Policies', []))
-            return {"Policies": policies}
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def describe_policy(self, policy_id: str) -> Mapping[str, Any]:
-        """
-        Describe one Organizations policy, including its stored content.
-
-        Args:
-            policy_id: The policy ID, e.g. ``p-abc123``.
-
-        Returns:
-            The ``DescribePolicy`` response on success, or the error result.
-            ``Policy.Content`` is the *stored* document, still wrapped in
-            inheritance operators (``@@assign`` / ``@@append``).
-        """
-        try:
-            return self.org_client.describe_policy(PolicyId=policy_id)
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def describe_effective_policy(
-        self, policy_type: str, target_id: str
-    ) -> Mapping[str, Any]:
-        """
-        Describe the effective policy of one type for an account.
-
-        Args:
-            policy_type: e.g. ``"SECURITYHUB_POLICY"``.
-            target_id: An account ID. A root or OU is not a supported target.
-
-        Returns:
-            The ``DescribeEffectivePolicy`` response on success, or the error
-            result. For ``SECURITYHUB_POLICY`` the effective document resolves the
-            inheritance operators away to plain lists -- observed 2026-09-25 as
-            ``{"securityhub":{"disable_in_regions":[],"enable_in_regions":
-            ["ALL_SUPPORTED"]}}``.
-        """
-        try:
-            return self.org_client.describe_effective_policy(
-                PolicyType=policy_type, TargetId=target_id
-            )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

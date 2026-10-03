@@ -202,13 +202,6 @@ _ACCESSANALYZER = (
         args=(f"arn:aws:access-analyzer:us-east-1:{_TEST_ACCOUNT}:analyzer/org",),
         success={"analyzer": {"name": "org", "type": "ORGANIZATION"}},
     ),
-    ClientAdapter(
-        method="get_delegated_admin",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT}]},
-    ),
     # Requirement 1.7's probe was here: a bare bool on the success path, so it had
     # nowhere to carry an error result and its failure path was always erasing.
     # **Deleted**, not converted -- accessanalyzer has an endpoint in
@@ -303,13 +296,6 @@ _CLOUDTRAIL = (
         args=(f"arn:aws:cloudtrail:us-east-1:{_TEST_ACCOUNT}:trail/org-trail",),
         success={"IsLogging": True, "LatestDeliveryTime": "2026-09-12T18:00:00Z"},
     ),
-    ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
-    ),
 )
 
 _CONFIG = (
@@ -384,20 +370,6 @@ _CONFIG = (
         operation="GetBucketPolicy",
         args=("config-bucket",),
         success={"Policy": '{"Version":"2012-10-17","Statement":[]}'},
-    ),
-    ClientAdapter(
-        method="get_management_account_id",
-        boto_service="organizations",
-        boto_method="describe_organization",
-        operation="DescribeOrganization",
-        success={"Organization": {"MasterAccountId": _TEST_ACCOUNT}},
-    ),
-    ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
     ),
 )
 
@@ -511,21 +483,6 @@ _IAM = (
         operation="GetAccountPasswordPolicy",
         success={"PasswordPolicy": {"MinimumPasswordLength": 14}},
     ),
-    ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success=({"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT}]},),
-        paginated=True,
-    ),
-    ClientAdapter(
-        method="describe_organization",
-        boto_service="organizations",
-        boto_method="describe_organization",
-        operation="DescribeOrganization",
-        success={"Organization": {"MasterAccountId": _TEST_ACCOUNT}},
-    ),
 )
 
 _INSPECTOR = (
@@ -601,13 +558,6 @@ _MACIE = (
         success={"securityHubConfiguration": {"publishPolicyFindings": True}},
     ),
     ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
-    ),
-    ClientAdapter(
         method="list_members",
         boto_service="macie2",
         boto_method="list_members",
@@ -681,6 +631,37 @@ _ORGANIZATIONS = (
         success=({"Roots": [{"Id": "r-abc1", "Name": "Root"}]},),
         paginated=True,
     ),
+    ClientAdapter(
+        method="list_delegated_administrators",
+        boto_service="organizations",
+        boto_method="list_delegated_administrators",
+        operation="ListDelegatedAdministrators",
+        args=("securityhub.amazonaws.com",),
+        success=({"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="list_policies_for_target",
+        boto_service="organizations",
+        boto_method="list_policies_for_target",
+        operation="ListPoliciesForTarget",
+        args=("r-abc1", "SECURITYHUB_POLICY"),
+        success=({"Policies": [{"Id": "p-abc123", "Name": "securityhub-all"}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="describe_policy",
+        boto_service="organizations",
+        boto_method="describe_policy",
+        operation="DescribePolicy",
+        args=("p-abc123",),
+        success={
+            "Policy": {
+                "PolicySummary": {"Id": "p-abc123", "Type": "SECURITYHUB_POLICY"},
+                "Content": "{}",
+            }
+        },
+    ),
 )
 
 _S3 = (
@@ -732,13 +713,6 @@ _SECURITYHUB = (
                 {"StandardsArn": "arn:aws:securityhub:::standards/aws-foundational-security-best-practices/v/1.0.0"}
             ]
         },
-    ),
-    ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
     ),
     ClientAdapter(
         method="describe_security_hub_v2",
@@ -893,67 +867,6 @@ _SECURITYHUB = (
         paginated=True,
     ),
     ClientAdapter(
-        method="list_roots",
-        boto_service="organizations",
-        boto_method="list_roots",
-        operation="ListRoots",
-        success=(
-            {
-                "Roots": [
-                    {
-                        "Id": "r-abc1",
-                        "PolicyTypes": [
-                            {"Type": "SECURITYHUB_POLICY", "Status": "ENABLED"}
-                        ],
-                    }
-                ]
-            },
-        ),
-        paginated=True,
-    ),
-    ClientAdapter(
-        method="list_policies_for_target",
-        boto_service="organizations",
-        boto_method="list_policies_for_target",
-        operation="ListPoliciesForTarget",
-        args=("r-abc1", "SECURITYHUB_POLICY"),
-        success=({"Policies": [{"Id": "p-abc123", "Name": "securityhub-all"}]},),
-        paginated=True,
-    ),
-    ClientAdapter(
-        method="describe_policy",
-        boto_service="organizations",
-        boto_method="describe_policy",
-        operation="DescribePolicy",
-        args=("p-abc123",),
-        success={
-            "Policy": {
-                "PolicySummary": {"Id": "p-abc123", "Type": "SECURITYHUB_POLICY"},
-                "Content": (
-                    '{"securityhub":{"enable_in_regions":{"@@append":["ALL_SUPPORTED"]},'
-                    '"disable_in_regions":{"@@append":[]}}}'
-                ),
-            }
-        },
-    ),
-    ClientAdapter(
-        method="describe_effective_policy",
-        boto_service="organizations",
-        boto_method="describe_effective_policy",
-        operation="DescribeEffectivePolicy",
-        args=("SECURITYHUB_POLICY", _TEST_ACCOUNT),
-        success={
-            "EffectivePolicy": {
-                "PolicyType": "SECURITYHUB_POLICY",
-                "TargetId": _TEST_ACCOUNT,
-                "PolicyContent": (
-                    '{"securityhub":{"disable_in_regions":[],'
-                    '"enable_in_regions":["ALL_SUPPORTED"]}}'
-                ),
-            }
-        },
-    ),
-    ClientAdapter(
         method="list_event_rules",
         boto_service="events",
         boto_method="list_rules",
@@ -1011,13 +924,6 @@ _SECURITYINCIDENTRESPONSE = (
         success={"Role": {"RoleName": "AWSServiceRoleForSecurityIncidentResponse"}},
     ),
     ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
-    ),
-    ClientAdapter(
         method="list_memberships",
         boto_service="security-ir",
         boto_method="list_memberships",
@@ -1037,13 +943,6 @@ _SECURITYLAKE = (
                 {"account": _TEST_ACCOUNT, "sourceName": "CLOUD_TRAIL_MGMT"}
             ]
         },
-    ),
-    ClientAdapter(
-        method="get_delegated_admin",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT}]},
     ),
     ClientAdapter(
         method="get_organization_configuration",
@@ -1076,13 +975,6 @@ _SECURITYLAKE = (
         boto_method="list_data_lakes",
         operation="ListDataLakes",
         success={"dataLakes": [{"region": _TEST_REGION, "s3BucketArn": "arn:aws:s3:::lake"}]},
-    ),
-    ClientAdapter(
-        method="list_delegated_administrators",
-        boto_service="organizations",
-        boto_method="list_delegated_administrators",
-        operation="ListDelegatedAdministrators",
-        success={"DelegatedAdministrators": [{"Id": _TEST_ACCOUNT, "Name": "audit"}]},
     ),
     ClientAdapter(
         method="list_log_sources",

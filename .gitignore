@@ -19,6 +19,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.pytest_cache
 
 # Virtual environments
 venv/
@@ -67,3 +68,6 @@ sratester/
 
 # ASH output
 .ash/
+
+# Exclude .agents directory created by Kiro
+.agents/

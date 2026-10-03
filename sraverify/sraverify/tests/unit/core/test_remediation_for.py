@@ -618,3 +618,129 @@ def test_the_three_access_denied_buckets_are_mutually_distinct(
     )
     for label, w in wordings.items():
         assert w.strip(), f"{label} produced a blank remediation"
+
+
+# --------------------------------------------------------------------------- #
+# Property 47 -- an Organizations-operation error keeps the Phase 1 remediation
+#
+# Phase 2 moved every Organizations call behind the provider, and Open Question 5
+# decided that ``_remediation_for`` keeps naming the *check's own* service for
+# those operations: any member may call DescribeOrganization and
+# DescribeEffectivePolicy, and a delegated administrator for any service may call
+# the admin-only reads, so naming "the Organizations delegated administrator"
+# would be wrong advice. The six templates below are the merged Phase 1 text
+# (f517024), committed literally so an edit to the wording fails here.
+# --------------------------------------------------------------------------- #
+
+from hypothesis import given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+from sraverify.core import check as check_module  # noqa: E402
+from sraverify.core.organization import OrganizationsProvider  # noqa: E402
+from sraverify.core.registry import all_checks  # noqa: E402
+
+_PHASE_ONE_TEMPLATES = {
+    "transport": (
+        "Confirm the {service} endpoint for this Region is reachable from the "
+        "scanner's network, then re-run the scan"
+    ),
+    "no_client": (
+        "Confirm the Region is enabled for this account and was supplied to "
+        "--regions, so a {service} client exists for it"
+    ),
+    "not_the_administrator": (
+        "{operation} was refused because the scanned account is not the {service} "
+        "delegated administrator, not for want of an IAM permission -- granting one "
+        "will not change this. Confirm which account holds that role and that this "
+        "check's account type is scanned against it"
+    ),
+    "iam_denial": (
+        "Grant the member role permission to call {operation} for this service (see "
+        "the SRAVerifyCheckPermissions policy in 1-sraverify-member-roles.yaml), then "
+        "re-run the scan"
+    ),
+    "unstated": (
+        "{operation} was refused without saying why. Check both causes: whether the "
+        "member role is granted the action (see 1-sraverify-member-roles.yaml), and "
+        "whether the scanned account is the {service} delegated administrator, which "
+        "several services require for an organization-wide read"
+    ),
+    "other": (
+        "Investigate {code} from {operation} in the scan log (the aws_call_failed "
+        "record names the Region), then re-run the scan"
+    ),
+}
+
+
+def _phase_one_remediation(service: str, error: dict[str, str]) -> str:
+    """The merged Phase 1 bucket choice, over the golden templates."""
+    code = error.get("Code", "")
+    operation = error.get("Operation", "") or "the AWS call"
+    if code in TRANSPORT_ERROR_CODES:
+        bucket = "transport"
+    elif code == NO_CLIENT_CODE:
+        bucket = "no_client"
+    elif code in check_module._ACCESS_DENIED_CODES:
+        message = error.get("Message", "").lower()
+        if any(n in message for n in check_module._NOT_THE_ADMINISTRATOR_NEEDLES):
+            bucket = "not_the_administrator"
+        elif any(n in message for n in check_module._IAM_DENIAL_NEEDLES):
+            bucket = "iam_denial"
+        else:
+            bucket = "unstated"
+    else:
+        bucket = "other"
+    return _PHASE_ONE_TEMPLATES[bucket].format(service=service, operation=operation, code=code)
+
+
+_ORGANIZATIONS_OPERATIONS = sorted(OrganizationsProvider.OWNED_OPERATIONS | {"ListPolicies"})
+_CATALOG_CLASSES = [cls for _, cls in sorted(all_checks().items())]
+_CODES = st.one_of(
+    st.sampled_from(sorted(TRANSPORT_ERROR_CODES)),
+    st.just(NO_CLIENT_CODE),
+    st.sampled_from(sorted(check_module._ACCESS_DENIED_CODES)),
+    st.sampled_from(["AWSOrganizationsNotInUseException", "TooManyRequestsException"]),
+    st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20),
+)
+_MESSAGES = st.one_of(
+    st.sampled_from(list(check_module._NOT_THE_ADMINISTRATOR_NEEDLES)),
+    st.sampled_from(list(check_module._IAM_DENIAL_NEEDLES)),
+    st.just("You don't have permissions to access this resource."),
+    st.text(max_size=40),
+)
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    cls=st.sampled_from(_CATALOG_CLASSES),
+    operation=st.sampled_from(_ORGANIZATIONS_OPERATIONS),
+    code=_CODES,
+    message=_MESSAGES,
+)
+def test_an_organizations_operation_error_keeps_the_phase_one_remediation(
+    cls: type[SecurityCheck], operation: str, code: str, message: str
+) -> None:
+    """Property 47: byte-identical to Phase 1, naming the check's own service."""
+    instance = cls()
+    error = {"Code": code, "Message": message, "Operation": operation}
+
+    assert instance._remediation_for(error) == _phase_one_remediation(cls.meta.service, error)
+
+
+def test_the_golden_covers_every_bucket() -> None:
+    """Property 47 is not vacuous: each of the six templates is reached."""
+    instance = _concrete(service="Security Hub")()
+    probes = {
+        "transport": ("EndpointConnectionError", "m"),
+        "no_client": (NO_CLIENT_CODE, "m"),
+        "not_the_administrator": ("AccessDeniedException", check_module._NOT_THE_ADMINISTRATOR_NEEDLES[0]),
+        "iam_denial": ("AccessDeniedException", check_module._IAM_DENIAL_NEEDLES[0]),
+        "unstated": ("AccessDeniedException", "You don't have permissions to access this resource."),
+        "other": ("AWSOrganizationsNotInUseException", "m"),
+    }
+    for bucket, (code, message) in probes.items():
+        error = {"Code": code, "Message": message, "Operation": "ListDelegatedAdministrators"}
+        expected = _PHASE_ONE_TEMPLATES[bucket].format(
+            service="Security Hub", operation="ListDelegatedAdministrators", code=code
+        )
+        assert instance._remediation_for(error) == expected, bucket

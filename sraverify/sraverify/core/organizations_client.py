@@ -83,7 +83,7 @@ class OrganizationsClient(AWSClient):
 
             ``AWSOrganizationsNotInUseException`` means no organization exists,
             which is a real answer and is declared in
-            ``OrganizationsCheck.NOT_CONFIGURED_ERRORS``.
+            ``OrganizationsProvider.NOT_CONFIGURED_ERRORS``.
         """
         try:
             return self.client.describe_organization()
@@ -194,7 +194,7 @@ class OrganizationsClient(AWSClient):
 
             ``EffectivePolicyNotFoundException`` means no policy of that type
             reaches the target, which is a real answer and is declared in
-            ``OrganizationsCheck.NOT_CONFIGURED_ERRORS``.
+            ``OrganizationsProvider.NOT_CONFIGURED_ERRORS``.
         """
         try:
             return self.client.describe_effective_policy(
@@ -220,5 +220,64 @@ class OrganizationsClient(AWSClient):
             for page in paginator.paginate(ParentId=parent_id):
                 accounts.extend(page.get('Accounts', []))
             return {"Accounts": accounts}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_delegated_administrators(
+        self, service_principal: str
+    ) -> Mapping[str, Any]:
+        """The delegated administrators registered for one service principal.
+
+        Args:
+            service_principal: e.g. ``"securityhub.amazonaws.com"``. Required,
+                with no default: a default on a shared client would name one
+                service's principal for all of them.
+
+        Returns:
+            ``{"DelegatedAdministrators": [...]}`` with every page merged, or the
+            error result.
+        """
+        try:
+            admins = []
+            paginator = self.client.get_paginator('list_delegated_administrators')
+            for page in paginator.paginate(ServicePrincipal=service_principal):
+                admins.extend(page.get('DelegatedAdministrators', []))
+            return {"DelegatedAdministrators": admins}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_policies_for_target(
+        self, target_id: str, policy_type: str
+    ) -> Mapping[str, Any]:
+        """The policies of one type attached directly to a root, OU or account.
+
+        Args:
+            target_id: Root, OU or account ID.
+            policy_type: e.g. ``"SECURITYHUB_POLICY"``.
+
+        Returns:
+            ``{"Policies": [...]}`` with every page merged, or the error result.
+            Summaries only; the content needs ``describe_policy``.
+        """
+        try:
+            policies = []
+            paginator = self.client.get_paginator('list_policies_for_target')
+            for page in paginator.paginate(TargetId=target_id, Filter=policy_type):
+                policies.extend(page.get('Policies', []))
+            return {"Policies": policies}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def describe_policy(self, policy_id: str) -> Mapping[str, Any]:
+        """One policy with its stored content.
+
+        Args:
+            policy_id: Policy ID, e.g. ``"p-abc123"``.
+
+        Returns:
+            The ``DescribePolicy`` response, or the error result.
+        """
+        try:
+            return self.client.describe_policy(PolicyId=policy_id)
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)

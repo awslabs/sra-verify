@@ -56,11 +56,13 @@ import boto3
 from sraverify.core.aws_errors import (
     NO_CLIENT_CODE,
     TRANSPORT_ERROR_CODES,
+    ErrorResult,
     NotConfiguredTable,
+    is_error,
 )
 from sraverify.core.aws_errors import is_not_configured_in
 from sraverify.core.enums import AccountType, Severity, Status
-from sraverify.core.errors import CheckIdentityError
+from sraverify.core.errors import CheckIdentityError, ScanPreconditionError
 from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
 from sraverify.core.metadata import CheckMeta
@@ -592,10 +594,11 @@ class SecurityCheck(ABC):
             RuntimeError: ``initialize(ctx)`` has not run (7.12). Raised by
                 ``_require_ctx`` before any ``Finding`` is built, so no
                 partial row escapes.
+            ScanPreconditionError: The account identity lookup failed; the
+                orchestrator turns it into this check's one precondition row.
         """
         m = self.meta
-        ctx = self._require_ctx(f"{_HELPER_NAMES[status]}()")
-        info = ctx.get_account_info()
+        info = self._identity(f"{_HELPER_NAMES[status]}()")
         return Finding(
             check_id=m.check_id,
             status=status,
@@ -1029,27 +1032,74 @@ class SecurityCheck(ABC):
         region list, that list is returned. Otherwise enabled regions are
         lazily resolved via ``ctx.get_enabled_regions()`` (one EC2
         ``DescribeRegions`` call per scan, cached for the rest of the scan).
+
+        Raises:
+            ScanPreconditionError: The Region lookup failed. ``run_checks``
+                turns it into this check's one precondition ERROR row; a check
+                never catches it.
         """
         ctx = self._require_ctx("regions")
         ctx_regions = ctx.regions
         if ctx_regions:
             return ctx_regions
-        return ctx.get_enabled_regions()
+        regions = ctx.get_enabled_regions()
+        if is_error(regions):
+            raise ScanPreconditionError(
+                check_id=self.check_id, lookup="regions", error=regions["Error"]
+            )
+        return regions
+
+    def _identity(self, accessor: str) -> dict[str, str]:
+        """The account identity, or a ``ScanPreconditionError`` naming the failure.
+
+        Handing a property an empty string on failure would make every
+        ``self.account_id == ...`` comparison silently false and could fabricate
+        a FAIL from an unreachable STS endpoint, so a failure is raised into the
+        check at the point it reads the fact, and the orchestrator's per-check
+        guard reports it.
+
+        Args:
+            accessor: The property or helper doing the read, for ``_require_ctx``.
+
+        Returns:
+            The ``{"account_id", "account_name"}`` dict.
+
+        Raises:
+            ScanPreconditionError: ``sts:GetCallerIdentity`` failed.
+        """
+        info = self._require_ctx(accessor).get_account_info()
+        if is_error(info):
+            raise ScanPreconditionError(
+                check_id=self.check_id, lookup="identity", error=info["Error"]
+            )
+        return info
 
     @property
     def account_info(self) -> dict[str, str]:
-        """The ``{"account_id", "account_name"}`` dict for the current scan."""
-        return self._require_ctx("account_info").get_account_info()
+        """The ``{"account_id", "account_name"}`` dict for the current scan.
+
+        Raises:
+            ScanPreconditionError: The identity lookup failed.
+        """
+        return self._identity("account_info")
 
     @property
     def account_id(self) -> str:
-        """The current AWS account ID, sourced from the ``ScanContext``."""
-        return self._require_ctx("account_id").get_account_info()["account_id"]
+        """The current AWS account ID, sourced from the ``ScanContext``.
+
+        Raises:
+            ScanPreconditionError: The identity lookup failed.
+        """
+        return self._identity("account_id")["account_id"]
 
     @property
     def account_name(self) -> str:
-        """The current AWS account name, sourced from the ``ScanContext``."""
-        return self._require_ctx("account_name").get_account_info()["account_name"]
+        """The current AWS account name, sourced from the ``ScanContext``.
+
+        Raises:
+            ScanPreconditionError: The identity lookup failed.
+        """
+        return self._identity("account_name")["account_name"]
 
     @property
     def audit_accounts(self) -> list[str]:
@@ -1070,21 +1120,25 @@ class SecurityCheck(ABC):
         """
         return self._require_ctx("organization").organization
 
-    def get_management_accountId(self, session: Optional[boto3.Session] = None) -> str:
+    def get_management_accountId(
+        self, session: Optional[boto3.Session] = None
+    ) -> str | ErrorResult:
         """
         Get the AWS Organizations management account ID for the current scan.
 
-        Delegates to ``self._ctx.get_management_account_id()``, which issues
-        ``organizations:DescribeOrganization`` once per scan and caches the
-        result. The ``session`` parameter is preserved for backward
-        compatibility with the pre-refactor signature but is ignored; the
-        attached ``ScanContext`` owns the session.
+        Delegates to ``self._ctx.get_management_account_id()``, which reads the
+        Organizations provider's cached ``DescribeOrganization`` answer. The
+        ``session`` parameter is preserved for backward compatibility with the
+        pre-refactor signature but is ignored; the attached ``ScanContext`` owns
+        the session.
 
         Args:
             session: Ignored. Kept for backward compatibility.
 
         Returns:
-            AWS account ID of the organization's management account.
+            The management account's ID, or the ``DescribeOrganization`` error
+            result unchanged. The caller tests it with ``is_error`` and reports
+            a failure as an ERROR row.
         """
         if session is not None:
             logger.debug(

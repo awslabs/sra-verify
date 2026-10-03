@@ -43,7 +43,6 @@ class MacieClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('macie2', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
         # Global service; the wrapper's Region does not apply.
         self.sts_client = ctx.get_client('sts')
 
@@ -75,32 +74,6 @@ class MacieClient(AWSClient):
         """
         try:
             return self.client.get_classification_export_configuration()
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_delegated_administrators(
-        self, service_principal: str = "macie.amazonaws.com"
-    ) -> Mapping[str, Any]:
-        """
-        List Organizations delegated administrators for a service principal.
-
-        Args:
-            service_principal: Service principal to check for delegated
-                administrators.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` on success, or the error
-            result.
-
-            Note this reaches ``organizations``, not ``macie2``, so its errors are
-            Organizations errors -- ``AWSOrganizationsNotInUseException`` here
-            means no organization exists, which is a different fact from Macie
-            being disabled.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal=service_principal
-            )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

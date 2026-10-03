@@ -139,8 +139,8 @@ class MacieCheck(SecurityCheck):
         """Set up Macie clients for each region.
 
         Constructs one ``MacieClient`` wrapper per region in ``self.regions``.
-        Each wrapper obtains its underlying boto3 ``macie2``, ``organizations``,
-        and ``sts`` clients from ``self._ctx.get_client(...)``, so the per-scan
+        Each wrapper obtains its underlying boto3 ``macie2`` and ``sts``
+        clients from ``self._ctx.get_client(...)``, so the per-scan
         ``Client_Config`` and per-scan boto3 client cache are applied.
         """
         self._clients.clear()
@@ -244,18 +244,20 @@ class MacieCheck(SecurityCheck):
 
     def get_macie_delegated_admin(self, region: str) -> Mapping[str, Any]:
         """
-        Get the Macie delegated administrator, with caching.
+        Get the Macie delegated administrator.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal. The answer is organization-wide.
 
         Args:
-            region: AWS region name
+            region: AWS region name. Accepted and ignored, so callers that pass
+                one are unchanged.
 
         Returns:
             ``{"DelegatedAdministrators": [...]}``, or an error result. The list
             is read by the check after the error test.
         """
-        return self._cached_call(
-            region, f"delegated_admin:{region}", "list_delegated_administrators"
-        )
+        return self.organization.delegated_administrators("macie.amazonaws.com")
 
     def get_macie_members(self, region: str) -> Mapping[str, Any]:
         """

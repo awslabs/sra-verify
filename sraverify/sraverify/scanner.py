@@ -9,10 +9,23 @@ application. The command-line interface lives in ``sraverify.cli``.
 """
 import difflib
 from boto3 import Session
-from typing import Dict, List, Any, Optional
+from botocore.exceptions import (
+    CredentialRetrievalError,
+    NoCredentialsError,
+    PartialCredentialsError,
+    SSOTokenLoadError,
+    TokenRetrievalError,
+    UnauthorizedSSOTokenError,
+)
+from typing import Dict, Final, List, Any, Optional
 
+from sraverify.core.aws_errors import TRANSPORT_ERROR_CODES, is_error
 from sraverify.core.check import SecurityCheck
-from sraverify.core.errors import NoChecksSelectedError, UnknownCheckError
+from sraverify.core.errors import (
+    NoChecksSelectedError,
+    ScanPreconditionError,
+    UnknownCheckError,
+)
 from sraverify.core.enums import Status
 from sraverify.core.finding import GLOBAL_REGION, Finding
 from sraverify.core.regions import resolve_scan_region
@@ -126,6 +139,129 @@ def _synthetic_error(check_class: type[SecurityCheck], exc: Exception,
         checked_value=f"{m.service} Configuration",
         actual_value=f"Error running {m.check_id}: {type(exc).__name__}: {exc}",
         remediation=m.remediation.text,
+        service=m.service,
+        check_logic=m.check_logic,
+        account_type=m.account_type,
+    )
+
+
+#: botocore raises these before any request is sent when no usable credential
+#: can be loaded: no credential source, partial static keys, a failed
+#: credential_process or container/IMDS fetch, or a missing or expired SSO
+#: token. All six are BotoCoreError subclasses with no subclasses of their own,
+#: and AWSClient.aws_error uses a BotoCoreError's class name as its Code
+#: (core/aws_client.py), so the codes are derived from the classes rather than
+#: written out, the way TRANSPORT_ERROR_CODES is. NoCredentialsError observed
+#: for DescribeRegions and GetCallerIdentity 2026-10-03
+#: (.tmp/sratester/organizations-provider-phase2/review4/nocreds-probe.txt);
+#: raise sites in botocore 1.43.105: cred-raise-sites.txt.
+_LOCAL_CREDENTIAL_EXCEPTIONS: Final = (
+    NoCredentialsError, PartialCredentialsError, CredentialRetrievalError,
+    UnauthorizedSSOTokenError, TokenRetrievalError, SSOTokenLoadError,
+)
+
+#: Codes AWS returns when it rejects the credentials themselves, whichever
+#: service is asked. Observed 2026-10-03 with deliberately invalid static
+#: credentials (.tmp/sratester/organizations-provider-phase2/review3/
+#: ec2-sts-invalid-creds.txt): EC2 DescribeRegions -> AuthFailure, STS
+#: GetCallerIdentity -> InvalidClientTokenId. Add a server code only with an
+#: observed aws_call_failed line or an API reference page, never by inference.
+_REJECTED_CREDENTIAL_CODES: Final = frozenset({"AuthFailure", "InvalidClientTokenId"})
+
+_CREDENTIAL_ERROR_CODES: Final[frozenset[str]] = _REJECTED_CREDENTIAL_CODES | frozenset(
+    exc.__name__ for exc in _LOCAL_CREDENTIAL_EXCEPTIONS
+)
+
+#: The scan-environment remediation for a credential failure, and for any
+#: non-transport identity failure: no IAM policy or SCP can deny
+#: sts:GetCallerIdentity (STS API reference), so only the credential can be
+#: the cause.
+_CREDENTIALS_REMEDIATION: Final = (
+    "Confirm the scan has valid, unexpired credentials (no credentials found, an "
+    "expired session token or SSO login, a wrong --profile, or an invalid access "
+    "key is the usual cause), then re-run the scan"
+)
+
+
+def _precondition_remediation(lookup: str, code: str, scan_region: str) -> str:
+    """The scan-environment remediation for a failed identity or Region lookup.
+
+    Chosen by the code first, then by the lookup: transport codes name the
+    endpoint, credential codes name the credentials for either lookup, and only
+    then does a ``regions`` failure name ``--regions`` and the grant.
+
+    Args:
+        lookup: ``"identity"`` or ``"regions"``.
+        code: The error result's ``Code``.
+        scan_region: The scan Region, interpolated into the endpoint wording.
+
+    Returns:
+        The remediation text.
+    """
+    if code in TRANSPORT_ERROR_CODES:
+        if lookup == "identity":
+            return (
+                f"Confirm the STS endpoint for {scan_region} is reachable from the "
+                f"scanner's network, then re-run the scan"
+            )
+        if lookup == "regions":
+            return (
+                f"Confirm the EC2 endpoint for {scan_region} is reachable from the "
+                f"scanner's network, or pass --regions"
+            )
+    if code in _CREDENTIAL_ERROR_CODES:
+        return _CREDENTIALS_REMEDIATION
+    if lookup == "regions":
+        return (
+            "Pass --regions explicitly, or grant the scanning role "
+            "ec2:DescribeRegions (1-sraverify-member-roles.yaml), then re-run the scan"
+        )
+    # "identity", and the defensive unknown-lookup fallback: this runs inside
+    # error handling, so it answers rather than raising.
+    return _CREDENTIALS_REMEDIATION
+
+
+def _precondition_error(
+    check_class: type[SecurityCheck],
+    exc: ScanPreconditionError,
+    fallback_account: tuple,
+    scan_region: str,
+) -> Finding:
+    """One ERROR row for a check that read a failed identity or Region lookup.
+
+    Built from ``check_class.meta`` the way the synthetic row is, and in the same
+    place: the row set is the one the merged tree produced (one row per check
+    that reads the failed fact), and only its two text cells change.
+    ``actual_value`` is ``<Operation> failed: <Code>: <Message>`` from the
+    lookup's error result, and ``remediation`` addresses the scan environment.
+
+    Args:
+        check_class: The class of the check that read the failed fact.
+        exc: The precondition error the check raised.
+        fallback_account: The ``(account_id, account_name)`` pair resolved once
+            for the scan, both empty strings when identity was unresolvable.
+        scan_region: ``ctx.scan_region``, for the endpoint wording.
+
+    Returns:
+        Exactly one ERROR ``Finding``.
+    """
+    m = check_class.meta
+    account_id, account_name = fallback_account
+    error = exc.error
+    return Finding(
+        check_id=m.check_id,
+        status=Status.ERROR,
+        region=GLOBAL_REGION,
+        severity=m.severity,
+        title=f"{m.check_id} {m.title}",
+        description=m.description,
+        resource_id=None,
+        resource_type=m.resource_type,
+        account_id=account_id,
+        account_name=account_name,
+        checked_value=f"{m.service} Configuration",
+        actual_value=f"{error['Operation']} failed: {error['Code']}: {error['Message']}",
+        remediation=_precondition_remediation(exc.lookup, error["Code"], scan_region),
         service=m.service,
         check_logic=m.check_logic,
         account_type=m.account_type,
@@ -397,11 +533,23 @@ class SRAVerify:
             # 10.10). A failure here is not fatal (10.5): every real finding
             # would fail too, but the ERROR rows should still say which check
             # broke and in which account, so we log and carry empty strings.
+            #
+            # A failed STS call arrives as an error result and produces no row
+            # of its own here: each check that reads identity reports it as its
+            # precondition row below. So it is logged at ``debug``. An exception
+            # is a programming defect (or a client-construction failure) and
+            # keeps ``logger.error``, now with its traceback.
             try:
                 info = ctx.get_account_info()
-                fallback_account = (info["account_id"], info["account_name"])
+                if is_error(info):
+                    logger.debug(
+                        f"Account identity unavailable: {info['Error'].get('Code')}"
+                    )
+                    fallback_account = ("", "")
+                else:
+                    fallback_account = (info["account_id"], info["account_name"])
             except Exception as exc:
-                logger.error(f"Could not resolve account identity: {exc}")
+                logger.error(f"Could not resolve account identity: {exc}", exc_info=True)
                 fallback_account = ("", "")
 
             # Run checks by service
@@ -472,6 +620,32 @@ class SRAVerify:
                             f"Check {selected_id} completed with "
                             f"{len(findings)} findings"
                         )
+                    except ScanPreconditionError as exc:
+                        # The check read the account identity or the Region
+                        # list and that lookup failed. Ahead of ``except
+                        # Exception`` so it becomes one honest ERROR row naming
+                        # the failed call, not a synthetic row naming a Python
+                        # exception. One ``error`` record per row.
+                        logger.error(f"{selected_id} could not run: {exc}")
+                        try:
+                            all_findings.append(
+                                _precondition_error(
+                                    check_class, exc, fallback_account, ctx.scan_region
+                                )
+                            )
+                        except Exception:
+                            # Same secondary-failure rule as the synthetic row
+                            # (Requirement 10.12): an exception raised inside an
+                            # ``except`` handler is not caught by a sibling
+                            # clause of the same ``try``, so without this nesting
+                            # a defect in building the row would escape the
+                            # per-check guard and end the scan. A failure here
+                            # costs this check its row, never the scan.
+                            logger.error(
+                                f"Could not build precondition ERROR row for "
+                                f"{selected_id}",
+                                exc_info=True,
+                            )
                     except Exception as exc:
                         logger.error(
                             f"Error running check {selected_id}: {exc}",

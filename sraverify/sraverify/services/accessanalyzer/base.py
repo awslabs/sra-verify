@@ -100,34 +100,15 @@ class AccessAnalyzerCheck(SecurityCheck):
 
     def get_delegated_admin(self) -> Mapping[str, Any]:
         """
-        Get the Organizations delegated administrator, with caching.
+        Get the Organizations delegated administrator for Access Analyzer.
 
-        Organization-wide, so the first registered client is used to reach
-        ``organizations`` and the cache key is the account ID alone.
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal.
 
         Returns:
             ``{"DelegatedAdministrators": [...]}`` on success, or an error
             result. Read element ``[0]`` after the error test.
         """
-        account_id = self.account_id
-        cache_key = f"delegated_admin:{account_id}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(
-                f"AccessAnalyzer: Using cached delegated admin for {account_id}"
-            )
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        if not self._clients:
-            logger.warning("AccessAnalyzer: No clients available")
-            return no_client_result(
-                service="IAM Access Analyzer", region="global"
-            )
-
-        region = next(iter(self._clients))
-        result = self._clients[region].get_delegated_admin()
-
-        if is_error(result):
-            return result
-
-        self._ctx._set(self.NAMESPACE, cache_key, result)
-        return result
+        return self.organization.delegated_administrators(
+            "access-analyzer.amazonaws.com"
+        )

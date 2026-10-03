@@ -80,8 +80,8 @@ class SecurityLakeCheck(SecurityCheck):
     def _setup_clients(self):
         """Set up Security Lake clients for each region.
 
-        Each wrapper obtains its underlying boto3 ``securitylake``,
-        ``organizations``, and ``sqs`` clients from ``self._ctx.get_client(...)``,
+        Each wrapper obtains its underlying boto3 ``securitylake`` and ``sqs``
+        clients from ``self._ctx.get_client(...)``,
         so the per-scan ``Client_Config`` and client cache are applied.
         """
         self._clients.clear()
@@ -214,17 +214,17 @@ class SecurityLakeCheck(SecurityCheck):
         """
         Get the Organizations delegated administrators for Security Lake.
 
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal.
+
         Args:
-            region: AWS region name
+            region: AWS region name. Accepted and ignored: the answer is
+                organization-wide.
 
         Returns:
             ``{"DelegatedAdministrators": [...]}``, or an error result.
         """
-        return self._cached_call(
-            region,
-            f"delegated_administrators:{region}",
-            "list_delegated_administrators",
-        )
+        return self.organization.delegated_administrators("securitylake.amazonaws.com")
 
     def get_sqs_queue_encryption(
         self, region: str, queue_url: str

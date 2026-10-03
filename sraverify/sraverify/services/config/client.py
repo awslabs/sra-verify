@@ -6,8 +6,8 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-Reaches four services -- ``config``, ``organizations``, ``s3`` and ``sts`` -- all
-acquired in ``__init__``.
+Reaches three services -- ``config``, ``s3`` and ``sts`` -- all acquired in
+``__init__``. Organizations is reached through the scan's provider, not here.
 
 ``get_bucket_location`` returns the raw response. The ``None``
 ``LocationConstraint`` -> ``us-east-1`` mapping the API implies lives in
@@ -35,7 +35,6 @@ class ConfigClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('config', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
         self.s3_client = ctx.get_client('s3', region=region)
         # Moved out of get_account_id, which acquired it per call.
         self.sts_client = ctx.get_client('sts')
@@ -49,23 +48,6 @@ class ConfigClient(AWSClient):
         """
         try:
             return self.sts_client.get_caller_identity()
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def get_management_account_id(self) -> Mapping[str, Any]:
-        """
-        Get the organization's management account.
-
-        Returns:
-            The ``DescribeOrganization`` response on success, i.e.
-            ``{"Organization": {...}}``, or the error result.
-
-            ``AWSOrganizationsNotInUseException`` means no organization exists,
-            which is a real answer and is declared in
-            ``ConfigCheck.NOT_CONFIGURED_ERRORS``.
-        """
-        try:
-            return self.org_client.describe_organization()
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
@@ -188,25 +170,5 @@ class ConfigClient(AWSClient):
         """
         try:
             return self.s3_client.get_bucket_policy(Bucket=bucket_name)
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_delegated_administrators(
-        self, service_principal: str = "config.amazonaws.com"
-    ) -> Mapping[str, Any]:
-        """
-        List Organizations delegated administrators for a service principal.
-
-        Args:
-            service_principal: Service principal to check.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` on success, or the error
-            result.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal=service_principal
-            )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)

@@ -19,8 +19,12 @@ This module holds the provider's contract:
 * a failure is returned unchanged, never cached, and re-issued on retry;
 * the Security Lake log-source primer reads the provider, seeds nothing on a
   failure, and issues no second sweep on the guarded path;
-* the provider's public surface is exactly ``accounts()``, its log records have a
-  fixed shape, and it is freed by refcount the moment its context is.
+* the provider's public surface is exactly eleven accessors, its log records have
+  a fixed shape, and it is freed by refcount the moment its context is;
+* every caching accessor caches a success under its documented key and never a
+  failure, issues one fetch per distinct argument tuple under sequential calls,
+  writes a distinct slot per accessor and argument tuple, and
+  ``management_account_id()`` is derived from ``describe()`` (Properties 37-40).
 
 It also exports :data:`PROVIDER_ADAPTERS` and :func:`stub_organization`, the
 single table and stub the catalog-wide harnesses patch the provider from, so an
@@ -43,6 +47,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import sraverify.core.organization as organization_module
 from sraverify.core.aws_errors import error_result, is_error
@@ -97,7 +103,27 @@ class ProviderAdapter:
 #: client and accessor adapter tables: an accessor missing here fails
 #: :func:`test_the_provider_adapter_table_is_complete_and_exact`, so the catalog
 #: harnesses cannot run one unpatched.
-PROVIDER_ADAPTERS: tuple[ProviderAdapter, ...] = (ProviderAdapter("accounts", "ListAccounts"),)
+PROVIDER_ADAPTERS: tuple[ProviderAdapter, ...] = (
+    ProviderAdapter("accounts", "ListAccounts"),
+    ProviderAdapter("describe", "DescribeOrganization"),
+    ProviderAdapter("management_account_id", "DescribeOrganization"),
+    ProviderAdapter(
+        "delegated_administrators",
+        "ListDelegatedAdministrators",
+        ("securityhub.amazonaws.com",),
+    ),
+    ProviderAdapter("roots", "ListRoots"),
+    ProviderAdapter("ous_for_parent", "ListOrganizationalUnitsForParent", ("r-root",)),
+    ProviderAdapter("policies", "ListPolicies", ("SERVICE_CONTROL_POLICY",)),
+    ProviderAdapter(
+        "policies_for_target", "ListPoliciesForTarget", ("r-root", "SECURITYHUB_POLICY")
+    ),
+    ProviderAdapter("describe_policy", "DescribePolicy", ("p-abc123",)),
+    ProviderAdapter(
+        "effective_policy", "DescribeEffectivePolicy", ("BEDROCK_POLICY", "111122223333")
+    ),
+    ProviderAdapter("accounts_for_parent", "ListAccountsForParent", ("ou-abc",)),
+)
 
 
 def test_the_provider_adapter_table_is_complete_and_exact() -> None:
@@ -476,14 +502,26 @@ def test_accounts_returns_the_clients_response_by_identity() -> None:
         assert ctx.organization.accounts() is org_response
 
 
-def test_the_provider_surface_is_exactly_accounts() -> None:
-    """One public accessor, and three public module-level names."""
+def test_the_provider_surface_is_exactly_eleven_accessors() -> None:
+    """Eleven public accessors, and three public module-level names."""
     public = {
         n
         for n, o in vars(OrganizationsProvider).items()
         if not n.startswith("_") and inspect.isfunction(o)
     }
-    assert public == {"accounts"}
+    assert public == {
+        "accounts",
+        "describe",
+        "management_account_id",
+        "delegated_administrators",
+        "roots",
+        "ous_for_parent",
+        "policies",
+        "policies_for_target",
+        "describe_policy",
+        "effective_policy",
+        "accounts_for_parent",
+    }
 
     tree = ast.parse(Path(organization_module.__file__).read_text(encoding="utf-8"))
     names: set[str] = set()
@@ -574,3 +612,270 @@ def test_the_provider_is_freed_by_refcount_with_its_context() -> None:
         assert ref() is None
     finally:
         gc.enable()
+
+
+# --------------------------------------------------------------------------- #
+# The caching accessors (Properties 37-40)
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _Caching:
+    """How one caching accessor reaches AWS, and where it caches.
+
+    ``client_method`` is the ``OrganizationsClient`` method, ``boto_method`` the
+    boto3 method it issues (through a paginator when ``paginated``), and
+    ``key_of`` the documented cache key for an argument tuple.
+    """
+
+    client_method: str
+    boto_method: str
+    paginated: bool
+    key_of: Any
+
+
+#: Every caching accessor (all of ``PROVIDER_ADAPTERS`` except the derived
+#: ``management_account_id``). Keys are the design's accessor table, byte for byte.
+_CACHING: dict[str, _Caching] = {
+    "accounts": _Caching("list_accounts", "list_accounts", True, lambda: ACCOUNTS_KEY),
+    "describe": _Caching(
+        "describe_organization", "describe_organization", False, lambda: "organization"
+    ),
+    "delegated_administrators": _Caching(
+        "list_delegated_administrators",
+        "list_delegated_administrators",
+        True,
+        lambda p: f"delegated_admins:{p}",
+    ),
+    "roots": _Caching("list_roots", "list_roots", True, lambda: "roots"),
+    "ous_for_parent": _Caching(
+        "list_organizational_units_for_parent",
+        "list_organizational_units_for_parent",
+        True,
+        lambda parent: f"ous:{parent}",
+    ),
+    "policies": _Caching(
+        "list_policies", "list_policies", True, lambda kind: f"policies:{kind}"
+    ),
+    "policies_for_target": _Caching(
+        "list_policies_for_target",
+        "list_policies_for_target",
+        True,
+        lambda target, kind: f"policies_for_target:{target}:{kind}",
+    ),
+    "describe_policy": _Caching(
+        "describe_policy", "describe_policy", False, lambda pid: f"policy:{pid}"
+    ),
+    "effective_policy": _Caching(
+        "describe_effective_policy",
+        "describe_effective_policy",
+        False,
+        lambda kind, target: f"effective_policy:{kind}:{target}",
+    ),
+    "accounts_for_parent": _Caching(
+        "list_accounts_for_parent",
+        "list_accounts_for_parent",
+        True,
+        lambda parent: f"accounts:{parent}",
+    ),
+}
+
+#: The derived accessors: they write no key of their own.
+_DERIVED = {"management_account_id"}
+
+_CACHING_ADAPTERS = [a for a in PROVIDER_ADAPTERS if a.method not in _DERIVED]
+
+
+def test_every_provider_accessor_is_caching_or_derived() -> None:
+    """The two tables partition ``PROVIDER_ADAPTERS`` exactly."""
+    assert set(_CACHING) | _DERIVED == {a.method for a in PROVIDER_ADAPTERS}
+    assert not set(_CACHING) & _DERIVED
+
+
+def _failure_for(adapter: ProviderAdapter, kind: str) -> Exception:
+    """A ``ClientError`` naming the row's operation, or a transport failure."""
+    if kind == "ClientError":
+        return ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "not allowed"}},
+            adapter.operation,
+        )
+    return _transport_error()
+
+
+def _arm_boto_failure(org: MagicMock, spec: _Caching, exc: Exception) -> None:
+    """Make the boto3 call behind ``spec`` raise ``exc`` on its first page."""
+    if spec.paginated:
+        org.get_paginator.return_value.paginate.side_effect = exc
+    else:
+        getattr(org, spec.boto_method).side_effect = exc
+
+
+def _boto_calls(org: MagicMock, spec: _Caching) -> int:
+    """How many requests the boto3 call behind ``spec`` started."""
+    if spec.paginated:
+        return org.get_paginator.return_value.paginate.call_count
+    return getattr(org, spec.boto_method).call_count
+
+
+@pytest.mark.parametrize("adapter", _CACHING_ADAPTERS, ids=lambda a: a.method)
+def test_a_success_is_cached_under_its_key_and_returned_by_identity(
+    adapter: ProviderAdapter,
+) -> None:
+    """Property 37, success half: by identity, under the documented key, once."""
+    spec = _CACHING[adapter.method]
+    ctx, _ = _scan()
+    response = {"Marker": adapter.method}
+    with patch.object(OrganizationsClient, spec.client_method, return_value=response) as call:
+        first = getattr(ctx.organization, adapter.method)(*adapter.args)
+        second = getattr(ctx.organization, adapter.method)(*adapter.args)
+
+    assert first is response
+    assert second is response
+    assert ctx._get(NAMESPACE, spec.key_of(*adapter.args)) is response
+    assert call.call_count == 1
+    assert call.call_args.args == adapter.args
+
+
+@pytest.mark.parametrize("kind,operation", [("ClientError", None), ("BotoCoreError", "Request")])
+@pytest.mark.parametrize("adapter", _CACHING_ADAPTERS, ids=lambda a: a.method)
+def test_a_failure_is_returned_unchanged_never_cached_and_re_issued(
+    adapter: ProviderAdapter, kind: str, operation: str | None
+) -> None:
+    """Property 37, failure half: the real ``aws_error`` result, slot empty, retried."""
+    spec = _CACHING[adapter.method]
+    ctx, session = _scan()
+    org = session.org()
+    exc = _failure_for(adapter, kind)
+    _arm_boto_failure(org, spec, exc)
+
+    result = getattr(ctx.organization, adapter.method)(*adapter.args)
+
+    assert is_error(result)
+    assert result["Error"]["Operation"] == (operation or adapter.operation)
+    assert not ctx._has(NAMESPACE, spec.key_of(*adapter.args))
+
+    again = getattr(ctx.organization, adapter.method)(*adapter.args)
+    assert is_error(again)
+    assert _boto_calls(org, spec) == 2
+
+
+_ARG_ALPHABET = ("a", "b", "c")
+
+
+@settings(max_examples=30, deadline=None)
+@given(data=st.data())
+def test_one_fetch_per_distinct_argument_tuple_under_sequential_calls(data: Any) -> None:
+    """Property 38: one client call and one ``Fetching`` per distinct tuple.
+
+    Every later read of a tuple logs one ``Using cached`` record. ``accounts()``
+    keeps its Phase 1 wording, which Property 29 holds above.
+    """
+    adapter = data.draw(st.sampled_from(_CACHING_ADAPTERS), label="accessor")
+    spec = _CACHING[adapter.method]
+    arity = len(adapter.args)
+    calls = data.draw(
+        st.lists(
+            st.tuples(*[st.sampled_from(_ARG_ALPHABET)] * arity),
+            min_size=1,
+            max_size=8,
+        ),
+        label="calls",
+    )
+    captured: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
+
+    handler = _Collector()
+    target = logging.getLogger("sraverify")
+    previous = target.level
+    target.setLevel(logging.DEBUG)
+    target.addHandler(handler)
+    try:
+        ctx, _ = _scan()
+        with patch.object(
+            OrganizationsClient,
+            spec.client_method,
+            side_effect=lambda *a: {"Args": a},
+        ) as call:
+            for args in calls:
+                getattr(ctx.organization, adapter.method)(*args)
+    finally:
+        target.removeHandler(handler)
+        target.setLevel(previous)
+
+    distinct = list(dict.fromkeys(calls))
+    assert [c.args for c in call.call_args_list] == distinct
+    if adapter.method == "accounts":
+        return
+    for args in distinct:
+        key = spec.key_of(*args)
+        fetching = [r for r in captured if r.getMessage() == f"Organizations: Fetching {key}"]
+        using = [r for r in captured if r.getMessage() == f"Organizations: Using cached {key}"]
+        assert len(fetching) == 1
+        assert len(using) == calls.count(args) - 1
+
+
+def test_distinct_accessors_and_arguments_write_distinct_slots() -> None:
+    """Property 39: ten caching accessors once each write ten keys; args split slots."""
+    ctx, _ = _scan()
+    patches = [
+        patch.object(OrganizationsClient, spec.client_method, return_value={"M": name})
+        for name, spec in _CACHING.items()
+    ]
+    for p in patches:
+        p.start()
+    try:
+        for adapter in _CACHING_ADAPTERS:
+            getattr(ctx.organization, adapter.method)(*adapter.args)
+        keys = set(ctx._cache.get(NAMESPACE, {}))
+        assert len(keys) == len(_CACHING) == 10
+        assert keys == {
+            _CACHING[a.method].key_of(*a.args) for a in _CACHING_ADAPTERS
+        }
+
+        for adapter in _CACHING_ADAPTERS:
+            if not adapter.args:
+                continue
+            other = tuple(f"{arg}-other" for arg in adapter.args)
+            getattr(ctx.organization, adapter.method)(*other)
+            assert ctx._has(NAMESPACE, _CACHING[adapter.method].key_of(*other))
+            assert _CACHING[adapter.method].key_of(*other) != _CACHING[
+                adapter.method
+            ].key_of(*adapter.args)
+    finally:
+        for p in patches:
+            p.stop()
+
+
+def test_management_account_id_writes_no_key_of_its_own() -> None:
+    """Property 39: the derived accessor's only slot is ``describe()``'s."""
+    ctx, _ = _scan()
+    org = {"Organization": {"Id": "o-abc", "MasterAccountId": "111122223333"}}
+    with patch.object(OrganizationsClient, "describe_organization", return_value=org):
+        assert ctx.organization.management_account_id() == "111122223333"
+    assert set(ctx._cache.get(NAMESPACE, {})) == {"organization"}
+
+
+def test_management_account_id_is_derived_from_describe() -> None:
+    """Property 40: success, failure by identity, and no call once cached."""
+    ctx, _ = _scan()
+    org = {"Organization": {"Id": "o-abc", "MasterAccountId": "111122223333"}}
+    with patch.object(OrganizationsClient, "describe_organization", return_value=org) as call:
+        assert ctx.organization.management_account_id() == "111122223333"
+        assert ctx.organization.describe() is org
+        assert ctx.organization.management_account_id() == "111122223333"
+    assert call.call_count == 1
+
+    ctx, _ = _scan()
+    failure = error_result(
+        code="AccessDeniedException", message="no", operation="DescribeOrganization"
+    )
+    with patch.object(
+        OrganizationsClient, "describe_organization", return_value=failure
+    ) as call:
+        assert ctx.organization.management_account_id() is failure
+        assert ctx.organization.management_account_id() is failure
+    assert call.call_count == 2
+    assert not ctx._has(NAMESPACE, "organization")

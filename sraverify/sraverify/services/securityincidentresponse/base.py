@@ -96,15 +96,14 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         """
         Get delegated administrators for Security Incident Response.
 
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal. Reads no Region.
+
         Returns:
-            The ``ListDelegatedAdministrators`` response on success, or an error
+            ``{"DelegatedAdministrators": [...]}`` on success, or an error
             result.
         """
-        region = self._default_region()
-        client = self.get_client(region)
-        if not client:
-            return no_client_result(service=_SERVICE_NAME, region=region)
-        return client.list_delegated_administrators()
+        return self.organization.delegated_administrators("security-ir.amazonaws.com")
 
     def list_memberships(self) -> Dict[str, Any]:
         """

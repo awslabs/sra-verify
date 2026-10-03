@@ -18,17 +18,14 @@ the other and one scan issues ``DescribeOrganization`` once.
 import json
 from typing import Any, ClassVar, Mapping, Optional
 
-from sraverify.core.aws_client import AWS_EXCEPTIONS
 from sraverify.core.aws_errors import (
     NotConfigured,
     NotConfiguredTable,
-    error_result,
     is_error,
     no_client_result,
 )
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
-from sraverify.core.organizations_client import scan_region
 from sraverify.services.securityhub.client import SecurityHubClient
 
 #: The EventBridge ``detail-type`` of a Security Hub (V2) finding event. Security
@@ -65,16 +62,14 @@ class SecurityHubCheck(SecurityCheck):
     #: ``InvalidAccessException`` is overloaded. Without the needle this table
     #: would turn every Security Hub permission denial into a fabricated FAIL.
     #:
-    #: Of the Organizations operations this service also calls,
-    #: ``ListDelegatedAdministrators``, ``ListAccounts``, ``ListRoots``,
-    #: ``ListPoliciesForTarget`` and ``DescribePolicy`` are deliberately absent.
-    #: Their errors are Organizations errors: an
-    #: ``AWSOrganizationsNotInUseException`` there means no organization exists,
-    #: which is a different fact from Security Hub not being subscribed, and a
-    #: table keyed only by code could not have told them apart. The one
-    #: Organizations entry, ``DescribeEffectivePolicy``, is keyed by its own
-    #: operation and states "no Security Hub policy reaches this account", which
-    #: is exactly what SRA-SECURITYHUB-17 asks.
+    #: No Organizations operation is declared here. The ones this service
+    #: reaches through ``self.organization`` -- ``ListDelegatedAdministrators``,
+    #: ``ListAccounts``, ``ListRoots``, ``ListPoliciesForTarget``,
+    #: ``DescribePolicy`` and ``DescribeEffectivePolicy`` -- are classified by
+    #: ``OrganizationsProvider.NOT_CONFIGURED_ERRORS``, which is where
+    #: ``DescribeEffectivePolicy`` / ``EffectivePolicyNotFoundException`` ("no
+    #: Security Hub policy reaches this account", what SRA-SECURITYHUB-17 asks)
+    #: now lives.
     #:
     #: The V2 operations are needle-guarded like the rest: ``ConflictException``
     #: means "V2 is not enabled" from ``ListAggregatorsV2`` but "wrong Region" from
@@ -173,20 +168,6 @@ class SecurityHubCheck(SecurityCheck):
                 message="security hub v2 is not enabled",
             ),
         },
-        "DescribeEffectivePolicy": {
-            "EffectivePolicyNotFoundException": NotConfigured(
-                evidence=(
-                    "https://docs.aws.amazon.com/organizations/latest/APIReference/"
-                    "API_DescribeEffectivePolicy.html -- returned when no policy of "
-                    "the requested type is in effect for the target, so no Security "
-                    "Hub policy reaches the account. Observed 2026-09-16 in "
-                    "organization o-svvpsun36e for BEDROCK_POLICY and declared on "
-                    "OrganizationsCheck for the same operation. InvalidInputException "
-                    "(a root or OU target) is deliberately not declared: that is a "
-                    "defect in the caller."
-                ),
-            ),
-        },
         "ListConfigurationPolicies": {
             "AccessDeniedException": NotConfigured(
                 evidence=(
@@ -207,16 +188,12 @@ class SecurityHubCheck(SecurityCheck):
         },
     }
 
-    # The shared cross-service cache slot for organizations:DescribeOrganization.
-    _ORGANIZATIONS_NAMESPACE = "organizations"
-    _ORGANIZATION_CACHE_KEY = "organization"
-
     def _setup_clients(self):
         """Set up SecurityHub clients for each region.
 
         Constructs one ``SecurityHubClient`` wrapper per region in
         ``self.regions``. Each wrapper obtains its underlying boto3
-        ``securityhub`` and ``organizations`` clients from
+        ``securityhub`` and ``events`` clients from
         ``self._ctx.get_client(...)``, so the per-scan ``Client_Config`` and
         per-scan boto3 client cache are applied.
         """
@@ -598,61 +575,69 @@ class SecurityHubCheck(SecurityCheck):
 
     def get_roots(self, region: str) -> Mapping[str, Any]:
         """
-        Get the organization roots and their policy types, with caching.
+        Get the organization roots and their policy types.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan.
 
         Args:
-            region: AWS region name, used only to pick a client.
+            region: AWS region name. Accepted and ignored: the answer is
+                organization-wide.
 
         Returns:
             ``{"Roots": [...]}`` on success, or an error result.
         """
-        return self._cached_call(region, "roots", "list_roots")
+        return self.organization.roots()
 
     def get_policies_for_target(
         self, region: str, target_id: str, policy_type: str
     ) -> Mapping[str, Any]:
         """
-        Get the policies of one type attached to a target, with caching.
+        Get the policies of one type attached to a target.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per target and type.
 
         Args:
-            region: AWS region name, used only to pick a client.
+            region: AWS region name. Accepted and ignored: the answer is
+                organization-wide.
             target_id: A root, OU or account ID.
             policy_type: e.g. ``"SECURITYHUB_POLICY"``.
 
         Returns:
             ``{"Policies": [...]}`` on success, or an error result.
         """
-        return self._cached_call(
-            region,
-            f"policies_for_target:{target_id}:{policy_type}",
-            "list_policies_for_target",
-            target_id,
-            policy_type,
-        )
+        return self.organization.policies_for_target(target_id, policy_type)
 
     def get_policy(self, region: str, policy_id: str) -> Mapping[str, Any]:
         """
-        Get one Organizations policy with its stored content, with caching.
+        Get one Organizations policy with its stored content.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per policy.
 
         Args:
-            region: AWS region name, used only to pick a client.
+            region: AWS region name. Accepted and ignored: the answer is
+                organization-wide.
             policy_id: The policy ID.
 
         Returns:
             The ``DescribePolicy`` response, or an error result.
         """
-        return self._cached_call(
-            region, f"policy:{policy_id}", "describe_policy", policy_id
-        )
+        return self.organization.describe_policy(policy_id)
 
     def get_effective_policy(
         self, region: str, policy_type: str, target_id: str
     ) -> Mapping[str, Any]:
         """
-        Get an account's effective policy of one type, with caching.
+        Get an account's effective policy of one type.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per type and target.
 
         Args:
-            region: AWS region name, used only to pick a client.
+            region: AWS region name. Accepted and ignored: the answer is
+                organization-wide.
             policy_type: e.g. ``"SECURITYHUB_POLICY"``.
             target_id: An account ID.
 
@@ -661,13 +646,7 @@ class SecurityHubCheck(SecurityCheck):
             policy reaches this account" arrives as
             ``EffectivePolicyNotFoundException``, declared as not configured.
         """
-        return self._cached_call(
-            region,
-            f"effective_policy:{policy_type}:{target_id}",
-            "describe_effective_policy",
-            policy_type,
-            target_id,
-        )
+        return self.organization.effective_policy(policy_type, target_id)
 
     @staticmethod
     def securityhub_policy_regions(
@@ -864,17 +843,19 @@ class SecurityHubCheck(SecurityCheck):
 
     def get_delegated_administrators(self, region: str) -> Mapping[str, Any]:
         """
-        Get the Organizations delegated administrators for Security Hub, with caching.
+        Get the Organizations delegated administrators for Security Hub.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal.
 
         Args:
-            region: AWS region name
+            region: AWS region name. Accepted and ignored: the answer is
+                organization-wide.
 
         Returns:
             ``{"DelegatedAdministrators": [...]}`` on success, or an error result.
         """
-        return self._cached_call(
-            region, f"delegated_admin:{region}", "list_delegated_administrators"
-        )
+        return self.organization.delegated_administrators("securityhub.amazonaws.com")
 
     def get_organization_admin_accounts(self, region: str) -> Mapping[str, Any]:
         """
@@ -909,74 +890,11 @@ class SecurityHubCheck(SecurityCheck):
     def get_organization(self) -> Mapping[str, Any]:
         """Return the AWS Organizations ``DescribeOrganization`` response.
 
-        Reads from and writes to the ``"organizations"`` namespace under the key
-        ``"organization"`` -- the same shape
-        :meth:`sraverify.services.organizations.base.OrganizationsCheck.get_organization`
-        uses -- so a later ``OrganizationsCheck`` call in the same scan picks up
-        the value without re-issuing ``organizations:DescribeOrganization``, and
-        vice-versa.
-
-        This is the one accessor here that issues its own boto3 call rather than
-        going through :class:`SecurityHubClient`, because the response belongs to
-        another service and ``SecurityHubClient`` has no method for it. A failure
-        is emphatically **not** cached: the namespace is shared, so a cached error
-        would be replayed to every later Organizations check as well as every
-        later Security Hub one.
-
-        The client's Region is derived from the scan through
-        :func:`~sraverify.core.organizations_client.scan_region`, exactly as
-        ``OrganizationsClient`` derives it, so it reaches the scan's partition
-        and shares that client's boto3 instance. The accessor itself is retired
-        in Phase 2 (Requirement 13.2).
+        Delegates to ``self.organization.describe()``, the scan's one cached
+        ``DescribeOrganization`` answer, shared with ``OrganizationsCheck`` and
+        ``IAMCheck``. A failure is returned unchanged and never cached.
 
         Returns:
             The ``DescribeOrganization`` response, or an error result.
         """
-        if self._ctx._has(
-            self._ORGANIZATIONS_NAMESPACE, self._ORGANIZATION_CACHE_KEY
-        ):
-            logger.debug(
-                "SecurityHub: Using cached organization details from "
-                "'organizations' namespace"
-            )
-            return self._ctx._get(
-                self._ORGANIZATIONS_NAMESPACE, self._ORGANIZATION_CACHE_KEY
-            )
-
-        logger.debug(
-            "SecurityHub: Fetching organization details and writing to "
-            "shared 'organizations' namespace"
-        )
-        org_region = scan_region(self._ctx)
-        org_client = self._ctx.get_client('organizations', region=org_region)
-        try:
-            response = org_client.describe_organization()
-        except AWS_EXCEPTIONS as e:
-            code = getattr(e, "response", {}).get("Error", {}).get(
-                "Code"
-            ) or type(e).__name__
-            message = getattr(e, "response", {}).get("Error", {}).get(
-                "Message"
-            ) or str(e)
-            # ``debug``, matching AWSClient.aws_error: a failed AWS call is an
-            # observation, not a verdict, and this tier cannot tell a semantic
-            # refusal from a broken scan. See that method for the full reasoning.
-            logger.debug(
-                f"aws_call_failed operation=DescribeOrganization "
-                f"region={org_region} "
-                f"code={code} message={message!r}"
-            )
-            # Not cached: the shared namespace makes a cached failure reachable
-            # from two services.
-            return error_result(
-                code=code, message=message, operation="DescribeOrganization"
-            )
-
-        self._ctx._set(
-            self._ORGANIZATIONS_NAMESPACE, self._ORGANIZATION_CACHE_KEY, response
-        )
-        logger.debug(
-            "SecurityHub: Cached organization details under shared "
-            "'organizations' namespace"
-        )
-        return response
+        return self.organization.describe()

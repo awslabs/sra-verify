@@ -68,10 +68,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.scan_context import ScanContext
 from sraverify.services.accessanalyzer.base import AccessAnalyzerCheck
 from sraverify.services.account.base import AccountCheck
@@ -378,10 +379,13 @@ def _invoke_securitylake(check: SecurityLakeCheck) -> None:
 
 
 def _invoke_organizations(check: OrganizationsCheck) -> None:
-    # Organizations is a global service: the migrated base class will hold a
-    # single client (likely on ``check._org_client`` or via
-    # ``ctx.get_client('organizations')``). We populate both surfaces so the
-    # typed method finds its client whichever shape it ends up using.
+    # OrganizationsCheck binds no client and issues no ``ctx._set`` of its own:
+    # every accessor delegates to the scan's Organizations provider, which owns
+    # the ``organizations`` namespace. So the mock context gets a real provider
+    # (it holds the context by weak reference, which a MagicMock supports), the
+    # provider's client wrapper is patched to answer, and the ``ctx._set``
+    # assertion (c) observes the provider's write of ``organization``.
+    check._ctx.organization = OrganizationsProvider(check._ctx)
     org_client = MagicMock(name="OrganizationsClient")
     org_client.describe_organization.return_value = {
         "Organization": {
@@ -389,10 +393,10 @@ def _invoke_organizations(check: OrganizationsCheck) -> None:
             "MasterAccountId": "111111111111",
         }
     }
-    check._org_client = org_client
-    # If the migrated implementation uses ctx.get_client instead, the mock
-    # ctx already returns a MagicMock that will accept any method call.
-    check.get_organization()
+    with patch(
+        "sraverify.core.organization.OrganizationsClient", return_value=org_client
+    ):
+        check.get_organization()
 
 
 def _invoke_iam(check: IAMCheck) -> None:

@@ -6,10 +6,10 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-Six methods across three boto3 services -- ``security-ir`` for the membership
-APIs, ``organizations`` for the delegated-administrator and account lookups, and
-``iam`` for the triage service linked role. All three clients are acquired in
-``__init__``.
+Four methods across two boto3 services -- ``security-ir`` for the membership
+APIs and ``iam`` for the triage service linked role. Both clients are acquired in
+``__init__``. The delegated-administrator and account lookups go through the
+scan's Organizations provider, not this client.
 
 A membership lives in a single home Region, and ``ListMemberships`` answers with an
 empty ``items`` list in every other Region rather than an error. The base class
@@ -36,26 +36,8 @@ class SecurityIncidentResponseClient(AWSClient):
                 clients used by this wrapper
         """
         super().__init__(region, ctx)
-        self.org_client = ctx.get_client('organizations', region=region)
         self.sir_client = ctx.get_client('security-ir', region=region)
         self.iam_client = ctx.get_client('iam', region=region)
-
-    def list_delegated_administrators(
-        self, service_principal: str = "security-ir.amazonaws.com"
-    ) -> Mapping[str, Any]:
-        """
-        List delegated administrators for the Security Incident Response principal.
-
-        Returns:
-            The ``ListDelegatedAdministrators`` response on success, i.e.
-            ``{"DelegatedAdministrators": [...]}``, or the error result.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal=service_principal
-            )
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
 
     def list_memberships(self) -> Mapping[str, Any]:
         """

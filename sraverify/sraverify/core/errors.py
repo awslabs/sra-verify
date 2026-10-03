@@ -1,15 +1,17 @@
 """Typed errors for catalog and selection failures.
 
 The first three errors below are import-time failures -- a catalog defect that
-no invocation can work around. The last three are usage failures, and are the
-ones ``sraverify.cli.main()`` catches to exit non-zero. Keeping them in one
-module lets ``scanner.py`` and ``cli.py`` import every ``except`` clause from a
-single place.
+no invocation can work around. The next three are usage failures, and are the
+ones ``sraverify.cli.main()`` catches to exit non-zero. The last,
+``ScanPreconditionError``, is neither: it reports a failed identity or Region
+lookup from inside one check and never escapes ``run_checks``. Keeping them in
+one module lets ``scanner.py`` and ``cli.py`` import every ``except`` clause from
+a single place.
 """
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Final, Literal, Mapping
 
 _UNSET: Final = object()  # private sentinel: "no bad value was supplied"
 
@@ -117,3 +119,25 @@ class PartitionUndeterminedError(SRAVerifyError):
                 "first --regions value."
             )
         super().__init__(msg)
+
+
+class ScanPreconditionError(SRAVerifyError):
+    """A check read the account identity or Region list, and the lookup failed.
+
+    Raised by SecurityCheck's context properties; caught by run_checks' per-check
+    guard, never by a check. Not a usage error: the CLI never sees it.
+
+    Attributes:
+        check_id: The check that read the failed fact.
+        lookup: ``"identity"`` or ``"regions"``.
+        error: The error result's ``Error`` sub-dict.
+    """
+
+    def __init__(self, *, check_id: str, lookup: str, error: Mapping[str, str]) -> None:
+        self.check_id = check_id
+        self.lookup = lookup          # "identity" or "regions"
+        self.error = error            # the error result's "Error" sub-dict
+        super().__init__(
+            f"{check_id}: {lookup} lookup failed: "
+            f"{error['Operation']} failed: {error['Code']}: {error['Message']}"
+        )

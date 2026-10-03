@@ -27,7 +27,6 @@ class AccessAnalyzerClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('accessanalyzer', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
 
     def list_analyzers(self) -> Mapping[str, Any]:
         """
@@ -57,20 +56,5 @@ class AccessAnalyzerClient(AWSClient):
         """
         try:
             return self.client.get_analyzer(analyzerArn=analyzer_arn)
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def get_delegated_admin(self) -> Mapping[str, Any]:
-        """
-        Get the Organizations delegated administrator for Access Analyzer.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` on success, or the error
-            result. The caller reads element ``[0]`` after the error test.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal="access-analyzer.amazonaws.com"
-            )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)

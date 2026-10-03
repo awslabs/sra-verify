@@ -30,6 +30,7 @@ Validates: Requirements 4.2, 4.3, 4.4, 4.5, 4.6, 4.6a, 7.7.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import inspect
 import pkgutil
@@ -55,6 +56,10 @@ from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.registry import all_checks
 from sraverify.tests.property.strategies import cell_text
 from sraverify.tests.property.test_accessor_cache_property import _concrete
+from sraverify.tests.property.test_client_contract_property import (
+    ADAPTERS as CLIENT_ADAPTERS,
+)
+from sraverify.tests.property.test_organization_provider_property import PROVIDER_ADAPTERS
 
 _SERVICES_ROOT: Path = Path(sraverify.services.__file__).resolve().parent
 
@@ -167,8 +172,10 @@ def test_the_declared_entry_count_matches_the_migration_state() -> None:
     table empty it has nothing to test and passes vacuously.
 
     A floor rather than an exact count, because a service legitimately having no
-    semantic codes is normal: ``auditmanager``, ``config``, ``cloudtrail``, ``ec2``
-    and ``iam`` declare none, each for a reason recorded on its own base class.
+    semantic codes is normal: ``accessanalyzer`` and ``ec2`` declare an empty
+    table, each for a reason recorded on its own base class. ``auditmanager``,
+    ``cloudtrail``, ``config`` and ``iam`` each declare at least one
+    non-Organizations entry, held by the golden below.
     """
     with_entries = {service for service, _, _, _ in _ENTRIES}
 
@@ -543,17 +550,126 @@ def test_the_default_table_on_security_check_is_empty() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_provider_table_is_a_mapping_and_empty_in_phase_one() -> None:
-    """Property 17: the provider's table is enumerated with the service tables.
+#: Every service-table entry for an operation outside
+#: ``OrganizationsProvider.OWNED_OPERATIONS``:
+#: ``(base class, operation, code, message needle or None, sha256(evidence))``.
+#: Captured at f517024. A deliberate change to a non-owned NOT_CONFIGURED_ERRORS entry updates this tuple in the same commit.
+#: Each row's digest trips detect-secrets' hex-entropy rule, so each carries the
+#: per-line allowlist pragma: a sha256 of the evidence text, which is public
+#: API-reference wording, is not a secret.
+_NON_OWNED_NOT_CONFIGURED_ENTRIES: tuple[tuple[str, str, str, str | None, str], ...] = (
+    ('AccountCheck', 'GetAlternateContact', 'ResourceNotFoundException', None, 'cee1a2d0dd7497c603bc606f9955cc3fb248102e17bffb0445056a26c05e66df'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('AuditManagerCheck', 'GetOrganizationAdminAccount', 'AccessDeniedException', 'Please complete AWS Audit Manager setup', 'c94a8c90079f230535f436901a3e87e2cc8ae631c3d848bea2c14afe90c8d3f6'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('CloudTrailCheck', 'GetEventSelectors', 'TrailNotFoundException', None, '501d46b719d2d6608713e7f242dc98fa7afa0335dfa900e278d03b8d1dddb581'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('CloudTrailCheck', 'GetTrailStatus', 'TrailNotFoundException', None, '64dac76a668ed3de3620f594c77cfd0f0326380821824b00f77befd38cc6803c'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ConfigCheck', 'GetBucketPolicy', 'NoSuchBucketPolicy', None, 'c443af8abd141a33d8d8a3e870ad157320ee2590984f351a46ad0b3c75dc248a'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('FirewallManagerCheck', 'GetAdminAccount', 'ResourceNotFoundException', None, '3f33df4b1bd99f160b5a9fa54a10b04df68efc3c20f01b76b9074f8d1c0e7ec3'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('GuardDutyCheck', 'DescribeOrganizationConfiguration', 'BadRequestException', None, '3724b5d86c89141f13ba15661194428cd1193c9ea726fb7656fccf1e572e3896'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('IAMCheck', 'GetAccountPasswordPolicy', 'NoSuchEntity', None, '749cae5663cb5263a5c65cebfb626b838a11d7624f78966557569ab5f2ff6e93'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('IAMCheck', 'ListOrganizationsFeatures', 'ServiceAccessNotEnabledException', None, '2600df326324cf7b80db53b8d6d268b44247ce05831cb7f0ca888f5f35bc45f3'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('InspectorCheck', 'GetDelegatedAdminAccount', 'ResourceNotFoundException', None, '5e7148b3a4219d008f38b0eec4e18dc7e667d5b2079828ba59170b3bdee53fa7'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'DescribeOrganizationConfiguration', 'AccessDeniedException', 'macie is not enabled', '48a988e3ade2535a16322e6670ffe0573dd131ff3aa5863dcc0e54691da9c203'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'DescribeOrganizationConfiguration', 'ResourceNotFoundException', None, 'dade7281e7c2e71e162fb82116afae7cbd3666bf9668598680510635aa46b022'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'GetAdministratorAccount', 'AccessDeniedException', 'macie is not enabled', '48a988e3ade2535a16322e6670ffe0573dd131ff3aa5863dcc0e54691da9c203'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'GetAdministratorAccount', 'ResourceNotFoundException', None, 'dade7281e7c2e71e162fb82116afae7cbd3666bf9668598680510635aa46b022'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'GetClassificationExportConfiguration', 'AccessDeniedException', 'macie is not enabled', '48a988e3ade2535a16322e6670ffe0573dd131ff3aa5863dcc0e54691da9c203'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'GetClassificationExportConfiguration', 'ResourceNotFoundException', None, 'dade7281e7c2e71e162fb82116afae7cbd3666bf9668598680510635aa46b022'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'GetFindingsPublicationConfiguration', 'AccessDeniedException', 'macie is not enabled', '48a988e3ade2535a16322e6670ffe0573dd131ff3aa5863dcc0e54691da9c203'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'GetFindingsPublicationConfiguration', 'ResourceNotFoundException', None, 'dade7281e7c2e71e162fb82116afae7cbd3666bf9668598680510635aa46b022'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'ListMembers', 'AccessDeniedException', 'macie is not enabled', '48a988e3ade2535a16322e6670ffe0573dd131ff3aa5863dcc0e54691da9c203'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('MacieCheck', 'ListMembers', 'ResourceNotFoundException', None, 'dade7281e7c2e71e162fb82116afae7cbd3666bf9668598680510635aa46b022'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('OrganizationsCheck', 'ListPolicies', 'PolicyTypeNotEnabledException', None, '33e69805a9edcd78963a4b16930071048c1fb6d2e1700e87f9cc45a73266b749'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('S3Check', 'GetPublicAccessBlock', 'NoSuchPublicAccessBlockConfiguration', None, 'f9d0924aa614e269f263bb043bf6dfd1947b7d2af6bc9ba1d40ef7d5ec20d05e'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'DescribeOrganizationConfiguration', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'DescribeSecurityHubV2', 'ResourceNotFoundException', 'not subscribed to hubv2', '24a4b3c0b0b19bd7f5c51a012ee69c7b39eb0f8ed578ef8ad8e4f9c844ed3c94'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'GetAdministratorAccount', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'GetEnabledStandards', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListAggregatorsV2', 'ConflictException', 'security hub v2 is not enabled', '82a75d90bf56c4c1b8bbb79d75985eb2babf6fc1b4f61c92f40dc0b47a9ac45e'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListConfigurationPolicies', 'AccessDeniedException', 'with central configuration enabled', '3ccf7d833f5c2d8d5db02e4500ad64e60f3295052a9b453347e6c52b3ecd567f'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListEnabledProductsForImport', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListMembers', 'BadRequestException', 'no such resource found', '7b9e912ade6d39edd69dd443c98c299938e7536c69f6dec126fe5cefc81f076d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListMembers', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListOrganizationAdminAccounts', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityIncidentResponseCheck', 'GetRole', 'NoSuchEntity', None, '7c5ac83a7dc3e9ac92c4466f38d34e30b8105bcf37792c85c1358fa08242cfc6'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityLakeCheck', 'GetDataLakeOrganizationConfiguration', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityLakeCheck', 'GetDataLakeSources', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityLakeCheck', 'ListDataLakes', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityLakeCheck', 'ListLogSources', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityLakeCheck', 'ListSubscribers', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ShieldCheck', 'DescribeDRTAccess', 'ResourceNotFoundException', None, 'ef3c54752d071f290a3d3e68f8b01c2e69ebec2a191c22e61706862deeebb6d5'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ShieldCheck', 'DescribeSubscription', 'ResourceNotFoundException', None, 'ef21755e28d48a807a5b824d3e1df72efe98361e642c665ea3cbe136fe22339d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ShieldCheck', 'GetFunction', 'ResourceNotFoundException', None, '0e3d077029789b73513f4c38c2e1d55c722de361fea0b274e18d2573fbca70b8'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ShieldCheck', 'GetSubscriptionState', 'ResourceNotFoundException', None, 'a7ecb34b3959e0920601905acd65fdc3dd0a410e77e7fd5edb1119f601baadda'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ShieldCheck', 'GetWebACLForResource', 'WAFNonexistentItemException', None, 'cf665ed2fe71e9f6e878c7fcb1b73ce68aab7ac4eb201592db231773d7e2155c'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('ShieldCheck', 'ListProtections', 'ResourceNotFoundException', None, '39c65b6c56d10982dbb452a17e5a1e57def679107077016262cfad195b7d5201'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('WAFCheck', 'GetLoggingConfiguration', 'WAFNonexistentItemException', None, '046667f6559c3ddde6bff7c372f1cd1592ad7520ad425049651b83db286daa5c'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('WAFCheck', 'GetWebACLForResource', 'WAFNonexistentItemException', None, 'dc848f79642065ffc6f2bd548e657eff49ce770c3e0d510db0e2987c1df2b54a'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+)
 
-    Empty in Phase 1 on purpose: no service declares ``ListAccounts``, so
-    ``AWSOrganizationsNotInUseException`` from it stays ERROR until an entry has
-    A/B evidence of the rows it would move.
-    """
+
+def _live_non_owned_entries() -> tuple[tuple[str, str, str, str | None, str], ...]:
+    """Rebuild the golden's tuple from the live service base classes."""
+    rows = []
+    for service in _SERVICE_NAMES:
+        base = _base_class(service)
+        for operation, by_code in vars(base).get("NOT_CONFIGURED_ERRORS", {}).items():
+            if operation in OrganizationsProvider.OWNED_OPERATIONS:
+                continue
+            for code, fact in by_code.items():
+                rows.append((
+                    base.__name__,
+                    operation,
+                    code,
+                    fact.message,
+                    hashlib.sha256(fact.evidence.encode()).hexdigest(),
+                ))
+    return tuple(sorted(rows, key=lambda r: (r[0], r[1], r[2], r[3] or "")))
+
+
+def test_the_provider_table_declares_only_operations_it_owns() -> None:
+    """Property 43: every provider-table operation is in ``OWNED_OPERATIONS``."""
     table = OrganizationsProvider.NOT_CONFIGURED_ERRORS
     assert isinstance(table, dict)
-    assert table == {}
-    assert "ListAccounts" not in table
+    assert set(table) <= OrganizationsProvider.OWNED_OPERATIONS
+    assert set(table) == {
+        "ListDelegatedAdministrators",
+        "ListAccounts",
+        "DescribeOrganization",
+        "DescribeEffectivePolicy",
+    }
+    assert "ListPolicies" not in OrganizationsProvider.OWNED_OPERATIONS
+
+
+def test_the_owned_operations_are_the_providers_and_no_other_clients() -> None:
+    """Property 43: owned operations are provider operations no other service issues."""
+    provider_operations = {a.operation for a in PROVIDER_ADAPTERS}
+    assert OrganizationsProvider.OWNED_OPERATIONS <= provider_operations
+    elsewhere = {
+        adapter.operation
+        for service, adapters in CLIENT_ADAPTERS.items()
+        if service != "organizations"
+        for adapter in adapters
+    }
+    assert not OrganizationsProvider.OWNED_OPERATIONS & elsewhere
+    # Non-vacuous: ListPolicies is why the set is not every provider operation.
+    assert "ListPolicies" in provider_operations
+    assert "ListPolicies" in elsewhere
+
+
+@pytest.mark.parametrize("service", _SERVICE_NAMES)
+def test_no_service_table_declares_an_owned_operation(service: str) -> None:
+    """Property 43: the provider table alone classifies an owned operation."""
+    declared = set(_TABLES[service]) & OrganizationsProvider.OWNED_OPERATIONS
+    assert declared == set(), (
+        f"{service} declares {sorted(declared)}, which only "
+        f"OrganizationsProvider.NOT_CONFIGURED_ERRORS may declare"
+    )
+
+
+def test_every_non_owned_service_entry_is_unchanged_from_the_merged_phase_one() -> None:
+    """Property 43: 46 entries, byte-identical to f517024 (evidence by digest)."""
+    assert len(_NON_OWNED_NOT_CONFIGURED_ENTRIES) == 46
+    assert _live_non_owned_entries() == _NON_OWNED_NOT_CONFIGURED_ENTRIES
 
 
 #: The pair every precedence case classifies.
@@ -606,6 +722,7 @@ def test_the_first_table_to_declare_the_pair_decides(
     """Property 16: service table first, provider table second, first declarer wins."""
     error = error_result(code=_PAIR_CODE, message=message, operation=_PAIR_OPERATION)["Error"]
     check = _precedence_check()
+    committed = OrganizationsProvider.NOT_CONFIGURED_ERRORS
 
     with patch.object(OrganizationsProvider, "NOT_CONFIGURED_ERRORS", provider), patch.object(
         type(check), "NOT_CONFIGURED_ERRORS", service
@@ -613,4 +730,4 @@ def test_the_first_table_to_declare_the_pair_decides(
         assert check.is_not_configured(error) is expected
         assert is_not_configured_in((service, provider), error) is expected
 
-    assert OrganizationsProvider.NOT_CONFIGURED_ERRORS == {}
+    assert OrganizationsProvider.NOT_CONFIGURED_ERRORS is committed

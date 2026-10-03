@@ -2,8 +2,8 @@
 Layering: ``core/`` never reaches into ``services/``, and Organizations data has
 one owner.
 
-Static, by AST (and, for Properties 8 and 30, source text). Nothing here imports
-a check or issues a call, and every file read is a package ``.py`` located from
+Static, by AST (and, for Property 30, source text). Nothing here imports a check
+or issues a call, and every file read is a package ``.py`` located from
 ``sraverify.__file__``, so the module runs unchanged from an installed wheel.
 
 * Property 10 -- no module under ``core/`` imports ``sraverify.services`` or names
@@ -14,11 +14,17 @@ a check or issues a call, and every file read is a package ``.py`` located from
   a complete statement about each base.
 * Property 12 -- no package code (tests included) uses a retired shared-accessor
   name, by AST. Docstrings, comments and Markdown may name the history.
-* Property 15 -- only ``OrganizationsCheck`` binds ``OrganizationsClient``; no
-  check reaches the context's cache or the provider's client directly (AST
-  attribute match on the receiver).
-* Property 8 -- only the provider issues ``ListAccounts``, and only through the
-  relocated client.
+* Property 15 -- no service base imports or constructs ``OrganizationsClient``,
+  ``OrganizationsCheck`` included; no check reaches the context's cache or the
+  provider's client directly (AST attribute match on the receiver).
+* Property 41 -- only the provider's client issues an Organizations operation:
+  the boto3 spellings of every ``OrganizationsProvider.OWNED_OPERATIONS`` entry
+  appear in ``core/organizations_client.py`` only, the wrapper methods are called
+  only by the provider or through ``self.organization``, only that client binds
+  an ``organizations`` boto3 client, and only it and the provider name
+  ``OrganizationsClient``. Replaces Phase 1's ``ListAccounts``-only Property 8.
+* Property 42 -- no service base reads the ``organizations`` namespace by key,
+  and ``OrganizationsCheck`` makes no ``_has`` / ``_get`` / ``_set`` call at all.
 * Property 30 -- each of the fifteen consumer checks reads the account list
   through ``self.organization.accounts()``, once.
 * Property 34 -- every boto3 binding in ``core/``, ``scanner.py``, ``cli.py``
@@ -33,6 +39,7 @@ import pytest
 
 import sraverify
 from sraverify.core.check import SecurityCheck
+from sraverify.core.organization import OrganizationsProvider
 from sraverify.tests.property.test_accessor_cache_property import (
     _base_class,
     _service_names,
@@ -254,12 +261,13 @@ def _imports_name(tree: ast.AST, name: str) -> bool:
 
 @pytest.mark.parametrize(
     "path",
-    # OrganizationsCheck is the one base that binds it.
-    sorted(p for p in _SERVICES_ROOT.glob("*/base.py") if p.parent.name != "organizations"),
+    # Every base, OrganizationsCheck included: all of them reach Organizations
+    # through self.organization.
+    sorted(_SERVICES_ROOT.glob("*/base.py")),
     ids=lambda p: f"{p.parent.name}/base.py",
 )
-def test_only_organizations_check_binds_the_organizations_client(path: Path) -> None:
-    """Property 15: no other service base imports or constructs the client."""
+def test_no_base_binds_the_organizations_client(path: Path) -> None:
+    """Property 15: no service base imports or constructs the client."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     assert not _imports_name(tree, "OrganizationsClient")
     constructs = [
@@ -345,10 +353,22 @@ def test_the_reach_through_rule_is_not_vacuous() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Property 8 -- ListAccounts has one issuer
+# Property 41 -- only the provider's client issues an Organizations operation
 # --------------------------------------------------------------------------- #
 
-_PAGINATOR_SPELLINGS = ("get_paginator('list_accounts')", 'get_paginator("list_accounts")')
+_CLIENT_MODULE = "core/organizations_client.py"
+_PROVIDER_MODULE = "core/organization.py"
+
+
+def _snake(operation: str) -> str:
+    """``ListAccountsForParent`` -> ``list_accounts_for_parent``."""
+    return "".join(f"_{c.lower()}" if c.isupper() else c for c in operation).lstrip("_")
+
+
+#: The boto3 (and wrapper) method names of every operation the provider owns.
+#: ``ListPolicies`` is outside ``OWNED_OPERATIONS`` because ``fms`` shares the
+#: name; rule (iv) is what covers it.
+_OWNED_METHODS = frozenset(_snake(op) for op in OrganizationsProvider.OWNED_OPERATIONS)
 
 
 def _core_and_services_modules() -> list[Path]:
@@ -356,29 +376,266 @@ def _core_and_services_modules() -> list[Path]:
     return [*_python_files(_CORE_ROOT), *_python_files(_SERVICES_ROOT)]
 
 
-def test_only_the_relocated_client_paginates_list_accounts() -> None:
-    """Property 8: the paginator is opened in ``core/organizations_client.py`` only."""
-    owner = _CORE_ROOT / "organizations_client.py"
-    issuers = [
-        _rel(p)
-        for p in _core_and_services_modules()
-        if any(s in p.read_text(encoding="utf-8") for s in _PAGINATOR_SPELLINGS)
+def _production_modules() -> list[Path]:
+    """Every package ``.py`` outside ``tests/``: core, services and the top level."""
+    return [
+        p for p in _python_files(_PACKAGE_ROOT) if "tests" not in p.relative_to(_PACKAGE_ROOT).parts
     ]
-    assert issuers == [_rel(owner)]
 
 
-def test_only_the_provider_calls_list_accounts() -> None:
-    """Property 8: ``.list_accounts(`` is called once, by the provider, on the wrapper."""
-    owner = _CORE_ROOT / "organization.py"
-    callers = {
-        _rel(p): p.read_text(encoding="utf-8").count(".list_accounts(")
-        for p in _core_and_services_modules()
-        if ".list_accounts(" in p.read_text(encoding="utf-8")
-    }
-    assert callers == {_rel(owner): 1}
-    source = owner.read_text(encoding="utf-8")
-    assert "get_paginator(" not in source
-    assert ".client." not in source
+def _literal_service(call: ast.Call) -> str | None:
+    """The literal service id of a ``get_client`` / ``client`` call, if any."""
+    service = _service_id(call)
+    if isinstance(service, ast.Constant) and isinstance(service.value, str):
+        return service.value
+    return None
+
+
+def _organizations_reach(source: str, rel: str) -> list[str]:
+    """Return ``rule line: expression`` for each Property 41 violation in ``source``.
+
+    ``rel`` is the module's package-relative path, which decides the exemptions:
+
+    (i)   ``get_paginator('<owned op>')`` anywhere but the client module;
+    (ii)  ``<recv>.<owned op>(`` anywhere but the client and provider modules,
+          unless ``<recv>`` is an attribute named ``organization``;
+    (iv)  ``get_client('organizations', ...)`` or ``client('organizations', ...)``
+          anywhere but the client module;
+    (v)   ``OrganizationsClient`` as a name, attribute or import alias anywhere
+          but the client and provider modules.
+
+    By AST, so prose -- docstrings, comments, string constants -- is not a hit.
+    """
+    in_client = rel == _CLIENT_MODULE
+    in_owner = rel in {_CLIENT_MODULE, _PROVIDER_MODULE}
+    hits: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            attr = node.func.attr
+            if (
+                attr == "get_paginator"
+                and not in_client
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value in _OWNED_METHODS
+            ):
+                hits.append(f"(i) {node.lineno}: {ast.unparse(node)}")
+            if attr in _OWNED_METHODS and not in_owner:
+                receiver = node.func.value
+                if not (isinstance(receiver, ast.Attribute) and receiver.attr == "organization"):
+                    hits.append(f"(ii) {node.lineno}: {ast.unparse(node)}")
+            if (
+                attr in {"get_client", "client"}
+                and not in_client
+                and _literal_service(node) == "organizations"
+            ):
+                hits.append(f"(iv) {node.lineno}: {ast.unparse(node)}")
+        if in_owner:
+            continue
+        if isinstance(node, ast.Name) and node.id == "OrganizationsClient":
+            hits.append(f"(v) {node.lineno}: OrganizationsClient")
+        elif isinstance(node, ast.Attribute) and node.attr == "OrganizationsClient":
+            hits.append(f"(v) {node.lineno}: {ast.unparse(node)}")
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            hits += [
+                f"(v) {node.lineno}: import {a.name}"
+                for a in node.names
+                if a.name.split(".")[-1] == "OrganizationsClient"
+                or a.asname == "OrganizationsClient"
+            ]
+    return hits
+
+
+@pytest.mark.parametrize("path", _production_modules(), ids=_rel)
+def test_only_the_providers_client_issues_an_organizations_operation(path: Path) -> None:
+    """Property 41 (i), (ii), (iv), (v) over every production module."""
+    hits = _organizations_reach(path.read_text(encoding="utf-8"), _rel(path))
+    assert hits == [], f"{_rel(path)} reaches Organizations outside the provider: {hits}"
+
+
+def test_the_provider_calls_the_wrapper_and_sweeps_accounts_once() -> None:
+    """Property 41 (iii): no paginator, no ``.client.`` receiver, one ``.list_accounts(``."""
+    tree = ast.parse((_CORE_ROOT / "organization.py").read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    attrs = [c.func.attr for c in calls if isinstance(c.func, ast.Attribute)]
+    assert "get_paginator" not in attrs
+    assert attrs.count("list_accounts") == 1
+    client_receivers = [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute)
+        and isinstance(n.value, ast.Attribute)
+        and n.value.attr == "client"
+    ]
+    assert client_receivers == []
+
+
+def test_the_client_module_is_where_every_owned_operation_is_issued() -> None:
+    """Property 41 is not vacuous: the client opens or calls each owned operation."""
+    source = (_CORE_ROOT / "organizations_client.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    issued = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "get_paginator" and isinstance(node.args[0], ast.Constant):
+                issued.add(node.args[0].value)
+            elif isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "client":
+                issued.add(node.func.attr)
+    assert _OWNED_METHODS <= issued
+    assert len(_OWNED_METHODS) == len(OrganizationsProvider.OWNED_OPERATIONS) == 9
+
+
+def test_the_organizations_reach_rule_is_not_vacuous() -> None:
+    """Property 41 catches each shape outside the owners, and ignores prose."""
+    code = (
+        "from sraverify.core.organizations_client import OrganizationsClient\n"
+        "import sraverify.core.organizations_client as oc\n"
+        "self.org_client = ctx.get_client('organizations', region=region)\n"
+        "session.client('organizations', region_name=r)\n"
+        "self.org_client.get_paginator('list_delegated_administrators')\n"
+        "self.org_client.describe_organization()\n"
+        "client = oc.OrganizationsClient(ctx)\n"
+        "OrganizationsClient(ctx).list_accounts()\n"
+    )
+    hits = _organizations_reach(code, "services/example/client.py")
+    rules = sorted(h.split(" ", 1)[0] for h in hits)
+    assert rules.count("(i)") == 1, hits
+    assert rules.count("(ii)") == 2, hits  # .describe_organization(, .list_accounts(
+    assert rules.count("(iv)") == 2, hits
+    assert rules.count("(v)") == 3, hits  # the import, oc.OrganizationsClient, the Name
+
+    allowed = (
+        '"""Never call get_client(\'organizations\') or OrganizationsClient here."""\n'
+        "# self.org_client.describe_organization() was the Phase 1 shape\n"
+        "x = 'get_paginator(\"list_roots\")'\n"
+        "self.organization.describe_policy('p-1')\n"
+        "self.organization.delegated_administrators('iam.amazonaws.com')\n"
+        "fms.get_paginator('list_policies')\n"
+        "self.get_client(region)\n"
+    )
+    assert _organizations_reach(allowed, "services/example/base.py") == []
+    # The owners are exempt from exactly their own rules: the client from all
+    # four, the provider from (ii) and (v) only.
+    assert _organizations_reach(code, _CLIENT_MODULE) == []
+    provider_hits = _organizations_reach(code, _PROVIDER_MODULE)
+    assert {h.split(" ", 1)[0] for h in provider_hits} == {"(i)", "(iv)"}
+
+
+# --------------------------------------------------------------------------- #
+# Property 42 -- no service base reads the organizations namespace by key
+# --------------------------------------------------------------------------- #
+
+_ORGANIZATIONS_NAMESPACE = "organizations"
+
+
+def _names_bound_to_namespace(body: list[ast.stmt]) -> set[str]:
+    """Names assigned the literal ``"organizations"`` directly in ``body``."""
+    names: set[str] = set()
+    for stmt in body:
+        targets: list[ast.expr] = []
+        value: ast.expr | None = None
+        if isinstance(stmt, ast.Assign):
+            targets, value = stmt.targets, stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            targets, value = [stmt.target], stmt.value
+        if isinstance(value, ast.Constant) and value.value == _ORGANIZATIONS_NAMESPACE:
+            names |= {t.id for t in targets if isinstance(t, ast.Name)}
+    return names
+
+
+def _namespace_reads(source: str) -> list[str]:
+    """Return ``line: call`` for each Property 42 violation in a base module.
+
+    A ``_has`` / ``_get`` / ``_set`` call is a hit when its namespace argument is
+    the literal ``"organizations"``, a module- or class-level name bound to that
+    literal (reached bare or as ``<recv>.<name>``), or -- inside a class whose
+    ``NAMESPACE`` is ``"organizations"`` -- anything at all, because that class
+    may make no such call.
+    """
+    tree = ast.parse(source)
+    module_names = _names_bound_to_namespace(tree.body)
+    hits: list[str] = []
+
+    def is_namespace(arg: ast.expr, class_names: set[str]) -> bool:
+        if isinstance(arg, ast.Constant) and arg.value == _ORGANIZATIONS_NAMESPACE:
+            return True
+        if isinstance(arg, ast.Name) and arg.id in module_names | class_names:
+            return True
+        return isinstance(arg, ast.Attribute) and arg.attr in module_names | class_names
+
+    def primitive_calls(node: ast.AST) -> list[ast.Call]:
+        return [
+            n
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr in _CACHE_PRIMITIVES
+        ]
+
+    classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+    in_class: set[int] = set()
+    for cls in classes:
+        class_names = _names_bound_to_namespace(cls.body)
+        owns_namespace = "NAMESPACE" in class_names
+        for call in primitive_calls(cls):
+            in_class.add(id(call))
+            if owns_namespace or (call.args and is_namespace(call.args[0], class_names)):
+                hits.append(f"{call.lineno}: {ast.unparse(call)}")
+    for call in primitive_calls(tree):
+        if id(call) not in in_class and call.args and is_namespace(call.args[0], set()):
+            hits.append(f"{call.lineno}: {ast.unparse(call)}")
+    return sorted(set(hits))
+
+
+@pytest.mark.parametrize(
+    "path", sorted(_SERVICES_ROOT.glob("*/base.py")), ids=lambda p: f"{p.parent.name}/base.py"
+)
+def test_no_base_reads_the_organizations_namespace_by_key(path: Path) -> None:
+    """Property 42: the namespace is the provider's alone."""
+    hits = _namespace_reads(path.read_text(encoding="utf-8"))
+    assert hits == [], f"{path.parent.name}/base.py reads 'organizations' by key: {hits}"
+
+
+def test_organizations_check_still_declares_the_namespace() -> None:
+    """Property 42 is aimed at the real class: it declares the namespace it may not read."""
+    source = (_SERVICES_ROOT / "organizations" / "base.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    owning = [
+        c.name
+        for c in ast.walk(tree)
+        if isinstance(c, ast.ClassDef) and "NAMESPACE" in _names_bound_to_namespace(c.body)
+    ]
+    assert owning == ["OrganizationsCheck"]
+
+
+def test_the_namespace_rule_is_not_vacuous() -> None:
+    """Property 42 catches each spelling, and ignores prose and other namespaces."""
+    caught = _namespace_reads(
+        "_NS = 'organizations'\n"
+        "class SecurityHubCheck:\n"
+        "    NAMESPACE = 'securityhub'\n"
+        "    _ORG_NS = 'organizations'\n"
+        "    def a(self):\n"
+        "        self._ctx._get('organizations', 'organization')\n"
+        "        self._ctx._has(_NS, 'organization')\n"
+        "        self._ctx._set(self._ORG_NS, 'organization', 1)\n"
+        "class OrganizationsCheck:\n"
+        "    NAMESPACE = 'organizations'\n"
+        "    def b(self):\n"
+        "        self._ctx._get(self.NAMESPACE, 'roots')\n"
+        "        self._ctx._set('anything', 'k', 1)\n"
+    )
+    assert len(caught) == 5, caught
+    assert _namespace_reads(
+        '"""Never self._ctx._get("organizations", ...) from a base."""\n'
+        "class GuardDutyCheck:\n"
+        "    NAMESPACE = 'guardduty'\n"
+        "    def a(self):\n"
+        "        # self._ctx._get('organizations', 'x') was the old shape\n"
+        "        self._ctx._get(self.NAMESPACE, 'detector')\n"
+        "        self._ctx._set('guardduty', 'k', 1)\n"
+        "        return self.organization.describe()\n"
+    ) == []
 
 
 # --------------------------------------------------------------------------- #

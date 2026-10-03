@@ -308,7 +308,7 @@ This is a fixed defect, not a hypothetical. 22 modules did exactly this and sile
 
 ## Organizations data
 
-Organization data is per-scan, cross-service state, so it lives on the `ScanContext` and a check reads it through the eighth context property, `self.organization` — the scan's `OrganizationsProvider` (`core/organization.py`). Today it has one accessor:
+Organization data is per-scan, cross-service state, so it lives on the `ScanContext` and a check reads it through the eighth context property, `self.organization` — the scan's `OrganizationsProvider` (`core/organization.py`). It has eleven accessors: `accounts()`, `describe()`, `management_account_id()` (derived from `describe()`, returns `str | ErrorResult`), `delegated_administrators(service_principal)`, `roots()`, `ous_for_parent(parent_id)`, `policies(policy_type)`, `policies_for_target(target_id, policy_type)`, `describe_policy(policy_id)`, `effective_policy(policy_type, target_id)` and `accounts_for_parent(parent_id)`. None takes a Region; each caches its success per argument under the `organizations` namespace and returns a failure unchanged and uncached. `accounts()` is the common case:
 
 ```python
 for region in self.regions:
@@ -329,10 +329,10 @@ for region in self.regions:
     ...
 ```
 
-- `accounts()` takes no Region: the answer is organization-wide, every page is merged, and one `ListAccounts` sweep serves the whole scan when checks run sequentially, as `run_checks` does (the cache is not single-flight; per-key in-flight coordination is a Phase 2 item). A failure is returned unchanged and never cached, so the next caller re-issues it.
+- `accounts()` takes no Region: the answer is organization-wide, every page is merged, and one `ListAccounts` sweep serves the whole scan when checks run sequentially, as `run_checks` does. The cache is not single-flight: the guarantee is one fetch per accessor per key per scan under sequential execution, and per-key in-flight coordination is deferred until concurrent scanning exists. A failure is returned unchanged and never cached, so the next caller re-issues it.
 - Filter with `is_active_account` (`core/accounts.py`) in the check. The provider returns every account.
-- **Never add an `org_client` to a service client, or an Organizations accessor to a service base.** No base inherits anything between itself and `SecurityCheck`, and only `OrganizationsCheck` binds `OrganizationsClient`; `test_layering_property.py` fails otherwise.
-- The error branch is the standard two-arm shape above. `self.is_not_configured(error)` consults the service's `NOT_CONFIGURED_ERRORS` first and then `OrganizationsProvider.NOT_CONFIGURED_ERRORS`; the first table to *declare* the `(Operation, Code)` pair decides. The provider's table is empty in Phase 1, so a `ListAccounts` failure is an ERROR unless the service's own table declares the pair.
+- **Anti-pattern: an `org_client`.** Phase 2 retired every `ctx.get_client("organizations", ...)` binding outside `core/organizations_client.py` — fifteen methods across eight service clients, `OrganizationsCheck`'s own `_org_client`, and `SecurityHubCheck.get_organization`'s raw call. Never add one back, and never construct `OrganizationsClient` in a base. A base that needs Organizations data adds a one-line delegator to the provider accessor (classified `derived` in `test_accessor_cache_property.py`); a missing accessor is added to the provider and its `PROVIDER_ADAPTERS` row. `test_layering_property.py` fails on a binding, an import, or a by-key read of the `organizations` namespace from any base.
+- The error branch is the standard two-arm shape above. `self.is_not_configured(error)` consults the service's `NOT_CONFIGURED_ERRORS` first and then `OrganizationsProvider.NOT_CONFIGURED_ERRORS`; the first table to *declare* the `(Operation, Code)` pair decides. No service table declares an operation the provider owns, so in practice the provider's table classifies every Organizations failure except `ListPolicies`: `AWSOrganizationsNotInUseException` from `ListAccounts`, `ListDelegatedAdministrators` or `DescribeOrganization` and `EffectivePolicyNotFoundException` from `DescribeEffectivePolicy` are FAILs, and every other code is an ERROR.
 
 ## Initialization and the context properties
 
@@ -350,7 +350,9 @@ Each routes through `_require_ctx`, so a read before `initialize(ctx)` raises `R
 
 `self.regions` returns the explicit `--regions` list when one was supplied, and otherwise lazily resolves enabled regions via `ctx.get_enabled_regions()` (one `ec2:DescribeRegions` per scan, cached). That lookup, and every client built without a Region, uses the **scan Region**: the first `--regions` value, else the session's Region. A scan with neither is refused before it starts (`PartitionUndeterminedError`, CLI exit 2), so a check never runs against botocore's commercial `aws-global` default. Shield, WAF for CloudFront, Firewall Manager's admin API and CloudFront stay `us-east-1`-only.
 
-`self.get_management_accountId()` takes no argument. The legacy `session` parameter is still accepted but ignored, and passing it logs a debug line.
+`self.get_management_accountId()` takes no argument. The legacy `session` parameter is still accepted but ignored, and passing it logs a debug line. It returns `str | ErrorResult`, so check for `"Error"` and use the standard two-arm branch.
+
+**The account identity and the Region list do not raise inside a check you can catch.** `ScanContext.get_account_info()` and `get_enabled_regions()` return an error result on failure and cache nothing; `self.account_id`, `self.account_name`, `self.account_info`, `self.regions` and the finding helpers then raise `ScanPreconditionError`, which `run_checks` turns into one ERROR row for the check. Never `try`/`except` around them in `execute()` — `test_scan_preconditions.py` asserts by AST that no check names the exception.
 
 Four more read-only properties delegate to `meta`: `check_id`, `service`, `severity`, `account_type`. `severity` and `account_type` return enum members.
 
@@ -491,17 +493,30 @@ class OrganizationsCheck(SecurityCheck):
     NAMESPACE = "organizations"
 
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
-        "DescribeOrganization": {
-            "AWSOrganizationsNotInUseException": NotConfigured(
+        "ListPolicies": {
+            "PolicyTypeNotEnabledException": NotConfigured(
                 evidence=(
                     "https://docs.aws.amazon.com/organizations/latest/APIReference/"
-                    "API_DescribeOrganization.html -- returned when the account is "
-                    "not a member of an organization."
+                    "API_ListPolicies.html -- returned when the requested policy "
+                    "type is not enabled for the organization, which is exactly "
+                    "what a check asking whether SCPs are enabled is testing for."
                 ),
             ),
         },
     }
 ```
+
+**An Organizations operation the provider owns is never declared on a service
+base.** The nine names in `OrganizationsProvider.OWNED_OPERATIONS` are classified
+only in `OrganizationsProvider.NOT_CONFIGURED_ERRORS`, which holds four entries:
+`AWSOrganizationsNotInUseException` for `ListDelegatedAdministrators`,
+`ListAccounts` and `DescribeOrganization`, and `EffectivePolicyNotFoundException`
+for `DescribeEffectivePolicy`. `ListPolicies` stays on `OrganizationsCheck` because
+`fms:ListPolicies` shares the name. `test_discriminator_property.py` fails if a
+service table declares an owned operation. Adding, removing or editing a
+service-table entry for an operation the provider does not own fails the
+`_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden in the same module until the golden is
+updated in the same commit, deliberately.
 
 Keyed **operation first**, then code, then optionally a case-insensitive `message`
 substring for an *overloaded* code — one AWS returns for both a semantic condition
@@ -521,10 +536,13 @@ controlled account. `test_discriminator_property.py` rejects a placeholder.
 code AWS introduces later, or a known code arriving from an operation nobody
 considered, produces an honest "could not determine" rather than a fabricated FAIL.
 An empty table is legal and means "this service has no semantic codes" —
-`auditmanager`, `config`, `cloudtrail`, `ec2` and `iam` all declare `{}`, each with
-its reason recorded on the base class. `auditmanager`'s is the instructive one: the
-"Please complete AWS Audit Manager setup" condition could not be confirmed against
-a not-yet-set-up account, so it was **omitted** rather than declared on inference.
+`accessanalyzer` and `ec2` declare `{}`. Partial tables are the more common case,
+and the omissions are as deliberate as the entries: `auditmanager` declares
+`GetOrganizationAdminAccount` (with a message needle), `cloudtrail` declares
+`GetEventSelectors` and `GetTrailStatus`, `config` declares `GetBucketPolicy`, and
+`iam` declares `ListOrganizationsFeatures` and `GetAccountPasswordPolicy`. Each
+leaves out every code it could not confirm, with its reason recorded on the base
+class rather than declared on inference.
 
 **Under-declaring is a real failure mode, and the property suite cannot see it.**
 An undeclared code resolving to ERROR is the conservative default and violates
@@ -572,7 +590,7 @@ Each of these is real and deliberately still here. The "why" matters, so nobody 
 - **`sra_firewallmanager_01` hardcodes `region = "us-east-1"` and has no region loop at all.** Firewall Manager's admin API is genuinely single-region, but the literal means `--regions` has no effect on the row's `Region` cell.
 - **`sra_securityincidentresponse_01` labels its four real rows with `self.regions[0]`** (falling back to `us-east-1`), so the same org-wide fact gets a different `Region` depending on `--regions` ordering — an **unstable row key**. Only its missing-input row is `global`. Deferred because relabelling moves the `Region` cell on genuine verdicts, which changes rows a consumer may already be diffing.
 - **`sra_macie_07` builds its `ActualValue` by joining a `set`** (`missing_accounts` is a set difference), so the cell's ordering is non-deterministic across runs and undiffable.
-- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_delegated_administrators()` and `get_role()` both pin `self.regions[0]` while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which makes the change impossible to separate from a regression when diffing two scans.
+- **`services/securityincidentresponse/base.py` declares no `NAMESPACE`**, and `get_role()` pins `self.regions[0]` (`get_delegated_administrators()` no longer does: it delegates to `self.organization`) while the sibling `discover_sir_region()` resolves the region correctly. The Region *sweep* is fixed and cached — one `ListMemberships` sweep per scan rather than one per call — but the labelling is not, and `test_securityincidentresponse_declares_no_namespace` asserts the absence so it cannot be "fixed" by accident. Relabelling moves the `Region` cell on genuine PASS and FAIL rows, which makes the change impossible to separate from a regression when diffing two scans.
 - **`ShieldClient.list_protections` reads the first page only.** Paginating would change which resources the per-resource fan-out covers, and a row-count change cannot be separated from a verdict change when diffing two scans.
 - **`IAMCheck._validate_metadata` is dead and unusable.** It validates `check_name`, `description`, and `check_logic` as instance attributes; `check_name` no longer exists on a check at all, and the other two live on `meta`. Nothing calls it.
 - **`SRA-CONFIG-08`'s ex-WARN branch is reachable but has never been observed.** It fires when the audit account is the Config delegated administrator for exactly one of `config.amazonaws.com` and `config-multiaccountsetup.amazonaws.com`. Exercising it needs an org configured that way.

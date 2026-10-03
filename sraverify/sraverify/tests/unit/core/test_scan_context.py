@@ -8,29 +8,36 @@ derivation.
   ``--regions`` value, else the session's Region; with neither, constructing
   the context raises ``PartitionUndeterminedError``. It is never resolved
   through ``get_enabled_regions``.
-* Property 7 -- ``IAM_Client`` binds its Organizations client the same way.
+* Property 7 -- ``IAM_Client`` binds no Organizations client at all.
 * Property 32 (context half) -- ``ctx.scan_region`` is computed once, is
   read-only, survives the caller mutating its list, and is the Region every
   ``core`` binding and every Region-less ``get_client`` uses.
+* Property 40 (tail) -- ``ctx.get_management_account_id()`` and
+  ``check.get_management_accountId()`` equal the provider's answer.
+* Property 46 -- the three lookups return an error result for an AWS failure,
+  log it once at ``debug``, never cache it, and let a defect or a
+  client-construction failure propagate unchanged.
 
 No AWS call is issued: the session is a stand-in and ``get_client`` is replaced
 on the instance where a call would otherwise be made.
 """
 from __future__ import annotations
 
-import ast
-from pathlib import Path
+import logging
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError, PartialCredentialsError
 
-import sraverify.services.iam.client as iam_client_module
+from sraverify.core.aws_errors import is_error
 from sraverify.core.errors import PartitionUndeterminedError
 from sraverify.core.organization import OrganizationsProvider
 from sraverify.core.organizations_client import OrganizationsClient, scan_region
 from sraverify.core.scan_context import ScanContext
 from sraverify.services.iam.client import IAM_Client
+from sraverify.services.organizations.base import OrganizationsCheck
+from sraverify.tests.property.test_accessor_cache_property import _concrete
 
 
 class _BareSession:
@@ -149,62 +156,28 @@ def test_a_session_without_a_region_attribute_raises_and_builds_no_client() -> N
 
 
 # --------------------------------------------------------------------------- #
-# Property 7 -- IAM's Organizations binding follows the same rule
+# Property 7 -- IAM binds no Organizations client at all
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize(
-    "regions,session_region",
-    [
-        pytest.param(["us-gov-west-1"], "us-east-1", id="explicit"),
-        pytest.param(None, "cn-north-1", id="session"),
-    ],
-)
-def test_the_iam_client_binds_organizations_through_scan_region(
-    regions: list[str] | None, session_region: str | None
-) -> None:
-    """``IAM_Client(ctx)`` requests ``("organizations", scan_region(ctx))``."""
+def test_the_iam_client_requests_no_organizations_client() -> None:
+    """``IAM_Client(ctx)`` binds ``iam`` only.
+
+    Its delegated administrator and organization are read through the scan's
+    Organizations provider (``IAMCheck`` delegates to ``self.organization``), so
+    the client has no Organizations binding whose Region could be wrong.
+    """
     session = MagicMock(name="session")
-    session.region_name = session_region
-    ctx = ScanContext(session=session, regions=regions)
+    session.region_name = "us-gov-west-1"
+    ctx = ScanContext(session=session, regions=None)
     get_client = _instrument(ctx)
 
     IAM_Client(ctx)
 
-    org_calls = [c for c in get_client.call_args_list if c.args[:1] == ("organizations",)]
-    assert len(org_calls) == 1
-    assert org_calls[0].kwargs == {"region": scan_region(ctx)}
+    services = [c.args[0] for c in get_client.call_args_list]
+    assert "organizations" not in services
+    assert services == ["iam"]
     ctx.get_enabled_regions.assert_not_called()
-
-
-def test_the_iam_client_cannot_be_built_without_a_scan_region() -> None:
-    """With neither Region source, the context -- and so the IAM client -- cannot exist."""
-    session = MagicMock(name="session")
-    session.region_name = None
-
-    with pytest.raises(PartitionUndeterminedError):
-        IAM_Client(ScanContext(session=session, regions=None))
-
-    session.client.assert_not_called()
-
-
-def test_the_iam_client_source_pins_no_organizations_region() -> None:
-    """No ``get_client('organizations', region='us-east-1')`` survives in the source."""
-    path = Path(iam_client_module.__file__)
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    pinned = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        if node.func.attr != "get_client" or not node.args:
-            continue
-        first = node.args[0]
-        if not (isinstance(first, ast.Constant) and first.value == "organizations"):
-            continue
-        for kw in node.keywords:
-            if kw.arg == "region" and isinstance(kw.value, ast.Constant):
-                pinned.append(node.lineno)
-    assert pinned == [], f"services/iam/client.py pins an Organizations Region at {pinned}"
 
 
 # --------------------------------------------------------------------------- #
@@ -281,6 +254,25 @@ def test_a_regionless_get_client_is_the_scan_region_client() -> None:
     assert all(kw.get("region_name") is not None for _, kw in session.client_calls)
 
 
+def test_the_management_lookup_reads_the_provider() -> None:
+    """Property 40 (tail): the context and the check agree with the provider."""
+    session = _RecordingSession("us-east-1")
+    ctx = ScanContext(session=session, regions=["us-gov-west-1"])  # type: ignore[arg-type]
+    org = OrganizationsClient(ctx)
+    org.client.describe_organization.return_value = {
+        "Organization": {"MasterAccountId": "000011112222"}
+    }
+    check = _concrete(OrganizationsCheck)()
+    check.initialize(ctx)
+
+    expected = ctx.organization.management_account_id()
+    assert expected == "000011112222"
+    assert ctx.get_management_account_id() == expected
+    assert check.get_management_accountId() == expected
+    assert check.get_management_accountId(MagicMock(name="ignored-session")) == expected
+    assert org.client.describe_organization.call_count == 1
+
+
 def test_the_management_lookup_and_the_organizations_client_share_one_client() -> None:
     """``get_management_account_id`` and ``OrganizationsClient`` hit one cache key."""
     session = _RecordingSession("us-east-1")
@@ -296,3 +288,203 @@ def test_the_management_lookup_and_the_organizations_client_share_one_client() -
     assert len(org_builds) == 1
     assert org_builds[0]["region_name"] == "us-gov-west-1"
     assert all(kw.get("region_name") is not None for _, kw in session.client_calls)
+
+
+# --------------------------------------------------------------------------- #
+# Property 46 -- the lookups never raise for an AWS outcome, never cache a failure
+# --------------------------------------------------------------------------- #
+
+
+class _ServiceSession:
+    """A session handing out one mock per service, optionally failing construction."""
+
+    def __init__(self, region_name: str = "us-east-1", fail: dict[str, Exception] | None = None):
+        self.region_name = region_name
+        self.mocks: dict[str, MagicMock] = {}
+        self.fail = fail or {}
+        self.client_calls: list[str] = []
+
+    def client(self, service_name: str, region_name: Any = None, config: Any = None) -> MagicMock:
+        """Return the service's mock, or raise the configured construction error."""
+        self.client_calls.append(service_name)
+        if service_name in self.fail:
+            raise self.fail[service_name]
+        return self.mocks.setdefault(service_name, MagicMock(name=service_name))
+
+
+@pytest.fixture
+def records() -> Any:
+    """Capture every ``sraverify`` record at ``DEBUG`` (the suite runs ``-p no:logging``)."""
+    captured: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
+
+    handler = _Collector()
+    target = logging.getLogger("sraverify")
+    previous = target.level
+    target.setLevel(logging.DEBUG)
+    target.addHandler(handler)
+    try:
+        yield captured
+    finally:
+        target.removeHandler(handler)
+        target.setLevel(previous)
+
+
+def _aws_call_failed(captured: list[logging.LogRecord]) -> list[logging.LogRecord]:
+    return [r for r in captured if r.getMessage().startswith("aws_call_failed ")]
+
+
+def _error_records(captured: list[logging.LogRecord]) -> list[logging.LogRecord]:
+    return [r for r in captured if r.levelno >= logging.ERROR]
+
+
+def _client_error(operation: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "not allowed"}}, operation
+    )
+
+
+def _transport_error() -> EndpointConnectionError:
+    return EndpointConnectionError(endpoint_url="https://example.invalid")
+
+
+#: ``(lookup id, service, boto3 method, operation, ctx regions)``.
+_LOOKUPS = [
+    pytest.param("get_account_info", "sts", "get_caller_identity", "GetCallerIdentity",
+                 ["us-east-1"], id="sts"),
+    pytest.param("get_enabled_regions", "ec2", "describe_regions", "DescribeRegions",
+                 None, id="ec2"),
+    pytest.param("get_management_account_id", "organizations", "describe_organization",
+                 "DescribeOrganization", ["us-east-1"], id="organizations"),
+]
+
+
+@pytest.mark.parametrize("kind", ["ClientError", "BotoCoreError"])
+@pytest.mark.parametrize("lookup,service,method,operation,regions", _LOOKUPS)
+def test_a_failed_lookup_is_an_error_result_logged_once_and_never_cached(
+    records: list[logging.LogRecord],
+    lookup: str,
+    service: str,
+    method: str,
+    operation: str,
+    regions: list[str] | None,
+    kind: str,
+) -> None:
+    """One ``aws_call_failed``, no ``error`` record, nothing cached, a re-call re-issues."""
+    session = _ServiceSession()
+    ctx = ScanContext(session=session, regions=regions)  # type: ignore[arg-type]
+    boto = session.client(service)
+    exc = _client_error(operation) if kind == "ClientError" else _transport_error()
+    getattr(boto, method).side_effect = exc
+
+    result = getattr(ctx, lookup)()
+
+    assert is_error(result)
+    assert result["Error"]["Operation"] == (operation if kind == "ClientError" else "Request")
+    assert result["Error"]["Code"] == (
+        "AccessDeniedException" if kind == "ClientError" else "EndpointConnectionError"
+    )
+    assert len(_aws_call_failed(records)) == 1
+    assert _error_records(records) == []
+    assert ctx._account_info is None
+    assert ctx._resolved_regions is None
+    assert not ctx._has("organizations", "organization")
+
+    again = getattr(ctx, lookup)()
+    assert is_error(again)
+    assert getattr(boto, method).call_count == 2
+
+
+@pytest.mark.parametrize(
+    "account_outcome",
+    [
+        pytest.param(_client_error("GetAccountInformation"), id="ClientError"),
+        pytest.param(_transport_error(), id="BotoCoreError"),
+        pytest.param({}, id="no-AccountName"),
+    ],
+)
+def test_the_account_name_is_best_effort(
+    records: list[logging.LogRecord], account_outcome: Any
+) -> None:
+    """A failed Account call, or no ``AccountName``, gives ``""`` with identity cached."""
+    session = _ServiceSession()
+    ctx = ScanContext(session=session, regions=["us-east-1"])  # type: ignore[arg-type]
+    session.client("sts").get_caller_identity.return_value = {"Account": "111122223333"}
+    account = session.client("account")
+    if isinstance(account_outcome, Exception):
+        account.get_account_information.side_effect = account_outcome
+    else:
+        account.get_account_information.return_value = account_outcome
+
+    info = ctx.get_account_info()
+
+    assert info == {"account_id": "111122223333", "account_name": ""}
+    assert ctx.get_account_info() is info
+    assert session.client("sts").get_caller_identity.call_count == 1
+    expected_failed = 1 if isinstance(account_outcome, Exception) else 0
+    assert len(_aws_call_failed(records)) == expected_failed
+    assert _error_records(records) == []
+
+
+@pytest.mark.parametrize(
+    "lookup,service,method,regions",
+    [
+        pytest.param("get_account_info", "sts", "get_caller_identity", ["us-east-1"], id="sts"),
+        pytest.param("get_account_info", "account", "get_account_information", ["us-east-1"],
+                     id="account"),
+        pytest.param("get_enabled_regions", "ec2", "describe_regions", None, id="ec2"),
+    ],
+)
+def test_a_non_aws_exception_propagates_unchanged(
+    records: list[logging.LogRecord],
+    lookup: str,
+    service: str,
+    method: str,
+    regions: list[str] | None,
+) -> None:
+    """A defect is not an AWS outcome: it is neither wrapped nor turned into a result."""
+    session = _ServiceSession()
+    ctx = ScanContext(session=session, regions=regions)  # type: ignore[arg-type]
+    session.client("sts").get_caller_identity.return_value = {"Account": "111122223333"}
+    defect = RuntimeError("a programming defect")
+    getattr(session.client(service), method).side_effect = defect
+
+    with pytest.raises(RuntimeError) as info:
+        getattr(ctx, lookup)()
+
+    assert info.value is defect
+    assert _aws_call_failed(records) == []
+    assert ctx._account_info is None
+    assert ctx._resolved_regions is None
+
+
+@pytest.mark.parametrize(
+    "lookup,service,regions",
+    [
+        pytest.param("get_enabled_regions", "ec2", None, id="ec2"),
+        pytest.param("get_account_info", "sts", ["us-east-1"], id="sts"),
+    ],
+)
+def test_a_client_construction_failure_propagates_unwrapped(
+    records: list[logging.LogRecord], lookup: str, service: str, regions: list[str] | None
+) -> None:
+    """``PartialCredentialsError`` from ``session.client()`` is raised as the same object.
+
+    No error result, no ``aws_call_failed`` record, nothing cached: the client is
+    acquired before the lookup's ``try``, so a construction failure never
+    becomes an error result describing a call that was never made.
+    """
+    partial = PartialCredentialsError(provider="env", cred_var="AWS_SECRET_ACCESS_KEY")
+    session = _ServiceSession(fail={service: partial})
+    ctx = ScanContext(session=session, regions=regions)  # type: ignore[arg-type]
+
+    with pytest.raises(PartialCredentialsError) as info:
+        getattr(ctx, lookup)()
+
+    assert info.value is partial
+    assert _aws_call_failed(records) == []
+    assert ctx._account_info is None
+    assert ctx._resolved_regions is None

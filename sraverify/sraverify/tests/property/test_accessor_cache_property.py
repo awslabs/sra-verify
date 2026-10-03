@@ -151,9 +151,9 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_delegated_admin",
-            "accessor",
-            client_method="get_delegated_admin",
-            cache_key=f"delegated_admin:{_TEST_ACCOUNT}",
+            "derived",
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
     ),
     "account": (
@@ -217,9 +217,9 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_delegated_administrators",
-            "accessor",
-            client_method="list_delegated_administrators",
-            cache_key=f"delegated_admins:{_TEST_ACCOUNT}",
+            "derived",
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_organization_trails",
@@ -271,21 +271,18 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             cache_key=f"configuration_aggregators:{_TEST_REGION}",
         ),
         # Loops over CONFIG_SERVICE_PRINCIPALS -- both `config.amazonaws.com` and
-        # `config-multiaccountsetup.amazonaws.com` -- caching one slot per
-        # principal and aggregating the results. So it writes the cache more than
-        # once for a single call, which Property 9's "exactly one _set" assertion
-        # cannot express. Excluded with a reason rather than special-cased.
+        # `config-multiaccountsetup.amazonaws.com` -- reading each through the
+        # Organizations provider and merging the results; the first failure is
+        # returned unchanged. Left unpatched by the classification harness, so the
+        # loop itself runs against the stubbed provider.
         A(
             "get_delegated_administrators",
             "derived",
-            error_bearing=True,
             why=(
-                "aggregates across CONFIG_SERVICE_PRINCIPALS, caching one slot "
-                "per principal, so a single call writes the cache more than once "
-                "-- which Property 9's 'exactly one _set' cannot express. Still "
-                "error-bearing: it returns the first principal's error result "
-                "rather than merging a partial answer, so the classification "
-                "properties must drive it"
+                "aggregates self.organization.delegated_administrators() across "
+                "CONFIG_SERVICE_PRINCIPALS, first failure returned unchanged; the "
+                "provider's cache contract is held in "
+                "test_organization_provider_property"
             ),
         ),
     ),
@@ -385,15 +382,15 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_iam_delegated_administrators",
-            "accessor",
-            client_method="list_delegated_administrators",
-            cache_key=f"delegated_admins:{_TEST_ACCOUNT}",
+            "derived",
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_organization",
-            "accessor",
-            client_method="describe_organization",
-            cache_key=f"organization:{_TEST_ACCOUNT}",
+            "derived",
+            why="delegates to self.organization.describe(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
     ),
     "inspector": (
@@ -480,10 +477,10 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_macie_delegated_admin",
-            "accessor",
+            "derived",
             args=(_TEST_REGION,),
-            client_method="list_delegated_administrators",
-            cache_key=f"delegated_admin:{_TEST_REGION}",
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_macie_members",
@@ -510,40 +507,47 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         # is_not_configured table.
     ),
     "organizations": (
-        A("get_org_client", "client_lookup"),
+        # Every accessor delegates to the Organizations provider, which owns the
+        # ``organizations`` namespace; this base binds no client and reads no
+        # slot by key (Property 42).
         A(
             "get_organization",
-            "accessor",
-            client_method="describe_organization",
-            cache_key="organization",
+            "derived",
+            why="delegates to self.organization.describe(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
-        A("get_roots", "accessor", client_method="list_roots", cache_key="roots"),
+        A(
+            "get_roots",
+            "derived",
+            why="delegates to self.organization.roots(); the provider's cache "
+            "contract is held in test_organization_provider_property",
+        ),
         A(
             "get_ous_for_parent",
-            "accessor",
+            "derived",
             args=("r-abc1",),
-            client_method="list_organizational_units_for_parent",
-            cache_key="ous:r-abc1",
+            why="delegates to self.organization.ous_for_parent(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "list_policies",
-            "accessor",
-            client_method="list_policies",
-            cache_key="policies:SERVICE_CONTROL_POLICY",
+            "derived",
+            why="delegates to self.organization.policies(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_accounts_for_parent",
-            "accessor",
+            "derived",
             args=("ou-abc-123",),
-            client_method="list_accounts_for_parent",
-            cache_key="accounts:ou-abc-123",
+            why="delegates to self.organization.accounts_for_parent(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_effective_policy",
-            "accessor",
+            "derived",
             args=("BEDROCK_POLICY", _TEST_ACCOUNT),
-            client_method="describe_effective_policy",
-            cache_key=f"effective_policy:BEDROCK_POLICY:{_TEST_ACCOUNT}",
+            why="delegates to self.organization.effective_policy(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         # A pure parser over EffectivePolicy.PolicyContent, which is a JSON
         # string. It lives on the base so that no `except` clause appears inside
@@ -595,10 +599,10 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_delegated_administrators",
-            "accessor",
+            "derived",
             args=(_TEST_REGION,),
-            client_method="list_delegated_administrators",
-            cache_key=f"delegated_admin:{_TEST_REGION}",
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_organization_admin_accounts",
@@ -676,31 +680,31 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_roots",
-            "accessor",
+            "derived",
             args=(_TEST_REGION,),
-            client_method="list_roots",
-            cache_key="roots",
+            why="delegates to self.organization.roots(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_policies_for_target",
-            "accessor",
+            "derived",
             args=(_TEST_REGION, "r-abc1", "SECURITYHUB_POLICY"),
-            client_method="list_policies_for_target",
-            cache_key="policies_for_target:r-abc1:SECURITYHUB_POLICY",
+            why="delegates to self.organization.policies_for_target(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_policy",
-            "accessor",
+            "derived",
             args=(_TEST_REGION, "p-abc123"),
-            client_method="describe_policy",
-            cache_key="policy:p-abc123",
+            why="delegates to self.organization.describe_policy(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_effective_policy",
-            "accessor",
+            "derived",
             args=(_TEST_REGION, "SECURITYHUB_POLICY", _TEST_ACCOUNT),
-            client_method="describe_effective_policy",
-            cache_key=f"effective_policy:SECURITYHUB_POLICY:{_TEST_ACCOUNT}",
+            why="delegates to self.organization.effective_policy(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_event_rules",
@@ -814,18 +818,13 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
                 },
             ),
         ),
-        # Writes into the SHARED "organizations" namespace, and builds its own
-        # error result in its own except clause and caches it -- one of the two
-        # deliberate failure-caching sites (Requirement 3.4). Because the
-        # namespace is shared, OrganizationsCheck.get_organization reads that
-        # cached error result back.
+        # No production caller; kept as a delegator because removing it would
+        # drop public surface from the base (task 24.2).
         A(
             "get_organization",
             "derived",
-            why=(
-                "writes the shared 'organizations' namespace rather than "
-                "securityhub's, and is covered by its own test below"
-            ),
+            why="delegates to self.organization.describe(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
     ),
     "securityincidentresponse": (
@@ -834,13 +833,17 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         # path nor the NAMESPACE cache applies -- this base declares no NAMESPACE
         # at all (a known defect, deferred by Non-Goal 6). The one caching site is
         # _discover_memberships, covered by its own test below.
-        # All six of these hand a check the client's dict directly, so they are
-        # error-bearing even though the caching classification is ``derived``.
+        # Of the five rows after get_delegated_administrators, four hand a check
+        # the client's dict directly, so they are error-bearing even though the
+        # caching classification is ``derived``; discover_sir_region returns a
+        # Region name and is not. get_delegated_administrators delegates to the
+        # Organizations provider and is left unpatched by the classification
+        # harness, so it runs against the stubbed provider.
         A(
             "get_delegated_administrators",
             "derived",
-            why="builds a throwaway client via _sir_client; no NAMESPACE cache",
-            error_bearing=True,
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "list_memberships",
@@ -906,10 +909,10 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
         A(
             "get_delegated_administrators",
-            "accessor",
+            "derived",
             args=(_TEST_REGION,),
-            client_method="list_delegated_administrators",
-            cache_key=f"delegated_administrators:{_TEST_REGION}",
+            why="delegates to self.organization.delegated_administrators(); the provider's cache "
+            "contract is held in test_organization_provider_property",
         ),
         A(
             "get_sqs_queue_encryption",
@@ -1694,33 +1697,6 @@ def test_a_helper_never_touches_the_per_scan_context(target: _Target | None) -> 
 # --------------------------------------------------------------------------- #
 # The two sites that need naming
 # --------------------------------------------------------------------------- #
-
-
-def test_securityhub_get_organization_writes_the_shared_organizations_namespace() -> None:
-    """One of the two deliberate failure-caching sites (Requirement 3.4).
-
-    ``SecurityHubCheck.get_organization`` builds an error result in its own ``except``
-    and caches it -- and it caches it under the **shared** ``organizations``
-    namespace, where ``OrganizationsCheck.get_organization`` will read it back. So
-    one denied ``securityhub`` path poisons an entirely different service's
-    accessor for the rest of the scan.
-
-    Asserted here by name because the adapter table classifies it ``derived`` (it
-    does not write securityhub's own namespace, so Property 9's namespace
-    assertion would be wrong for it).
-    """
-    source = (_SERVICES_ROOT / "securityhub" / "base.py").read_text(encoding="utf-8")
-
-    assert "_ORGANIZATION_CACHE_KEY" in source, (
-        "the shared-namespace write has been restructured; re-check that this "
-        "accessor still cannot poison OrganizationsCheck"
-    )
-
-    # After migration the accessor must not construct an error result of its own.
-    assert "except ClientError" not in source, (
-        "SecurityHubCheck.get_organization still builds its own error result; it "
-        "should pass the client's through and not cache it"
-    )
 
 
 def test_securityincidentresponse_discover_memberships_is_the_one_caching_site() -> None:

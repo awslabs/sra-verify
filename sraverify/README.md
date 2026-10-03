@@ -97,7 +97,7 @@ classDiagram
         +organization: OrganizationsProvider
         +initialize(ctx: ScanContext)
         +get_client(region) Optional
-        +get_management_accountId() str
+        +get_management_accountId() str | ErrorResult
         +passed(*, region, resource_id, actual_value, checked_value) Finding
         +failed(*, region, resource_id, actual_value, remediation, checked_value) Finding
         +error(*, region, resource_id, actual_value, remediation, checked_value) Finding
@@ -112,9 +112,9 @@ classDiagram
         +client_config: botocore.config.Config
         +organization: OrganizationsProvider
         +get_client(service_name, region)
-        +get_account_info() dict
-        +get_management_account_id() str
-        +get_enabled_regions() list
+        +get_account_info() dict | ErrorResult
+        +get_management_account_id() str | ErrorResult
+        +get_enabled_regions() list | ErrorResult
         -_get(namespace, key, default)
         -_set(namespace, key, value)
         -_has(namespace, key)
@@ -122,7 +122,18 @@ classDiagram
 
     class OrganizationsProvider {
         +NOT_CONFIGURED_ERRORS: dict
+        +OWNED_OPERATIONS: frozenset
         +accounts() Mapping
+        +describe() Mapping
+        +management_account_id() str | ErrorResult
+        +delegated_administrators(service_principal) Mapping
+        +roots() Mapping
+        +ous_for_parent(parent_id) Mapping
+        +policies(policy_type) Mapping
+        +policies_for_target(target_id, policy_type) Mapping
+        +describe_policy(policy_id) Mapping
+        +effective_policy(policy_type, target_id) Mapping
+        +accounts_for_parent(parent_id) Mapping
     }
 
     class GuardDutyCheck {
@@ -167,8 +178,14 @@ session's, computed once and read-only. `get_client(service, region=None)` binds
 scan Region, so no client is built Region-less. Constructing a context with neither
 raises `PartitionUndeterminedError`.
 
-**Never cache a failure.** If an AWS call raises, leave the cache slot empty so a retry
-re-issues the call.
+**Never cache a failure.** If an AWS call fails, leave the cache slot empty and return
+the error result unchanged, so a retry re-issues the call.
+
+`get_account_info()`, `get_management_account_id()` and `get_enabled_regions()` follow
+the same model: each returns an error result on failure and caches nothing. A check
+that reads a failed identity or Region list (`self.account_id`, `self.regions`, a
+finding helper) raises `ScanPreconditionError`, which `run_checks` turns into one ERROR
+row for that check; no `execute()` catches it.
 
 Client tuning defaults live as module constants in `core/scan_context.py` and are what the
 CLI help text quotes:
@@ -486,9 +503,16 @@ read before `initialize(ctx)` raises `RuntimeError` naming the property and the 
 `session`, `regions`, `account_info`, `account_id`, `account_name`, `audit_accounts`,
 `log_archive_accounts`, `organization`
 
-`organization` is the scan's `OrganizationsProvider`: a check reads the organization's
-account list as `self.organization.accounts()` and filters it with `is_active_account`. A
-class attribute named `organization` on a check or an intermediate base raises
+`organization` is the scan's `OrganizationsProvider` and the only path to Organizations
+data. A check reads the organization's account list as `self.organization.accounts()` and
+filters it with `is_active_account`. Its other accessors are `describe()`,
+`management_account_id()`, `delegated_administrators(service_principal)`, `roots()`,
+`ous_for_parent(parent_id)`, `policies(policy_type)`,
+`policies_for_target(target_id, policy_type)`, `describe_policy(policy_id)`,
+`effective_policy(policy_type, target_id)` and `accounts_for_parent(parent_id)`. Each
+caches its success per argument and returns a failure unchanged and uncached; one fetch
+per accessor per key per scan holds under sequential execution (the cache is not
+single-flight). A class attribute named `organization` on a check or an intermediate base raises
 `CheckIdentityError` at import, because it would shadow the property.
 
 Four more delegate to `meta`: `check_id`, `service`, `severity`, `account_type`. None of
@@ -497,7 +521,7 @@ the twelve has a setter, so assignment raises `AttributeError`.
 `self.regions` returns the explicit `--regions` list when one was supplied, and otherwise
 lazily resolves enabled regions via `ctx.get_enabled_regions()` — one `ec2:DescribeRegions`
 per scan, cached. `self.get_management_accountId()` takes no argument; the legacy `session`
-parameter is accepted and ignored. `get_client(region)` can return `None`; always handle it.
+parameter is accepted and ignored. It returns `str | ErrorResult`, so check for `"Error"`. `get_client(region)` can return `None`; always handle it.
 
 ### Account lists
 
@@ -547,14 +571,15 @@ For a **global** service, build a single client and let the wrapper choose its R
 
 ```python
 def _setup_clients(self):
-    # Organizations is partition-global: one client, whose Region the wrapper
-    # derives from the scan (scan_region), is enough.
-    self._org_client = OrganizationsClient(ctx=self._ctx)
+    # IAM is partition-global: one client, bound to the scan Region, is enough.
+    self._iam_client = IAM_Client(ctx=self._ctx)
     self._clients.clear()
 ```
 
-No service base inherits anything between itself and `SecurityCheck`, and none other than
-`OrganizationsCheck` binds `OrganizationsClient`. Organization data is reached through
+No service base inherits anything between itself and `SecurityCheck`, and no base imports
+or constructs `OrganizationsClient` — not even `OrganizationsCheck`, whose accessors are
+one-line delegators to `self.organization`. The `org_client` pattern (an `organizations`
+binding inside a service client) is retired: organization data is reached through
 `self.organization`, never through a service base or a service client.
 
 ### Client method
@@ -589,7 +614,7 @@ This is the one client under `core/` (`core/organizations_client.py`): the provi
 `core/` uses it, and `core/` never imports `services/`. Every other client is
 `services/<svc>/client.py`.
 
-That `except` clause is byte-identical in all 108 client methods, and that is the point:
+That `except` clause is byte-identical in all 96 client methods, and that is the point:
 there is nothing to type per call site, so nothing that can be typed wrong. Earlier drafts
 passed `operation="ListRoots"` and `region=self.region`; both were removed on the
 reasoning that a value typed at 108 call sites will be typed wrong at one of them.
@@ -661,9 +686,9 @@ exists to prevent.
 - `_has` / `_get` / `_set` are for **service base classes and providers**. A check class
   never touches them; it calls the typed accessor on its base class, or
   `self.organization`.
-- The `all_accounts` slot of the `organizations` namespace is written by
-  `OrganizationsProvider.accounts()` and read by no base class by key: one `ListAccounts`
-  sweep serves every service and Region in the scan.
+- The `organizations` namespace is written and read only by the Organizations provider;
+  no service base reads it by key. One `ListAccounts` sweep serves every service and
+  Region in the scan.
 - Cache keys are `"<thing>:<discriminator>"` with no account or session-region prefix — the
   context is already per-scan and per-account. `IAMCheck` is the exception and keys on
   `account_id`, because an assumed-role session can in principle cross account boundaries.
@@ -1024,7 +1049,7 @@ before `sts:AssumeRole`, and `SRAVerify.resolve_scan_region()` lets a host prefl
 
 ## Tests
 
-The suite lives at `sraverify/tests/` and collects **9759 tests** (9162 passed, 597
+The suite lives at `sraverify/tests/` and collects **11319 tests** (10081 passed, 1238
 skipped). None of them needs AWS credentials or issues an AWS call.
 
 From the project root. `[tool.pytest.ini_options]` in `pyproject.toml` sets `testpaths`
@@ -1048,16 +1073,16 @@ cd sraverify && uv run pytest -q
 The client-error-contract modules are the largest block, and between them they hold the whole
 contract:
 
-| Module                                  | What it holds                                                                                                                                                                                                                                        |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_client_contract_property.py`      | All 108 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 17 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition |
-| `test_accessor_cache_property.py`       | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                      |
-| `test_check_classification_property.py` | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                            |
-| `test_discriminator_property.py`        | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared                                                                                                                                 |
-| `test_no_confessing_fail_property.py`   | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                               |
-| `test_stdout_contract_property.py`      | Nothing in the package writes to stdout                                                                                                                                                                                                              |
-| `test_organization_provider_property.py` | `OrganizationsProvider.accounts()`: every page merged, one sweep per scan, failures never cached, the Security Lake primer, log shape, refcount release; exports the `PROVIDER_ADAPTERS` table the catalog harnesses stub `ctx.organization` from |
-| `test_layering_property.py` | By AST over package code only: `core/` never imports `services/`; no base inherits anything below `SecurityCheck`; only the provider's client issues `ListAccounts`; every binding in `core/`, `scanner.py`, `cli.py`, `utils/` names a derived Region |
+| Module                                   | What it holds                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_client_contract_property.py`       | All 96 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 17 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition |
+| `test_accessor_cache_property.py`        | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                                                                     |
+| `test_check_classification_property.py`  | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                                                                           |
+| `test_discriminator_property.py`         | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared; the provider alone declares its `OWNED_OPERATIONS`, and the 46-row `_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden pins every other service-table entry                                                                                                                                                                                |
+| `test_no_confessing_fail_property.py`    | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                                                                              |
+| `test_stdout_contract_property.py`       | Nothing in the package writes to stdout                                                                                                                                                                                                                                                             |
+| `test_organization_provider_property.py` | All eleven `OrganizationsProvider` accessors: every page merged, one fetch per accessor per key per (sequential) scan, failures never cached, the Security Lake primer, log shape, refcount release; exports the `PROVIDER_ADAPTERS` table the catalog harnesses stub `ctx.organization` from                                                   |
+| `test_layering_property.py`              | By AST over package code only: `core/` never imports `services/`; no base inherits anything below `SecurityCheck`; no `base.py` imports or constructs `OrganizationsClient`; only `core/organizations_client.py` issues an `organizations` operation and only `core/organization.py` calls it; no base reads the `organizations` namespace by key; every binding in `core/`, `scanner.py`, `cli.py`, `utils/` names a derived Region                                              |
 
 Two of these carry **prescriptive** adapter tables — the `ClientAdapter` tables name the
 boto3 method, operation and success shape each client method is contracted to produce, and

@@ -67,8 +67,8 @@ class CloudTrailCheck(SecurityCheck):
     def _setup_clients(self):
         """Set up CloudTrail clients for each region.
 
-        Each wrapper obtains its underlying boto3 ``cloudtrail``,
-        ``organizations`` and ``sts`` clients from ``self._ctx.get_client(...)``.
+        Each wrapper obtains its underlying boto3 ``cloudtrail`` and ``sts``
+        clients from ``self._ctx.get_client(...)``.
         """
         self._clients.clear()
         if hasattr(self, 'regions') and self.regions:
@@ -243,30 +243,12 @@ class CloudTrailCheck(SecurityCheck):
 
     def get_delegated_administrators(self) -> Mapping[str, Any]:
         """
-        Get the Organizations delegated administrators for CloudTrail, with caching.
+        Get the Organizations delegated administrators for CloudTrail.
+
+        Delegates to the scan's Organizations provider, which caches the answer
+        once per scan per service principal.
 
         Returns:
             ``{"DelegatedAdministrators": [...]}``, or an error result.
         """
-        account_id = self.account_id
-        cache_key = f"delegated_admins:{account_id}"
-        if self._ctx._has(self.NAMESPACE, cache_key):
-            logger.debug(f"CloudTrail: Using cached {cache_key}")
-            return self._ctx._get(self.NAMESPACE, cache_key)
-
-        if not self.regions:
-            logger.warning("CloudTrail: No regions specified")
-            return no_client_result(service="CloudTrail", region="global")
-
-        region = self.regions[0]
-        client = self.get_client(region)
-        if client is None:
-            logger.warning(f"CloudTrail: No client available for region {region}")
-            return no_client_result(service="CloudTrail", region=region)
-
-        result = client.list_delegated_administrators()
-        if is_error(result):
-            return result
-
-        self._ctx._set(self.NAMESPACE, cache_key, result)
-        return result
+        return self.organization.delegated_administrators("cloudtrail.amazonaws.com")

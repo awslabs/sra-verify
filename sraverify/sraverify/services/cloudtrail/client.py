@@ -6,8 +6,8 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-Reaches ``cloudtrail``, ``organizations`` and ``sts``. All three boto3 clients are
-acquired in ``__init__``.
+Reaches ``cloudtrail`` and ``sts``. Both boto3 clients are acquired in
+``__init__``. Organizations is reached through the scan's provider, not here.
 """
 from typing import Any, List, Mapping, Optional
 
@@ -30,7 +30,6 @@ class CloudTrailClient(AWSClient):
         """
         super().__init__(region, ctx)
         self.client = ctx.get_client('cloudtrail', region=region)
-        self.org_client = ctx.get_client('organizations', region=region)
         # Moved out of get_account_id, which acquired it per call.
         self.sts_client = ctx.get_client('sts')
 
@@ -100,26 +99,6 @@ class CloudTrailClient(AWSClient):
         """
         try:
             return self.client.get_event_selectors(TrailName=trail_arn)
-        except AWS_EXCEPTIONS as e:
-            return self.aws_error(e)
-
-    def list_delegated_administrators(
-        self, service_principal: str = "cloudtrail.amazonaws.com"
-    ) -> Mapping[str, Any]:
-        """
-        List Organizations delegated administrators for a service principal.
-
-        Args:
-            service_principal: Service principal to check.
-
-        Returns:
-            ``{"DelegatedAdministrators": [...]}`` on success, or the error
-            result.
-        """
-        try:
-            return self.org_client.list_delegated_administrators(
-                ServicePrincipal=service_principal
-            )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

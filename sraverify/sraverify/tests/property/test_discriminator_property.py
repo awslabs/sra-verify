@@ -586,7 +586,9 @@ _NON_OWNED_NOT_CONFIGURED_ENTRIES: tuple[tuple[str, str, str, str | None, str], 
     ('SecurityHubCheck', 'GetEnabledStandards', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListAggregatorsV2', 'ConflictException', 'security hub v2 is not enabled', '82a75d90bf56c4c1b8bbb79d75985eb2babf6fc1b4f61c92f40dc0b47a9ac45e'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListConfigurationPolicies', 'AccessDeniedException', 'with central configuration enabled', '3ccf7d833f5c2d8d5db02e4500ad64e60f3295052a9b453347e6c52b3ecd567f'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListConfigurationPolicyAssociations', 'AccessDeniedException', 'with central configuration enabled', '994fe6fa8d63f198953ad9f84b5fe47310004e31bdaa3d12da765fbdf6f83636'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListEnabledProductsForImport', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityHubCheck', 'ListFindingAggregators', 'InvalidAccessException', 'not subscribed to aws security hub', 'ff72024d6ecd4a1c1e5081985b37f3a64ad8a60db3c560f3194d500dba8d2865'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListMembers', 'BadRequestException', 'no such resource found', '7b9e912ade6d39edd69dd443c98c299938e7536c69f6dec126fe5cefc81f076d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListMembers', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListOrganizationAdminAccounts', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
@@ -667,8 +669,9 @@ def test_no_service_table_declares_an_owned_operation(service: str) -> None:
 
 
 def test_every_non_owned_service_entry_is_unchanged_from_the_merged_phase_one() -> None:
-    """Property 43: 46 entries, byte-identical to f517024 (evidence by digest)."""
-    assert len(_NON_OWNED_NOT_CONFIGURED_ENTRIES) == 46
+    """Property 43: 48 entries -- f517024's 46 plus the two Security Hub CSPM
+    entries observed live on 2026-10-05 (evidence by digest)."""
+    assert len(_NON_OWNED_NOT_CONFIGURED_ENTRIES) == 48
     assert _live_non_owned_entries() == _NON_OWNED_NOT_CONFIGURED_ENTRIES
 
 

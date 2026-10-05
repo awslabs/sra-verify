@@ -176,15 +176,49 @@ class SecurityHubCheck(SecurityCheck):
                 message="security hub v2 is not enabled",
             ),
         },
-        # Considered for SRA-SECURITYHUB-21/22/25 (spec securityhub-cspm-split,
-        # 2026-10-05) and NOT declared, because neither has been observed yet:
-        #   - ListFindingAggregators / InvalidAccessException, needle
-        #     "not subscribed to aws security hub" (candidate entry A);
-        #   - ListConfigurationPolicyAssociations / AccessDeniedException, needle
-        #     "with central configuration enabled" (candidate entry B).
-        # Both are gated on the read-only live probe; until it records the exact
-        # code and message, each stays an honest ERROR. Nothing is declared on
-        # inference.
+        # Entries A and B below were considered for SRA-SECURITYHUB-21/22/25 (spec
+        # securityhub-cspm-split) and declared only after the read-only live probe
+        # of 2026-10-05 recorded the exact code and message for each.
+        "ListFindingAggregators": {
+            "InvalidAccessException": NotConfigured(
+                evidence=(
+                    "Observed 2026-10-05 by a read-only probe from the Security Hub "
+                    "delegated administrator, the management account and an "
+                    "application account, in eu-central-1, eu-west-1 and "
+                    "ap-southeast-2, where none of them is subscribed: "
+                    "'InvalidAccessException: Account <id> is not subscribed to AWS "
+                    "Security Hub'. The same accounts answered successfully in "
+                    "us-west-2 and us-east-1, where they are subscribed, so the "
+                    "missing resource is the hub itself and no aggregator can link "
+                    "that Region. The needle is required because InvalidAccessException "
+                    "is overloaded, as for the other operations in this table. "
+                    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_ListFindingAggregators.html"
+                ),
+                message="not subscribed to aws security hub",
+            ),
+        },
+        "ListConfigurationPolicyAssociations": {
+            "AccessDeniedException": NotConfigured(
+                evidence=(
+                    "Observed 2026-10-05 by a read-only probe from the management "
+                    "account and an application account, neither of which is the "
+                    "Security Hub delegated administrator, in the home Region "
+                    "us-west-2 and in us-east-1 and eu-central-1: "
+                    "'AccessDeniedException: Must be a Security Hub delegated "
+                    "administrator with Central Configuration enabled' -- central "
+                    "configuration is not in use from this account, the same reading "
+                    "as the ListConfigurationPolicies entry. The needle is essential: "
+                    "the delegated administrator in a subscribed non-home Region "
+                    "(us-east-1) answered the same code as 'Central Configuration APIs "
+                    "can only be called from the aggregation region', a fact about "
+                    "where we asked that must stay an ERROR, as must a plain IAM "
+                    "denial. https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_ListConfigurationPolicyAssociations.html"
+                ),
+                message="with central configuration enabled",
+            ),
+        },
         "ListConfigurationPolicies": {
             "AccessDeniedException": NotConfigured(
                 evidence=(

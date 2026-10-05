@@ -29,7 +29,7 @@ class SRA_SECURITYHUB_14(SecurityHubCheck):
         ),
         severity=Severity.MEDIUM,
         account_type=AccountType.APPLICATION,
-        service="SecurityHub",
+        service="Security Hub",
         resource_type="AWS::SecurityHub::HubV2",
         remediation=Remediation(
             text="Enable Security Hub V2 in every Region where Security Hub CSPM is enabled.",

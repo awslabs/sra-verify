@@ -32,7 +32,7 @@ class SRA_SECURITYHUB_19(SecurityHubCheck):
         ),
         severity=Severity.MEDIUM,
         account_type=AccountType.AUDIT,
-        service="SecurityHub",
+        service="Security Hub",
         resource_type="AWS::Organizations::Account",
         remediation=Remediation(
             text=(

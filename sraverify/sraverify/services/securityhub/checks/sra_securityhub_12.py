@@ -59,7 +59,7 @@ class SRA_SECURITYHUB_12(SecurityHubCheck):
         ),
         severity=Severity.HIGH,
         account_type=AccountType.APPLICATION,
-        service="SecurityHub",
+        service="Security Hub CSPM",
         resource_type="AWS::SecurityHub::Standard",
         remediation=Remediation(
             text=(

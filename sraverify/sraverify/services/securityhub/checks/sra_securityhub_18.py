@@ -31,7 +31,7 @@ class SRA_SECURITYHUB_18(SecurityHubCheck):
         ),
         severity=Severity.MEDIUM,
         account_type=AccountType.AUDIT,
-        service="SecurityHub",
+        service="Security Hub",
         resource_type="AWS::SecurityHub::AggregatorV2",
         remediation=Remediation(
             text=(

@@ -37,16 +37,23 @@ class SRA_SECURITYHUB_21(SecurityHubCheck):
         resource_type="AWS::SecurityHub::FindingAggregator",
         remediation=Remediation(
             text=(
-                "In the delegated administrator account, create or update the Security Hub "
-                "CSPM finding aggregator in the home Region so that it links all Regions."
+                "In the delegated administrator account, update the Security Hub CSPM finding "
+                "aggregator in the home Region so that it links every Region you use, naming "
+                "them with SPECIFIED_REGIONS. Avoid ALL_REGIONS unless intended: it also "
+                "enables Security Hub CSPM in every enabled Region of the account."
             ),
             cli=(
                 "aws securityhub update-finding-aggregator --finding-aggregator-arn <arn> "
-                "--region-linking-mode ALL_REGIONS --region <home-region>"
+                "--region-linking-mode SPECIFIED_REGIONS --regions <linked-region> "
+                "<unlinked-region> ... --region <home-region>\n"
+                "# SPECIFIED_REGIONS replaces the list, so keep the Regions already linked.\n"
+                "# ALL_REGIONS also enables Security Hub CSPM in every enabled Region."
             ),
             console=(
                 "Security Hub CSPM console in the delegated administrator account and home "
-                "Region, Settings, Regions, Cross-Region aggregation, Edit, link all Regions."
+                "Region, Settings, Regions, Cross-Region aggregation, Edit, choose Specified "
+                "Regions and add the unlinked Regions. Choosing all Regions also enables "
+                "Security Hub CSPM in every enabled Region."
             ),
         ),
         sra_sections=("Security Tooling account", "AWS Security Hub CSPM"),
@@ -157,6 +164,14 @@ class SRA_SECURITYHUB_21(SecurityHubCheck):
         unlinked = self.cspm_unlinked_regions(aggregator, list(self.regions))
 
         if unlinked:
+            # SPECIFIED_REGIONS replaces the linked list, so the recommendation keeps
+            # the Regions an existing SPECIFIED_REGIONS aggregator already links and
+            # adds every scanned Region but the home Region (which is always covered
+            # and is rejected in the list). ALL_REGIONS is deliberately not suggested:
+            # observed 2026-10-05, it also enabled Security Hub CSPM in every enabled
+            # Region of the delegated administrator account.
+            kept = set(listed_regions) if mode == "SPECIFIED_REGIONS" else set()
+            target = sorted(kept | {r for r in self.regions if r != home_region})
             yield self.failed(
                 region=home_region,
                 resource_id=aggregator_arn,
@@ -169,7 +184,9 @@ class SRA_SECURITYHUB_21(SecurityHubCheck):
                 remediation=(
                     f"Link {', '.join(unlinked)}: aws securityhub update-finding-aggregator "
                     f"--finding-aggregator-arn {aggregator_arn} --region-linking-mode "
-                    f"ALL_REGIONS --region {home_region}"
+                    f"SPECIFIED_REGIONS --regions {' '.join(target)} --region {home_region}. "
+                    f"Avoid ALL_REGIONS unless intended: it also enables Security Hub CSPM "
+                    f"in every enabled Region"
                 ),
             )
         else:

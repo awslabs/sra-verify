@@ -1057,7 +1057,7 @@ before `sts:AssumeRole`, and `SRAVerify.resolve_scan_region()` lets a host prefl
 
 ## Tests
 
-The suite lives at `sraverify/tests/` and collects **11672 tests** (10320 passed, 1352
+The suite lives at `sraverify/tests/` and collects **11677 tests** (10325 passed, 1352
 skipped; one more skips where no local `generated_*` policy artefact exists). None of them needs AWS credentials or issues an AWS call.
 
 From the project root. `[tool.pytest.ini_options]` in `pyproject.toml` sets `testpaths`

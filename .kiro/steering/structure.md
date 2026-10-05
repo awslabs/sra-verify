@@ -685,7 +685,7 @@ order ascending and reproducible.
 ## Tests
 
 The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collects
-**11672 tests** (10320 passed, 1352 skipped; one more skips where no local
+**11677 tests** (10325 passed, 1352 skipped; one more skips where no local
 `generated_*` policy artefact exists) and no xfails. It is no longer thin.
 
 - `tests/unit/core/` — `test_check_registration.py`, `test_enums.py`,

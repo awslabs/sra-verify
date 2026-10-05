@@ -25,7 +25,7 @@ or issues a call, and every file read is a package ``.py`` located from
   ``OrganizationsClient``. Replaces Phase 1's ``ListAccounts``-only Property 8.
 * Property 42 -- no service base reads the ``organizations`` namespace by key,
   and ``OrganizationsCheck`` makes no ``_has`` / ``_get`` / ``_set`` call at all.
-* Property 30 -- each of the fifteen consumer checks reads the account list
+* Property 30 -- each of the sixteen consumer checks reads the account list
   through ``self.organization.accounts()``, once.
 * Property 34 -- every boto3 binding in ``core/``, ``scanner.py``, ``cli.py``
   and ``utils/`` names its Region with a non-literal value.
@@ -61,13 +61,14 @@ _RETIRED_NAMES = (
     "get_organization_accounts",
 )
 
-#: The fifteen checks that read the organization's account list.
+#: The sixteen checks that read the organization's account list.
 _CONSUMERS = (
     "inspector/checks/sra_inspector_07.py",
     "macie/checks/sra_macie_07.py",
     "organizations/checks/sra_organizations_12.py",
     "securityhub/checks/sra_securityhub_08.py",
     "securityhub/checks/sra_securityhub_17.py",
+    "securityhub/checks/sra_securityhub_22.py",
     "securityincidentresponse/checks/sra_securityincidentresponse_04.py",
     "securitylake/checks/sra_securitylake_01.py",
     *(f"securitylake/checks/sra_securitylake_{n:02d}.py" for n in range(6, 14)),
@@ -639,7 +640,7 @@ def test_the_namespace_rule_is_not_vacuous() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Property 30 -- the fifteen consumers
+# Property 30 -- the sixteen consumers
 # --------------------------------------------------------------------------- #
 
 
@@ -651,14 +652,14 @@ def test_each_consumer_reads_accounts_through_the_provider_once(relative: str) -
     assert "get_organization_accounts" not in source
 
 
-def test_there_are_exactly_fifteen_consumers() -> None:
-    """No check outside the fifteen reads the provider's account list."""
+def test_there_are_exactly_sixteen_consumers() -> None:
+    """No check outside the sixteen reads the provider's account list."""
     readers = sorted(
         p.relative_to(_SERVICES_ROOT).as_posix()
         for p in _SERVICES_ROOT.glob("*/checks/sra_*.py")
         if "self.organization.accounts()" in p.read_text(encoding="utf-8")
     )
-    assert len(_CONSUMERS) == 15
+    assert len(_CONSUMERS) == 16
     assert readers == sorted(_CONSUMERS)
 
 

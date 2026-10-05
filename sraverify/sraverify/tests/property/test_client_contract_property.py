@@ -768,6 +768,26 @@ _SECURITYHUB = (
         },
     ),
     ClientAdapter(
+        method="list_configuration_policy_associations",
+        boto_service="securityhub",
+        boto_method="list_configuration_policy_associations",
+        operation="ListConfigurationPolicyAssociations",
+        success=(
+            {
+                "ConfigurationPolicyAssociationSummaries": [
+                    {
+                        "TargetId": _TEST_ACCOUNT,
+                        "TargetType": "ACCOUNT",
+                        "ConfigurationPolicyId": "abc",
+                        "AssociationType": "INHERITED",
+                        "AssociationStatus": "SUCCESS",
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+    ClientAdapter(
         method="list_enabled_products_for_import",
         boto_service="securityhub",
         boto_method="list_enabled_products_for_import",
@@ -788,6 +808,21 @@ _SECURITYHUB = (
                     )
                 }
             ]
+        },
+    ),
+    ClientAdapter(
+        method="get_finding_aggregator",
+        boto_service="securityhub",
+        boto_method="get_finding_aggregator",
+        operation="GetFindingAggregator",
+        args=(f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:finding-aggregator/abc",),
+        success={
+            "FindingAggregationRegion": "us-east-1",
+            "FindingAggregatorArn": (
+                f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:finding-aggregator/abc"
+            ),
+            "RegionLinkingMode": "ALL_REGIONS",
+            "Regions": [],
         },
     ),
     ClientAdapter(

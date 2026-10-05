@@ -220,7 +220,7 @@ class SecurityHubCheck(SecurityCheck):
         """
         Run one client method for a Region through the accessor shape.
 
-        The eight public accessors below differ only in cache key and client
+        The public accessors below differ only in cache key and client
         method, so the shape is written once.
 
         Args:

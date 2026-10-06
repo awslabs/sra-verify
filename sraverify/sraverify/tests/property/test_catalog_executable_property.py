@@ -102,7 +102,7 @@ Nothing here re-reads the registry at test time, and this module installs no
 fixture of its own.
 
 ``import sraverify.services`` is present for its side effect and is not
-removable: it is what triggers ``pkgutil`` discovery over the 18 service
+removable: it is what triggers ``pkgutil`` discovery over the 19 service
 packages, and therefore what populates the registry this module reads.
 """
 

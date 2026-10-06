@@ -70,7 +70,7 @@ sraverify --account-type audit --audit-account 111122223333
 cd sra-verify/sraverify && uv run pytest -q
 ```
 
-It reports **10081 passed, 1238 skipped** (11319 collected), and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (31 hypothesis and reflection modules, including catalog-wide properties that iterate the real 182 registered checks and the 96 real client methods) plus `tests/unit/{core,cli,services,util}/`. `tests/unit/mcp/` holds only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees, refuses outbound HTTP, and restores the `sraverify` logger's handlers, level and propagation after every test, so a test that runs `cli.main()` cannot leak its logging configuration into the next.
+It reports **10444 passed, 1262 skipped** (11706 collected), and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (31 hypothesis and reflection modules, including catalog-wide properties that iterate the real 187 registered checks and the 101 real client methods) plus `tests/unit/{core,cli,services,util}/`. `tests/unit/mcp/` holds only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees, refuses outbound HTTP, and restores the `sraverify` logger's handlers, level and propagation after every test, so a test that runs `cli.main()` cannot leak its logging configuration into the next.
 
 Add `-p no:logging` when you want readable output: several modules assert on log records, and pytest's live-log capture floods the terminal otherwise.
 
@@ -78,7 +78,7 @@ Add `-p no:logging` when you want readable output: several modules assert on log
 cd sra-verify/sraverify && uv run pytest -q --tb=line -p no:logging
 ```
 
-The 1238 skips are all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) — the service table's pairs plus the provider table's four pairs for every one of the 182 checks — and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
+The 1262 skips are all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) — the service table's pairs plus the provider table's four pairs for every one of the 187 checks — and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
 
 ### Regenerating `docs/checks.txt`
 
@@ -197,6 +197,8 @@ The inline buildspec is the canonical execution model, and it explains what `--a
 **Deploy `1-sraverify-member-roles.yaml` before the CodeBuild project when a change adds an AWS call, and expect one transitional run of ERROR rows if you don't.** Observed on the 2026-09-16 deploy of the AI-coverage checks: the 02:09 build ran the new checks against an `SRAMemberRole` that did not yet grant the six new actions, and returned `DescribeSecurityHubV2 failed: AccessDeniedException`, `DescribeEffectivePolicy failed: AccessDeniedException` and so on — 68 ERROR rows. The 02:16 build, after the StackSet propagated, returned 98 PASS and 79 FAIL with **zero** ERROR rows from those checks. Nothing was wrong with either run: that is the FAIL-vs-ERROR contract working, and it is why a permission gap must never be allowed to read as a FAIL. The signal to look for is a whole check flipping ERROR→PASS/FAIL between two runs minutes apart; the cause is propagation, not flakiness.
 
 The rule covers calls issued from `core/` as well as from a service client. The organizations-provider change is the example: once the generator walked the whole package, `ec2:DescribeRegions` (`ScanContext.get_enabled_regions`) and `account:GetAccountInformation` (`ScanContext.get_account_info`) became visible to it and were added to `SRAVerifyLeastPrivilege`. Neither had been granted by that policy before; `account:GetAccountInformation` was already granted by `SRAVerifyCheckPermissions`, and `ec2:DescribeRegions` is reached only when `--regions` is omitted, which the buildspec never does — so the deploy is expected to move no row.
+
+The SIR log-readiness checks are the next instance. They add three actions to `SRAVerifyLeastPrivilege` — `ec2:DescribeVpcs` and `ec2:DescribeFlowLogs` (`SRA-EC2-02`, and `DescribeVpcs` again from `SRA-ROUTE53RESOLVER-01`) and `route53resolver:ListResolverQueryLogConfigAssociations` — taking the minified policy document from 5,338 to 5,517 characters against the 6,144-character managed-policy quota. `events:ListRules` and `iam:GetRole`, which `SRA-SECURITYINCIDENTRESPONSE-07` and `-06` also call, were already granted. Deploy the member-role template first, or those two network checks report one transitional run of `AccessDenied` ERROR rows.
 
 The buildspec does **not** capture stderr per account. Under `parallel -j5` five
 processes interleave into one CloudWatch stream, so a diagnostic cannot be

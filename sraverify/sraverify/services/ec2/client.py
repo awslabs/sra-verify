@@ -1,5 +1,6 @@
 """
-EC2 client, for the account-level default EBS encryption setting.
+EC2 client, for the account-level default EBS encryption setting and the
+VPC and flow-log inventories.
 
 Every method returns a dict: the boto3 response on success, or the error result
 built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
@@ -42,6 +43,45 @@ class EC2Client(AWSClient):
         """
         try:
             return self.client.get_ebs_encryption_by_default()
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def describe_vpcs(self) -> Mapping[str, Any]:
+        """
+        List every VPC visible to the account in this Region.
+
+        The result includes VPCs shared into the account through AWS RAM; the
+        check filters on ``OwnerId``.
+
+        Returns:
+            ``{"Vpcs": [...]}`` with every page merged, on success, or the error
+            result.
+        """
+        try:
+            vpcs = []
+            for page in self.client.get_paginator('describe_vpcs').paginate():
+                vpcs.extend(page.get('Vpcs', []))
+            return {"Vpcs": vpcs}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def describe_flow_logs(self) -> Mapping[str, Any]:
+        """
+        List every flow log in this Region.
+
+        Deliberately unfiltered: a ``resource-id`` filter naming a nonexistent
+        VPC answers an empty list rather than an error, so the check lists all
+        flow logs once and matches them to VPCs by ``ResourceId``.
+
+        Returns:
+            ``{"FlowLogs": [...]}`` with every page merged, on success, or the
+            error result.
+        """
+        try:
+            flow_logs = []
+            for page in self.client.get_paginator('describe_flow_logs').paginate():
+                flow_logs.extend(page.get('FlowLogs', []))
+            return {"FlowLogs": flow_logs}
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

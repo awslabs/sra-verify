@@ -3,15 +3,15 @@ Properties 1, 2, 3, 3a, 4, and 6: the client contract, over every client method.
 
 Every ``<Service>Client`` method must return a dict on every non-raising path --
 a named-key success dict, or ``{"Error": {"Code", "Message", "Operation"}}`` --
-and must let a programming defect propagate. This module holds that for all 92
-methods across the 18 clients, enumerated by reflection so a method added later
+and must let a programming defect propagate. This module holds that for all 101
+methods across the 19 clients, enumerated by reflection so a method added later
 is covered without a second edit.
 
 **This module is what makes plain ``try``/``except`` safe to repeat.** Each client
 method writes its own two-clause handler by hand rather than going through a
 shared guard -- a deliberate choice, so a reader of ``client.py`` sees the error
-handling at the call site. The cost is 92 copies of the same idiom, and the
-historical failure mode of 92 copies is drift: some catching only
+handling at the call site. The cost is 101 copies of the same idiom, and the
+historical failure mode of 101 copies is drift: some catching only
 ``ClientError``, some using ``str(e)``, some returning ``[]``. Properties 1-4
 close that by *running* every method through every failure kind, and the static
 Property 6 tests read each ``except`` clause and require it to be exactly
@@ -187,7 +187,7 @@ class ClientAdapter:
 
 
 # --------------------------------------------------------------------------- #
-# The tables -- one per service, all 18, written against the current signatures.
+# The tables -- one per service, all 19, written against the current signatures.
 #
 # ``success`` is the boto3 response the method *reads*, which the migration does
 # not change: it changes what the wrapper returns, not what AWS sends.
@@ -387,6 +387,33 @@ _EC2 = (
         boto_method="get_ebs_encryption_by_default",
         operation="GetEbsEncryptionByDefault",
         success={"EbsEncryptionByDefault": True},
+    ),
+    ClientAdapter(
+        method="describe_vpcs",
+        boto_service="ec2",
+        boto_method="describe_vpcs",
+        operation="DescribeVpcs",
+        success=({"Vpcs": [{"VpcId": "vpc-1", "OwnerId": _TEST_ACCOUNT, "IsDefault": True}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="describe_flow_logs",
+        boto_service="ec2",
+        boto_method="describe_flow_logs",
+        operation="DescribeFlowLogs",
+        success=(
+            {
+                "FlowLogs": [
+                    {
+                        "FlowLogId": "fl-1",
+                        "ResourceId": "vpc-1",
+                        "FlowLogStatus": "ACTIVE",
+                        "TrafficType": "ALL",
+                    }
+                ]
+            },
+        ),
+        paginated=True,
     ),
 )
 
@@ -930,6 +957,59 @@ _SECURITYINCIDENTRESPONSE = (
         operation="ListMemberships",
         success={"items": [{"membershipId": "m-abc123", "membershipStatus": "Active"}]},
     ),
+    ClientAdapter(
+        method="list_event_rules",
+        boto_service="events",
+        boto_method="list_rules",
+        operation="ListRules",
+        success=(
+            {
+                "Rules": [
+                    {
+                        "Name": "SIRGuardDutyRule",
+                        "State": "ENABLED",
+                        "EventBusName": "default",
+                        "ManagedBy": "triage.security-ir.amazonaws.com",
+                        "EventPattern": (
+                            '{"source":["aws.guardduty"],'
+                            '"detail-type":["GuardDuty Finding"]}'
+                        ),
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+)
+
+_ROUTE53RESOLVER = (
+    ClientAdapter(
+        method="describe_vpcs",
+        boto_service="ec2",
+        boto_method="describe_vpcs",
+        operation="DescribeVpcs",
+        success=({"Vpcs": [{"VpcId": "vpc-1", "OwnerId": _TEST_ACCOUNT, "IsDefault": False}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="list_resolver_query_log_config_associations",
+        boto_service="route53resolver",
+        boto_method="list_resolver_query_log_config_associations",
+        operation="ListResolverQueryLogConfigAssociations",
+        success=(
+            {
+                "ResolverQueryLogConfigAssociations": [
+                    {
+                        "Id": "rqlca-1",
+                        "ResolverQueryLogConfigId": "rqlc-1",
+                        "ResourceId": "vpc-1",
+                        "Status": "ACTIVE",
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
 )
 
 _SECURITYLAKE = (
@@ -1170,7 +1250,7 @@ _WAF = (
     ),
 )
 
-#: service -> adapters. All 18, so Property 3a can assert completeness per
+#: service -> adapters. All 19, so Property 3a can assert completeness per
 #: service rather than only in aggregate.
 ADAPTERS: dict[str, tuple[ClientAdapter, ...]] = {
     "accessanalyzer": _ACCESSANALYZER,
@@ -1185,6 +1265,7 @@ ADAPTERS: dict[str, tuple[ClientAdapter, ...]] = {
     "inspector": _INSPECTOR,
     "macie": _MACIE,
     "organizations": _ORGANIZATIONS,
+    "route53resolver": _ROUTE53RESOLVER,
     "s3": _S3,
     "securityhub": _SECURITYHUB,
     "securityincidentresponse": _SECURITYINCIDENTRESPONSE,
@@ -1238,7 +1319,7 @@ def _params(property_key: str) -> list[Any]:
     """Return parametrize values, one per client method.
 
     ``property_key`` is retained and unused; see the note on
-    ``test_accessor_cache_property._params``. Every one of the 92 client methods
+    ``test_accessor_cache_property._params``. Every one of the 101 client methods
     is now asserted unconditionally against every property.
 
     Args:
@@ -1394,18 +1475,18 @@ def _failure_lines(records: list[logging.LogRecord]) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
-def test_eighteen_services_are_discovered() -> None:
+def test_nineteen_services_are_discovered() -> None:
     """The enumeration found the whole tree."""
-    assert len(_SERVICE_NAMES) == 18, (
-        f"expected 18 service packages, found {len(_SERVICE_NAMES)}: {_SERVICE_NAMES}"
+    assert len(_SERVICE_NAMES) == 19, (
+        f"expected 19 service packages, found {len(_SERVICE_NAMES)}: {_SERVICE_NAMES}"
     )
 
 
 def test_the_target_set_is_not_trivially_small() -> None:
-    """92 client methods across the 18 clients."""
+    """101 client methods across the 19 clients."""
     assert len(_TARGETS) >= 90, (
         f"only {len(_TARGETS)} client methods paired with an adapter; the tree "
-        f"holds 92 and either discovery or the tables are broken"
+        f"holds 101 and either discovery or the tables are broken"
     )
 
 
@@ -1670,7 +1751,7 @@ def test_every_client_method_returns_a_non_error_mapping_on_success(
 def _client_module_paths() -> list[Path]:
     """Return every client module's path, sorted.
 
-    The 17 ``services/*/client.py`` files and ``core/organizations_client.py``,
+    The 18 ``services/*/client.py`` files and ``core/organizations_client.py``,
     derived from the imported modules so the AST rules scan exactly what
     :func:`_client_classes` enumerates.
 
@@ -1687,7 +1768,7 @@ def _client_params(property_key: str) -> list[Any]:
     """Return parametrize values over client modules, one per module.
 
     ``property_key`` is retained and unused; see the note on
-    ``test_accessor_cache_property._params``. All 18 client modules are now
+    ``test_accessor_cache_property._params``. All 19 client modules are now
     asserted unconditionally, which makes this identical to
     :func:`_all_client_params` -- the two are kept separate because the
     distinction they encoded is still the reason some properties were never
@@ -1743,7 +1824,7 @@ def test_every_client_except_clause_catches_exactly_the_aws_exceptions(
     ``AWS_EXCEPTIONS`` and nothing else.
 
     This is the static half of what makes hand-written ``try``/``except`` safe to
-    repeat across 92 methods. The dynamic half is Properties 1-4 above, which
+    repeat across 101 methods. The dynamic half is Properties 1-4 above, which
     drive every method through a simulated failure; this one reads the clause
     itself, so the two failure modes the old handlers had are each caught at the
     line that introduces them:
@@ -1842,7 +1923,7 @@ def test_no_client_method_names_an_operation_or_region_in_its_handler(
     ``aws_error`` takes only the exception: the operation comes from
     ``ClientError.operation_name`` where botocore has it and is a placeholder
     where it does not, and the Region comes from ``self.region``. A method that
-    reintroduced either as a keyword would be reintroducing a value typed 92
+    reintroduced either as a keyword would be reintroducing a value typed 101
     times -- and the operation literal in particular was the one thing in the
     client layer that no test could defend, because a literal disagreeing with
     the call it labels is invisible at runtime.

@@ -2,7 +2,7 @@
 
 SRA Verify is a security assessment tool that automates the verification of [AWS Security Reference Architecture (SRA)](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/welcome.html) implementations across multiple AWS accounts and regions. It provides detailed findings and actionable remediation steps to ensure your AWS environment follows security best practices.
 
-The tool performs **158 automated security checks across 18 AWS services**: Account, Audit Manager, CloudTrail, Config, EC2, Firewall Manager, GuardDuty, IAM, IAM Access Analyzer, Inspector, Macie, Organizations, S3, Security Hub, Security Incident Response, Security Lake, Shield, and WAF. It supports multi-account environments and can run checks specific to management, audit, and log archive accounts while providing detailed findings with remediation guidance.
+The tool performs **187 automated security checks across 19 AWS services**: Account, Audit Manager, CloudTrail, Config, EC2, Firewall Manager, GuardDuty, IAM, IAM Access Analyzer, Inspector, Macie, Organizations, Route 53 Resolver, S3, Security Hub, Security Incident Response, Security Lake, Shield, and WAF. It supports multi-account environments and can run checks specific to management, audit, and log archive accounts while providing detailed findings with remediation guidance.
 
 For the full check inventory, see [docs/checks.txt](./docs/checks.txt) or run `sraverify --list-checks`.
 

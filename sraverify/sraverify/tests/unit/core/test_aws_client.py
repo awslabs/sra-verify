@@ -2,7 +2,7 @@
 Unit tests for ``core/aws_client.py`` -- ``AWSClient.aws_error``.
 
 ``aws_error`` is the single line every client's ``except`` clause contains, so
-it is the one piece of the client tier that is written once and relied on 92
+it is the one piece of the client tier that is written once and relied on 101
 times. These tests pin its behaviour directly; the reflection module
 ``tests/property/test_client_contract_property.py`` then drives every real client
 method through the same failure kinds and asserts the return shape.
@@ -642,7 +642,7 @@ def test_the_message_field_always_round_trips_through_json(
     """A hostile AWS message cannot break the one-line promise.
 
     This is why ``message`` is JSON-encoded and last, and why the encoding lives
-    in one method rather than in 92 hand-written ``except`` clauses. An AWS
+    in one method rather than in 101 hand-written ``except`` clauses. An AWS
     message containing a newline would otherwise split the record across two
     lines, so a per-line reader would take the tail for a separate malformed
     record and the count would no longer be one-per-failure.
@@ -683,7 +683,7 @@ def test_aws_error_needs_only_the_exception() -> None:
 
     One positional argument. Nothing to type per call site, so nothing that can
     be typed wrong -- which was the objection that removed ``operation=`` and
-    ``region=`` from every one of the 92 handlers.
+    ``region=`` from every one of the 101 handlers.
     """
     import inspect
 

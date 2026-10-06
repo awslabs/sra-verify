@@ -5,7 +5,8 @@ Per-scan cached AWS responses live on the attached :class:`ScanContext` under th
 ``"ec2"`` namespace. Every accessor returns the client's response dict unchanged,
 or an error result, and none caches a failure.
 
-One accessor, reading the account-level default EBS encryption setting per Region.
+Three accessors, per Region: the account-level default EBS encryption setting,
+the VPC inventory and the flow-log inventory.
 """
 from typing import Any, ClassVar, Mapping, Optional
 
@@ -28,7 +29,9 @@ class EC2Check(SecurityCheck):
     #: an account with default encryption switched off is a successful response
     #: carrying ``EbsEncryptionByDefault: False``, not an error. So there is no
     #: code from this operation that means "not configured", and every error is an
-    #: inability to determine.
+    #: inability to determine. DescribeVpcs and DescribeFlowLogs answer an empty
+    #: list for "nothing here"; no error code from either was observed or is
+    #: documented as meaning "not configured".
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
 
     def _setup_clients(self):
@@ -75,6 +78,62 @@ class EC2Check(SecurityCheck):
             return no_client_result(service="EC2", region=region)
 
         result = client.get_ebs_encryption_by_default()
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
+
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
+
+    def get_vpcs(self, region: str) -> Mapping[str, Any]:
+        """
+        Get every VPC visible to the account in a Region, with caching.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            ``{"Vpcs": [...]}``, or an error result.
+        """
+        cache_key = f"vpcs:{region}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug(f"EC2: Using cached {cache_key}")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(f"EC2: No client available for region {region}")
+            return no_client_result(service="EC2", region=region)
+
+        result = client.describe_vpcs()
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
+
+        self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
+
+    def get_flow_logs(self, region: str) -> Mapping[str, Any]:
+        """
+        Get every flow log in a Region, with caching.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            ``{"FlowLogs": [...]}``, or an error result.
+        """
+        cache_key = f"flow_logs:{region}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            logger.debug(f"EC2: Using cached {cache_key}")
+            return self._ctx._get(self.NAMESPACE, cache_key)
+
+        client = self.get_client(region)
+        if client is None:
+            logger.warning(f"EC2: No client available for region {region}")
+            return no_client_result(service="EC2", region=region)
+
+        result = client.describe_flow_logs()
         if is_error(result):
             # Never cached: a retry has to be able to re-issue the call.
             return result

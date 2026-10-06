@@ -7,7 +7,7 @@ writing new checks. For deployment and operator instructions, see the [top-level
 The tool is **read-only**. Checks call `Describe*` / `Get*` / `List*` only. Remediation is
 emitted as text in the finding, never performed.
 
-Current catalog: **158 checks across 18 services**. Run `sraverify --list-checks` for the
+Current catalog: **192 checks across 19 services**. Run `sraverify --list-checks` for the
 inventory; [`docs/checks.txt`](../docs/checks.txt) is a checked-in copy of that output.
 
 ## Project structure
@@ -231,7 +231,7 @@ layer instead of removing it. Each check's findings are materialized with
 Because a defective declaration raises at import, **the catalog is validated by importing
 it**: a mis-filed or malformed check is a boot failure, not a silent skip. Nothing on the
 discovery or registration path opens a file or issues an AWS call, which makes
-`--list-checks` a credential-free, I/O-free validation pass over all 158 checks.
+`--list-checks` a credential-free, I/O-free validation pass over all 192 checks.
 
 ### Identity is cross-checked four ways
 
@@ -622,7 +622,7 @@ This is the one client under `core/` (`core/organizations_client.py`): the provi
 `core/` uses it, and `core/` never imports `services/`. Every other client is
 `services/<svc>/client.py`.
 
-That `except` clause is byte-identical in all 98 client methods, and that is the point:
+That `except` clause is byte-identical in all 103 client methods, and that is the point:
 there is nothing to type per call site, so nothing that can be typed wrong. Earlier drafts
 passed `operation="ListRoots"` and `region=self.region`; both were removed on the
 reasoning that a value typed at 108 call sites will be typed wrong at one of them.
@@ -1057,8 +1057,8 @@ before `sts:AssumeRole`, and `SRAVerify.resolve_scan_region()` lets a host prefl
 
 ## Tests
 
-The suite lives at `sraverify/tests/` and collects **11677 tests** (10325 passed, 1352
-skipped; one more skips where no local `generated_*` policy artefact exists). None of them needs AWS credentials or issues an AWS call.
+The suite lives at `sraverify/tests/` and collects **12064 tests** (10689 passed, 1375
+skipped). None of them needs AWS credentials or issues an AWS call.
 
 From the project root. `[tool.pytest.ini_options]` in `pyproject.toml` sets `testpaths`
 and `pythonpath`, so no `PYTHONPATH` is needed:
@@ -1072,7 +1072,7 @@ cd sraverify && uv run pytest -q
   `ScanContext` construction, the scan Region rule and its fail-fast paths (session, library),
   and the Organizations Region derivation
 - `tests/unit/cli/` — exit codes, including the scan paths
-- `tests/unit/services/` — Inspector's `BatchGetAccountStatus` batching
+- `tests/unit/services/` — Inspector's `BatchGetAccountStatus` batching, and per-arm tests for the five SIR log-readiness checks
 - `tests/unit/util/` — the IAM policy generator
 - `tests/property/` — 31 hypothesis and reflection modules covering metadata validation,
   `Finding` immutability and value types, the row contract, CSV round-trip, helper
@@ -1081,16 +1081,16 @@ cd sraverify && uv run pytest -q
 The client-error-contract modules are the largest block, and between them they hold the whole
 contract:
 
-| Module                                   | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test_client_contract_property.py`       | All 98 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 17 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition                                                                                                                                   |
-| `test_accessor_cache_property.py`        | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                                                                                                                                                                                                      |
-| `test_check_classification_property.py`  | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                                                                                                                                                                                                            |
-| `test_discriminator_property.py`         | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared; the provider alone declares its `OWNED_OPERATIONS`, and the 48-row `_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden pins every other service-table entry                                                                                                                                                             |
-| `test_no_confessing_fail_property.py`    | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                                                                                                                                                                                                               |
-| `test_stdout_contract_property.py`       | Nothing in the package writes to stdout                                                                                                                                                                                                                                                                                                                                                                                              |
-| `test_organization_provider_property.py` | All eleven `OrganizationsProvider` accessors: every page merged, one fetch per accessor per key per (sequential) scan, failures never cached, the Security Lake primer, log shape, refcount release; exports the `PROVIDER_ADAPTERS` table the catalog harnesses stub `ctx.organization` from                                                                                                                                        |
-| `test_layering_property.py`              | By AST over package code only: `core/` never imports `services/`; no base inherits anything below `SecurityCheck`; no `base.py` imports or constructs `OrganizationsClient`; only `core/organizations_client.py` issues an `organizations` operation and only `core/organization.py` calls it; no base reads the `organizations` namespace by key; every binding in `core/`, `scanner.py`, `cli.py`, `utils/` names a derived Region |
+| Module                                   | What it holds                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_client_contract_property.py`       | All 103 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 18 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition |
+| `test_accessor_cache_property.py`        | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                                                                     |
+| `test_check_classification_property.py`  | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                                                                           |
+| `test_discriminator_property.py`         | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared; the provider alone declares its `OWNED_OPERATIONS`, and the 48-row `_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden pins every other service-table entry                                                                                                                                                                                |
+| `test_no_confessing_fail_property.py`    | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                                                                              |
+| `test_stdout_contract_property.py`       | Nothing in the package writes to stdout                                                                                                                                                                                                                                                             |
+| `test_organization_provider_property.py` | All eleven `OrganizationsProvider` accessors: every page merged, one fetch per accessor per key per (sequential) scan, failures never cached, the Security Lake primer, log shape, refcount release; exports the `PROVIDER_ADAPTERS` table the catalog harnesses stub `ctx.organization` from                                                   |
+| `test_layering_property.py`              | By AST over package code only: `core/` never imports `services/`; no base inherits anything below `SecurityCheck`; no `base.py` imports or constructs `OrganizationsClient`; only `core/organizations_client.py` issues an `organizations` operation and only `core/organization.py` calls it; no base reads the `organizations` namespace by key; every binding in `core/`, `scanner.py`, `cli.py`, `utils/` names a derived Region                                              |
 
 Two of these carry **prescriptive** adapter tables — the `ClientAdapter` tables name the
 boto3 method, operation and success shape each client method is contracted to produce, and
@@ -1099,7 +1099,7 @@ must be added to its table, or the completeness test fails for that service. Tha
 deliberate: the tables are how the suite knows what to drive, so an unlisted method would be
 silently untested.
 
-Several property modules are **catalog-wide**: they enumerate all 187 registered checks with
+Several property modules are **catalog-wide**: they enumerate all 192 registered checks with
 `pytest.mark.parametrize` rather than sampling, so a failure names the offending check ID in
 the test ID.
 

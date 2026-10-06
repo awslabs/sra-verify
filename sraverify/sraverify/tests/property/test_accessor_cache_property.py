@@ -295,6 +295,20 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             client_method="get_ebs_encryption_by_default",
             cache_key=f"ebs_encryption_default:{_TEST_REGION}",
         ),
+        A(
+            "get_vpcs",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="describe_vpcs",
+            cache_key=f"vpcs:{_TEST_REGION}",
+        ),
+        A(
+            "get_flow_logs",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="describe_flow_logs",
+            cache_key=f"flow_logs:{_TEST_REGION}",
+        ),
     ),
     "firewallmanager": (
         A(
@@ -556,6 +570,23 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             "guardrail_identifiers_of",
             "helper",
             args=({"EffectivePolicy": {"PolicyContent": "{}"}},),
+        ),
+    ),
+    "route53resolver": (
+        A("get_client", "client_lookup", args=(_TEST_REGION,)),
+        A(
+            "get_vpcs",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="describe_vpcs",
+            cache_key=f"vpcs:{_TEST_REGION}",
+        ),
+        A(
+            "get_query_log_config_associations",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_resolver_query_log_config_associations",
+            cache_key=f"query_log_config_associations:{_TEST_REGION}",
         ),
     ),
     "s3": (
@@ -891,9 +922,9 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         # Every one of these routes through the private _discover_memberships or
         # _sir_client rather than through self._clients, so neither the no-client
         # path nor the NAMESPACE cache applies -- this base declares no NAMESPACE
-        # at all (a known defect, deferred by Non-Goal 6). The one caching site is
-        # _discover_memberships, covered by its own test below.
-        # Of the five rows after get_delegated_administrators, four hand a check
+        # at all (a known defect, deferred by Non-Goal 6). The caching sites are
+        # _discover_memberships and get_event_rules, each covered by its own test below.
+        # Of the six rows after get_delegated_administrators, five hand a check
         # the client's dict directly, so they are error-bearing even though the
         # caching classification is ``derived``; discover_sir_region returns a
         # Region name and is not. get_delegated_administrators delegates to the
@@ -928,6 +959,16 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             "get_role",
             "derived",
             why="builds a throwaway client via _sir_client; no NAMESPACE cache",
+            error_bearing=True,
+        ),
+        A(
+            "get_event_rules",
+            "derived",
+            args=(_TEST_REGION,),
+            client_method="list_event_rules",
+            why="caches under the module-level _CACHE_NAMESPACE via _sir_client; this base "
+            "declares no NAMESPACE (known deferral), so Properties 7-9 cannot reach it -- "
+            "held by test_securityincidentresponse_get_event_rules_never_caches_a_failure",
             error_bearing=True,
         ),
         # Returns a Region name, not a response dict.
@@ -1477,10 +1518,10 @@ def _params(targets: list[_Target], property_key: str) -> list[Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_eighteen_services_are_discovered() -> None:
+def test_nineteen_services_are_discovered() -> None:
     """The enumeration found the whole tree."""
-    assert len(_SERVICE_NAMES) == 18, (
-        f"expected 18 service packages, found {len(_SERVICE_NAMES)}"
+    assert len(_SERVICE_NAMES) == 19, (
+        f"expected 19 service packages, found {len(_SERVICE_NAMES)}"
     )
 
 
@@ -1759,11 +1800,12 @@ def test_a_helper_never_touches_the_per_scan_context(target: _Target | None) -> 
 # --------------------------------------------------------------------------- #
 
 
-def test_securityincidentresponse_discover_memberships_is_the_one_caching_site() -> None:
+def test_securityincidentresponse_discover_memberships_caches_under_the_module_namespace() -> None:
     """The private helper the six SIR accessors route through.
 
     Classified out of Properties 7-9 because it is private and therefore not in
-    the public enumeration, but it is the only place that base writes the cache --
+    the public enumeration, but it is one of the two places that base writes the
+    cache (the other is get_event_rules) --
     and it falls back to caching ``(regions[0], response_from_regions[0])``, which
     may itself be an error result.
     """
@@ -1782,10 +1824,49 @@ def test_securityincidentresponse_discover_memberships_is_the_one_caching_site()
     )
 
 
+def test_securityincidentresponse_get_event_rules_never_caches_a_failure() -> None:
+    """``get_event_rules`` caches a success under the module namespace, never a failure.
+
+    Classified ``derived`` because this base has no ``NAMESPACE`` for Properties
+    7-9 to check the write against, so the same four facts are held here: an
+    error result is returned unchanged and not cached; the next call re-issues
+    the client call; a success is cached under
+    ``("securityincidentresponse", "event_rules:<region>")``; and a warm cache
+    answers without touching the client.
+    """
+    cls = _base_class("securityincidentresponse")
+    adapter = next(
+        a for a in _ADAPTERS["securityincidentresponse"] if a.method == "get_event_rules"
+    )
+    target = _Target("securityincidentresponse", cls, adapter)
+    key = ("securityincidentresponse", f"event_rules:{_TEST_REGION}")
+
+    check, ctx, wrapper = _make_check(target)
+    failure = error_result(
+        code="AccessDeniedException", message="denied", operation="ListRules"
+    )
+    wrapper.list_event_rules.return_value = failure
+
+    assert check.get_event_rules(_TEST_REGION) == failure
+    assert key not in ctx.probe_cache
+    assert check.get_event_rules(_TEST_REGION) == failure
+    assert wrapper.list_event_rules.call_count == 2, "a failure must be re-issued"
+
+    success = {"Rules": [{"Name": "SIRGuardDutyRule", "State": "ENABLED"}]}
+    wrapper.list_event_rules.return_value = success
+    assert check.get_event_rules(_TEST_REGION) == success
+    assert ctx.probe_cache[key] == success
+
+    wrapper.list_event_rules.reset_mock()
+    assert check.get_event_rules(_TEST_REGION) == success
+    wrapper.list_event_rules.assert_not_called()
+
+
 def test_securityincidentresponse_declares_no_namespace() -> None:
     """A known defect, asserted so it cannot be "fixed" by accident here.
 
-    This base declares no ``NAMESPACE``, its accessors do no caching, and three of
+    This base declares no ``NAMESPACE``, its two caching sites write the
+    module-level _CACHE_NAMESPACE rather than a class NAMESPACE, and three of
     them pin ``self.regions[0]`` while the sibling ``discover_sir_region``
     resolves the Region correctly. Non-Goal 6 defers all of it: folding a
     Region-labelling change into a verdict-correctness change would make a diff of

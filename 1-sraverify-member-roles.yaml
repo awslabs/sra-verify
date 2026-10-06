@@ -146,8 +146,10 @@ Resources:
           - Sid: Ec2Permissions
             Effect: Allow
             Action:
+              - ec2:DescribeFlowLogs
               - ec2:DescribeRegions
               - ec2:DescribeVerifiedAccessInstances
+              - ec2:DescribeVpcs
               - ec2:GetEbsEncryptionByDefault
               - ec2:GetVerifiedAccessInstanceWebAcl
             Resource: '*'
@@ -219,6 +221,11 @@ Resources:
               - organizations:ListPolicies
               - organizations:ListPoliciesForTarget
               - organizations:ListRoots
+            Resource: '*'
+          - Sid: Route53resolverPermissions
+            Effect: Allow
+            Action:
+              - route53resolver:ListResolverQueryLogConfigAssociations
             Resource: '*'
           - Sid: S3Permissions
             Effect: Allow

@@ -6,9 +6,9 @@ built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
-Four methods across two boto3 services -- ``security-ir`` for the membership
-APIs and ``iam`` for the triage service linked role. Both clients are acquired in
-``__init__``. The delegated-administrator and account lookups go through the
+Five methods across three boto3 services -- ``security-ir`` for the membership
+APIs, ``iam`` for the service linked roles, and ``events`` for the proactive
+response EventBridge rules. All three clients are acquired in ``__init__``. The delegated-administrator and account lookups go through the
 scan's Organizations provider, not this client.
 
 A membership lives in a single home Region, and ``ListMemberships`` answers with an
@@ -38,6 +38,9 @@ class SecurityIncidentResponseClient(AWSClient):
         super().__init__(region, ctx)
         self.sir_client = ctx.get_client('security-ir', region=region)
         self.iam_client = ctx.get_client('iam', region=region)
+        # EventBridge rules are regional, so this binding is per-Region like the
+        # wrapper itself.
+        self.events_client = ctx.get_client('events', region=region)
 
     def list_memberships(self) -> Mapping[str, Any]:
         """
@@ -101,5 +104,23 @@ class SecurityIncidentResponseClient(AWSClient):
         """
         try:
             return self.iam_client.get_role(RoleName=role_name)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_event_rules(self) -> Mapping[str, Any]:
+        """
+        List the EventBridge rules on the default event bus in this Region.
+
+        No ``EventBusName`` is passed, so ``ListRules`` reads the default bus.
+
+        Returns:
+            ``{"Rules": [...]}`` with every page merged, on success, or the error
+            result.
+        """
+        try:
+            rules = []
+            for page in self.events_client.get_paginator('list_rules').paginate():
+                rules.extend(page.get('Rules', []))
+            return {"Rules": rules}
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)

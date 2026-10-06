@@ -119,7 +119,7 @@ def test_the_service_module_set_is_not_trivially_small() -> None:
     """Guard against an enumeration bug reading as a vacuous pass."""
     assert len(_SERVICE_MODULES) >= 200, (
         f"found {len(_SERVICE_MODULES)} modules under services/; the tree holds "
-        f"18 services with 158 checks and the walk is broken"
+        f"19 services with 192 checks and the walk is broken"
     )
 
 

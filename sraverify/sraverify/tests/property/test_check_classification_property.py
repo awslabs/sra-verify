@@ -433,10 +433,12 @@ def test_no_check_raises_when_every_accessor_fails(
 #: against the real classes, so this join is derived from the tree rather than
 #: asserted about it.
 #:
-#: ``securityincidentresponse``'s six public methods are classified ``derived``
-#: and declare no ``client_method``, because they route through a private helper
-#: rather than through ``self._clients`` -- but their names are the client method
-#: names, so ``client_method or method`` resolves them.
+#: ``securityincidentresponse``'s seven public methods are classified ``derived``,
+#: because they route through a private helper rather than through
+#: ``self._clients``. Six declare no ``client_method`` because their names are the
+#: client method names; ``get_event_rules`` declares
+#: ``client_method="list_event_rules"``. Either way ``client_method or method``
+#: resolves them.
 _OPERATION_OF_ACCESSOR: dict[tuple[str, str], str] = {
     (service, accessor.method): client.operation
     for service, accessors in _ADAPTERS.items()

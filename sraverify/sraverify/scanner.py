@@ -378,7 +378,7 @@ class SRAVerify:
             # Full-value comparison, ASCII-lower-cased and therefore
             # locale-independent. ``str.lower()`` rather than ``casefold()``,
             # which folds characters outside A-Z and would let a lookalike
-            # match one of the 19 ASCII display names. No prefix or substring
+            # match one of the 20 ASCII display names. No prefix or substring
             # match: ``--service Security`` matches nothing. ``strip()``
             # applies to the supplied value only, since whitespace inside
             # ``meta.service`` is already impossible.

@@ -91,11 +91,11 @@ from sraverify.core.registry import all_checks
 import sraverify.services  # noqa: F401  (imported for its registration side effect)
 
 
-#: The catalog size the migration is specified to produce: 158 checks across
-#: 18 services. Both numbers are asserted rather than merely derived, so that a
+#: The catalog size the migration is specified to produce: 192 checks across
+#: 19 services. Both numbers are asserted rather than merely derived, so that a
 #: change which drops a check *and* its file stays a bijection and still fails.
-EXPECTED_CHECK_COUNT = 187
-EXPECTED_SERVICE_COUNT = 18
+EXPECTED_CHECK_COUNT = 192
+EXPECTED_SERVICE_COUNT = 19
 
 #: Modules eligible to be check modules. Mirrors ``CHECK_MODULE_PREFIX`` in
 #: ``core/discovery.py``, spelled out here rather than imported so that this
@@ -378,8 +378,8 @@ def test_the_bijection_reports_both_directions_of_a_mismatch() -> None:
     )
 
 
-def test_exactly_eighteen_service_subpackages_are_discovered() -> None:
-    """Requirement 5.2: the ``services`` package holds 18 service subpackages.
+def test_exactly_nineteen_service_subpackages_are_discovered() -> None:
+    """Requirement 5.2: the ``services`` package holds 19 service subpackages.
 
     Counted from the filesystem, taking a directory with an ``__init__.py`` as
     a package, so ``__pycache__`` and any stray directory are excluded on the
@@ -412,7 +412,7 @@ def test_exactly_eighteen_service_subpackages_are_discovered() -> None:
     )
 
     # Every service contributes at least one check, so no service subpackage is
-    # dead weight and the 158 files are spread across all 18 of them.
+    # dead weight and the 192 files are spread across all 19 of them.
     empty = [
         name
         for name in subpackages

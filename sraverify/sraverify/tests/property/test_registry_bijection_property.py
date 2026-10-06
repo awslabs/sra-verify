@@ -91,10 +91,10 @@ from sraverify.core.registry import all_checks
 import sraverify.services  # noqa: F401  (imported for its registration side effect)
 
 
-#: The catalog size the migration is specified to produce: 187 checks across
+#: The catalog size the migration is specified to produce: 192 checks across
 #: 19 services. Both numbers are asserted rather than merely derived, so that a
 #: change which drops a check *and* its file stays a bijection and still fails.
-EXPECTED_CHECK_COUNT = 187
+EXPECTED_CHECK_COUNT = 192
 EXPECTED_SERVICE_COUNT = 19
 
 #: Modules eligible to be check modules. Mirrors ``CHECK_MODULE_PREFIX`` in
@@ -412,7 +412,7 @@ def test_exactly_nineteen_service_subpackages_are_discovered() -> None:
     )
 
     # Every service contributes at least one check, so no service subpackage is
-    # dead weight and the 187 files are spread across all 19 of them.
+    # dead weight and the 192 files are spread across all 19 of them.
     empty = [
         name
         for name in subpackages

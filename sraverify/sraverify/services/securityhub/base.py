@@ -33,6 +33,14 @@ from sraverify.services.securityhub.client import SecurityHubClient
 #: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-v2-cwe-event-types.html
 V2_FINDINGS_DETAIL_TYPE = "Findings Imported V2"
 
+#: The EventBridge ``detail-type`` of a Security Hub CSPM finding event.
+#: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-cwe-integration-types.html
+CSPM_FINDINGS_DETAIL_TYPE = "Security Hub Findings - Imported"
+
+#: The ``ConfigurationPolicyId`` of a self-managed association.
+#: https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_StartConfigurationPolicyAssociation.html
+SELF_MANAGED_POLICY_ID = "SELF_MANAGED_SECURITY_HUB"
+
 #: The Organizations policy type that enables Security Hub (V2) org-wide.
 SECURITYHUB_POLICY_TYPE = "SECURITYHUB_POLICY"
 
@@ -168,6 +176,49 @@ class SecurityHubCheck(SecurityCheck):
                 message="security hub v2 is not enabled",
             ),
         },
+        # Entries A and B below were considered for SRA-SECURITYHUB-21/22/25 (spec
+        # securityhub-cspm-split) and declared only after the read-only live probe
+        # of 2026-10-05 recorded the exact code and message for each.
+        "ListFindingAggregators": {
+            "InvalidAccessException": NotConfigured(
+                evidence=(
+                    "Observed 2026-10-05 by a read-only probe from the Security Hub "
+                    "delegated administrator, the management account and an "
+                    "application account, in eu-central-1, eu-west-1 and "
+                    "ap-southeast-2, where none of them is subscribed: "
+                    "'InvalidAccessException: Account <id> is not subscribed to AWS "
+                    "Security Hub'. The same accounts answered successfully in "
+                    "us-west-2 and us-east-1, where they are subscribed, so the "
+                    "missing resource is the hub itself and no aggregator can link "
+                    "that Region. The needle is required because InvalidAccessException "
+                    "is overloaded, as for the other operations in this table. "
+                    "https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_ListFindingAggregators.html"
+                ),
+                message="not subscribed to aws security hub",
+            ),
+        },
+        "ListConfigurationPolicyAssociations": {
+            "AccessDeniedException": NotConfigured(
+                evidence=(
+                    "Observed 2026-10-05 by a read-only probe from the management "
+                    "account and an application account, neither of which is the "
+                    "Security Hub delegated administrator, in the home Region "
+                    "us-west-2 and in us-east-1 and eu-central-1: "
+                    "'AccessDeniedException: Must be a Security Hub delegated "
+                    "administrator with Central Configuration enabled' -- central "
+                    "configuration is not in use from this account, the same reading "
+                    "as the ListConfigurationPolicies entry. The needle is essential: "
+                    "the delegated administrator in a subscribed non-home Region "
+                    "(us-east-1) answered the same code as 'Central Configuration APIs "
+                    "can only be called from the aggregation region', a fact about "
+                    "where we asked that must stay an ERROR, as must a plain IAM "
+                    "denial. https://docs.aws.amazon.com/securityhub/1.0/APIReference/"
+                    "API_ListConfigurationPolicyAssociations.html"
+                ),
+                message="with central configuration enabled",
+            ),
+        },
         "ListConfigurationPolicies": {
             "AccessDeniedException": NotConfigured(
                 evidence=(
@@ -220,7 +271,7 @@ class SecurityHubCheck(SecurityCheck):
         """
         Run one client method for a Region through the accessor shape.
 
-        The eight public accessors below differ only in cache key and client
+        The public accessors below differ only in cache key and client
         method, so the shape is written once.
 
         Args:
@@ -301,6 +352,26 @@ class SecurityHubCheck(SecurityCheck):
             region, f"finding_aggregators:{region}", "list_finding_aggregators"
         )
 
+    def get_finding_aggregator(
+        self, region: str, aggregator_arn: str
+    ) -> Mapping[str, Any]:
+        """
+        Get one Security Hub CSPM finding aggregator, with caching.
+
+        Args:
+            region: AWS region name. Should be the home Region the ARN names.
+            aggregator_arn: The ``FindingAggregatorArn``.
+
+        Returns:
+            The ``GetFindingAggregator`` response on success, or an error result.
+        """
+        return self._cached_call(
+            region,
+            f"finding_aggregator:{region}:{aggregator_arn}",
+            "get_finding_aggregator",
+            aggregator_arn,
+        )
+
     def get_configuration_policies(self, region: str) -> Mapping[str, Any]:
         """
         Get the central configuration policy summaries, with caching.
@@ -335,6 +406,23 @@ class SecurityHubCheck(SecurityCheck):
             f"configuration_policy:{region}:{identifier}",
             "get_configuration_policy",
             identifier,
+        )
+
+    def get_configuration_policy_associations(self, region: str) -> Mapping[str, Any]:
+        """
+        Get every central configuration policy association, with caching.
+
+        Args:
+            region: AWS region name. Must be the home Region.
+
+        Returns:
+            ``{"ConfigurationPolicyAssociationSummaries": [...]}`` on success, or
+            an error result.
+        """
+        return self._cached_call(
+            region,
+            f"configuration_policy_associations:{region}",
+            "list_configuration_policy_associations",
         )
 
     @staticmethod
@@ -383,6 +471,40 @@ class SecurityHubCheck(SecurityCheck):
             parts = arn.split(":")
             if len(parts) > 3 and parts[3]:
                 return parts[3]
+        return None
+
+    @staticmethod
+    def association_of(
+        summaries: list[Mapping[str, Any]], account_id: str
+    ) -> Optional[Mapping[str, Any]]:
+        """
+        Return the association summary whose target is ``account_id``, or None.
+
+        Matches ``TargetType == "ACCOUNT"`` and ``TargetId == account_id``. OU and
+        root associations are not an account's association: an account governed
+        through inheritance is listed with its own ACCOUNT entry and
+        ``AssociationType`` INHERITED. The reference supports that reading --
+        ``ListConfigurationPolicyAssociations`` takes an ``AssociationType``
+        filter (INHERITED | APPLIED), which only makes sense on a list that
+        contains inherited targets. If two entries name one account (not
+        observed; the API lists each target once), the first in list order wins,
+        which keeps the result deterministic.
+        https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_AssociationFilters.html
+        https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_ConfigurationPolicyAssociationSummary.html
+
+        Args:
+            summaries: ``ConfigurationPolicyAssociationSummaries``.
+            account_id: The account to look up.
+
+        Returns:
+            The matching summary, or ``None``.
+        """
+        for summary in summaries:
+            if (
+                summary.get("TargetType") == "ACCOUNT"
+                and summary.get("TargetId") == account_id
+            ):
+                return summary
         return None
 
     # ------------------------------------------------------------------ #
@@ -529,6 +651,45 @@ class SecurityHubCheck(SecurityCheck):
             if mode == "ALL_REGIONS_EXCEPT_SPECIFIED" and region not in linked:
                 continue
             if mode == "SPECIFIED_REGIONS" and region in linked:
+                continue
+            uncovered.append(region)
+        return sorted(uncovered)
+
+    @staticmethod
+    def cspm_unlinked_regions(
+        aggregator: Mapping[str, Any], regions: list[str]
+    ) -> list[str]:
+        """
+        Return the Regions a CSPM finding aggregator does not link to its home Region.
+
+        ``RegionLinkingMode``: ``ALL_REGIONS`` links everything;
+        ``ALL_REGIONS_EXCEPT_SPECIFIED`` links everything but ``Regions``;
+        ``SPECIFIED_REGIONS`` links only ``Regions``; ``NO_REGIONS`` links
+        nothing. The home Region (``FindingAggregationRegion``) is always
+        covered. An unrecognized mode links nothing, so it reads as a gap.
+
+        A sibling of :meth:`unlinked_regions` rather than a generalization: the
+        V2 response spells the fields ``AggregationRegion`` / ``LinkedRegions``
+        and has no ``NO_REGIONS``.
+        https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_CreateFindingAggregator.html
+
+        Args:
+            aggregator: A successful ``GetFindingAggregator`` response.
+            regions: The Regions that should be aggregated.
+
+        Returns:
+            The uncovered Regions, sorted.
+        """
+        home = aggregator.get("FindingAggregationRegion")
+        mode = aggregator.get("RegionLinkingMode")
+        listed = set(aggregator.get("Regions") or [])
+        uncovered = []
+        for region in regions:
+            if region == home or mode == "ALL_REGIONS":
+                continue
+            if mode == "ALL_REGIONS_EXCEPT_SPECIFIED" and region not in listed:
+                continue
+            if mode == "SPECIFIED_REGIONS" and region in listed:
                 continue
             uncovered.append(region)
         return sorted(uncovered)
@@ -793,6 +954,47 @@ class SecurityHubCheck(SecurityCheck):
         return (
             isinstance(detail_types, list)
             and V2_FINDINGS_DETAIL_TYPE in detail_types
+        )
+
+    @staticmethod
+    def matches_cspm_findings(rule: Mapping[str, Any]) -> bool:
+        """
+        Return whether an EventBridge rule's pattern matches CSPM finding events.
+
+        The pattern must be valid JSON naming ``aws.securityhub`` in ``source``,
+        and either name ``Security Hub Findings - Imported`` in ``detail-type`` or
+        omit ``detail-type``. A pattern that omits ``detail-type`` but filters on
+        ``detail`` counts here and not in :meth:`matches_v2_findings`: the only
+        ``detail.findings`` schema Security Hub emits is the CSPM ASFF schema, so
+        a ``detail``-filtered rule was written against CSPM events. A rule that
+        names only ``Findings Imported V2`` is a V2 rule and does not count; a
+        rule that names only ``Security Hub Findings - Custom Action`` needs a
+        person to trigger it and does not count as automated response. A bare
+        source-only rule matches both this and :meth:`matches_v2_findings`, which
+        is correct: it receives every Security Hub event.
+        https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-cwe-all-findings.html
+
+        Args:
+            rule: One ``ListRules`` entry.
+
+        Returns:
+            ``True`` if the rule would receive Security Hub CSPM finding events.
+        """
+        try:
+            pattern = json.loads(rule.get("EventPattern") or "")
+        except ValueError:
+            return False
+        if not isinstance(pattern, dict):
+            return False
+        sources = pattern.get("source")
+        if not isinstance(sources, list) or "aws.securityhub" not in sources:
+            return False
+        detail_types = pattern.get("detail-type")
+        if detail_types is None:
+            return True
+        return (
+            isinstance(detail_types, list)
+            and CSPM_FINDINGS_DETAIL_TYPE in detail_types
         )
 
     def get_administrator_account(self, region: str) -> Mapping[str, Any]:

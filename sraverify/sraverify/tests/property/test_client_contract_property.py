@@ -795,6 +795,26 @@ _SECURITYHUB = (
         },
     ),
     ClientAdapter(
+        method="list_configuration_policy_associations",
+        boto_service="securityhub",
+        boto_method="list_configuration_policy_associations",
+        operation="ListConfigurationPolicyAssociations",
+        success=(
+            {
+                "ConfigurationPolicyAssociationSummaries": [
+                    {
+                        "TargetId": _TEST_ACCOUNT,
+                        "TargetType": "ACCOUNT",
+                        "ConfigurationPolicyId": "abc",
+                        "AssociationType": "INHERITED",
+                        "AssociationStatus": "SUCCESS",
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+    ClientAdapter(
         method="list_enabled_products_for_import",
         boto_service="securityhub",
         boto_method="list_enabled_products_for_import",
@@ -815,6 +835,21 @@ _SECURITYHUB = (
                     )
                 }
             ]
+        },
+    ),
+    ClientAdapter(
+        method="get_finding_aggregator",
+        boto_service="securityhub",
+        boto_method="get_finding_aggregator",
+        operation="GetFindingAggregator",
+        args=(f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:finding-aggregator/abc",),
+        success={
+            "FindingAggregationRegion": "us-east-1",
+            "FindingAggregatorArn": (
+                f"arn:aws:securityhub:us-east-1:{_TEST_ACCOUNT}:finding-aggregator/abc"
+            ),
+            "RegionLinkingMode": "ALL_REGIONS",
+            "Regions": [],
         },
     ),
     ClientAdapter(
@@ -1319,7 +1354,7 @@ def _params(property_key: str) -> list[Any]:
     """Return parametrize values, one per client method.
 
     ``property_key`` is retained and unused; see the note on
-    ``test_accessor_cache_property._params``. Every one of the 101 client methods
+    ``test_accessor_cache_property._params``. Every one of the 103 client methods
     is now asserted unconditionally against every property.
 
     Args:
@@ -1483,7 +1518,7 @@ def test_nineteen_services_are_discovered() -> None:
 
 
 def test_the_target_set_is_not_trivially_small() -> None:
-    """101 client methods across the 19 clients."""
+    """103 client methods across the 19 clients."""
     assert len(_TARGETS) >= 90, (
         f"only {len(_TARGETS)} client methods paired with an adapter; the tree "
         f"holds 101 and either discovery or the tables are broken"

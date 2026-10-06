@@ -756,7 +756,7 @@ builtins.open = spy_open
 pathlib.Path.read_text = spy_read_text
 
 # The import under test: this is what walks 19 service packages and executes
-# 187 check class bodies, each constructing and validating a CheckMeta.
+# 192 check class bodies, each constructing and validating a CheckMeta.
 import sraverify.services
 from sraverify.core.registry import all_checks
 

@@ -164,6 +164,30 @@ class SecurityHubClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
+    def get_finding_aggregator(self, aggregator_arn: str) -> Mapping[str, Any]:
+        """
+        Get one Security Hub CSPM finding aggregator.
+
+        Args:
+            aggregator_arn: The ``FindingAggregatorArn`` from ``ListFindingAggregators``.
+
+        Returns:
+            The ``GetFindingAggregator`` response -- ``FindingAggregationRegion``,
+            ``FindingAggregatorArn``, ``RegionLinkingMode`` and ``Regions`` -- or the
+            error result. Called from the home Region, which the ARN names: the
+            user guide requires creating and updating the aggregator there, the
+            reference does not say whether a read from elsewhere answers, and the
+            live probe records what it does. Reading from the home Region is
+            correct either way.
+            https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_GetFindingAggregator.html
+        """
+        try:
+            return self.client.get_finding_aggregator(
+                FindingAggregatorArn=aggregator_arn
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
     def list_configuration_policies(self) -> Mapping[str, Any]:
         """
         List the Security Hub central configuration policies.
@@ -210,6 +234,33 @@ class SecurityHubClient(AWSClient):
         """
         try:
             return self.client.get_configuration_policy(Identifier=identifier)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_configuration_policy_associations(self) -> Mapping[str, Any]:
+        """
+        List every configuration policy association in the organization.
+
+        Returns:
+            ``{"ConfigurationPolicyAssociationSummaries": [...]}`` with every page
+            merged, or the error result. Each summary carries ``TargetId``,
+            ``TargetType`` (ACCOUNT | ORGANIZATIONAL_UNIT | ROOT),
+            ``ConfigurationPolicyId`` (a UUID, or ``SELF_MANAGED_SECURITY_HUB``),
+            ``AssociationType`` (APPLIED | INHERITED), ``AssociationStatus``
+            (PENDING | SUCCESS | FAILED) and ``AssociationStatusMessage``. Only the
+            delegated administrator may call this, and only from the home Region.
+            https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_ListConfigurationPolicyAssociations.html
+            https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_ConfigurationPolicyAssociationSummary.html
+        """
+        try:
+            summaries = []
+            for page in self.client.get_paginator(
+                'list_configuration_policy_associations'
+            ).paginate():
+                summaries.extend(
+                    page.get('ConfigurationPolicyAssociationSummaries', [])
+                )
+            return {"ConfigurationPolicyAssociationSummaries": summaries}
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 

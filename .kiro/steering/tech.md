@@ -59,6 +59,7 @@ sraverify --list-checks                        # inventory; this is the exact fo
 sraverify --list-services
 sraverify --check SRA-GUARDDUTY-01 --debug     # verify a single check while developing
 sraverify --service GuardDuty                  # case-insensitive, full-value service filter
+sraverify --service "Security Hub CSPM"        # CSPM checks only; "Security Hub" selects the V2 ones
 sraverify --account-type audit --audit-account 111122223333
 ```
 
@@ -70,7 +71,7 @@ sraverify --account-type audit --audit-account 111122223333
 cd sra-verify/sraverify && uv run pytest -q
 ```
 
-It reports **10444 passed, 1262 skipped** (11706 collected), and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (31 hypothesis and reflection modules, including catalog-wide properties that iterate the real 187 registered checks and the 101 real client methods) plus `tests/unit/{core,cli,services,util}/`. `tests/unit/mcp/` holds only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees, refuses outbound HTTP, and restores the `sraverify` logger's handlers, level and propagation after every test, so a test that runs `cli.main()` cannot leak its logging configuration into the next.
+It reports **10689 passed, 1375 skipped** (12064 collected), and no xfails — the client-error-contract migration ledger that produced them is deleted, so every property is now asserted unconditionally. The suite is `tests/property/` (31 hypothesis and reflection modules, including catalog-wide properties that iterate the real 192 registered checks and the 103 real client methods) plus `tests/unit/{core,cli,services,util}/`. `tests/unit/mcp/` holds only `__init__.py`. `tests/conftest.py` silences the boto3/botocore/urllib3 logger trees, refuses outbound HTTP, and restores the `sraverify` logger's handlers, level and propagation after every test, so a test that runs `cli.main()` cannot leak its logging configuration into the next.
 
 Add `-p no:logging` when you want readable output: several modules assert on log records, and pytest's live-log capture floods the terminal otherwise.
 
@@ -78,7 +79,7 @@ Add `-p no:logging` when you want readable output: several modules assert on log
 cd sra-verify/sraverify && uv run pytest -q --tb=line -p no:logging
 ```
 
-The 1262 skips are all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) — the service table's pairs plus the provider table's four pairs for every one of the 187 checks — and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
+The 1375 skips are all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) — the service table's pairs plus the provider table's four pairs for every one of the 192 checks — and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
 
 ### Regenerating `docs/checks.txt`
 

@@ -4,7 +4,7 @@ Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazo
 to the SRA Verify checks that assess it, so gaps are visible.
 
 - **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
-- **Check source:** the live registry (`sraverify --list-checks`), **182 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
+- **Check source:** the live registry (`sraverify --list-checks`), **187 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five Security Hub CSPM checks added by the CSPM split (SRA-SECURITYHUB-21 aggregator, -22 central-configuration associations, -23 FSBP, -24 CIS, -25 EventBridge routing), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,7 +15,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` matches the live registry byte for byte at the time of writing (182 checks).
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (187 checks).
 
 ## Summary
 
@@ -23,7 +23,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | --------------------------------- | ------: | ------: | ------: | ------: |
 | AWS Organizations                 |      11 |       7 |       1 |       3 |
 | AWS CloudTrail                    |      14 |       8 |       1 |       5 |
-| AWS Security Hub CSPM             |      17 |       6 |       5 |       6 |
+| AWS Security Hub CSPM             |      17 |      11 |       3 |       3 |
 | AWS Config                        |       7 |       5 |       0 |       2 |
 | Amazon GuardDuty                  |      17 |      11 |       1 |       5 |
 | IAM                               |       8 |       5 |       1 |       2 |
@@ -45,12 +45,12 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
 | AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **119** |  **15** |  **90** |
+| **Total**                         | **224** | **124** |  **13** |  **87** |
 
 Coverage is concentrated in the security services SRA Verify has packages for. Six
 checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
 Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 90 missing items.
+the 87 missing items.
 
 ---
 
@@ -91,25 +91,27 @@ the 90 missing items.
 
 ## AWS Security Hub CSPM
 
-|    # | Checklist item                                                   | SRA Verify check(s)                                        | Status  | Note                                                                                                                                                              |
-| ---: | ---------------------------------------------------------------- | ---------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|    1 | CSPM enabled for all member accounts and the management account  | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Covered | -08 all active accounts are members, -09 all members are Enabled                                                                                                  |
-|    2 | AWS Config enabled as a prerequisite                             | SRA-CONFIG-01, SRA-CONFIG-02                               | Covered | Recorder configured and running per Region                                                                                                                        |
-|    3 | Security Tooling account is delegated administrator              | SRA-SECURITYHUB-06, SRA-SECURITYHUB-07, SRA-SECURITYHUB-03 | Covered | -06 exists, -07 is the audit account, -03 account-level agreement                                                                                                 |
-|    4 | GuardDuty and Detective share the CSPM delegated administrator   | SRA-GUARDDUTY-14, SRA-SECURITYHUB-07                       | Partial | Both are compared to the audit account independently, which implies agreement; Detective is not assessed at all                                                   |
-|    5 | Central configuration used                                       | SRA-SECURITYHUB-04                                         | Covered |                                                                                                                                                                   |
-|    6 | All OUs and member accounts designated centrally managed         | —                                                          | Missing | Central configuration is checked, per-target association is not                                                                                                   |
-|    7 | Automatically enabled for new member accounts                    | SRA-SECURITYHUB-10                                         | Covered |                                                                                                                                                                   |
-|    8 | Automatically enabled for new standards                          | SRA-SECURITYHUB-02                                         | Covered |                                                                                                                                                                   |
-|    9 | Findings from all Regions aggregated to a single home Region     | —                                                          | Missing | No finding-aggregator check                                                                                                                                       |
-|   10 | Findings from all member accounts aggregated in Security Tooling | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Partial | Membership implies finding flow but is not the aggregation configuration itself                                                                                   |
-|   11 | FSBP standard enabled for all member accounts                    | SRA-SECURITYHUB-01                                         | Partial | Passes if *any* standard is enabled; does not identify FSBP                                                                                                       |
-|   12 | CIS AWS Foundations Benchmark enabled for all member accounts    | SRA-SECURITYHUB-01                                         | Partial | Same — no per-standard identification                                                                                                                             |
-|   13 | Other standards enabled as applicable                            | SRA-SECURITYHUB-01, SRA-SECURITYHUB-12, SRA-SECURITYHUB-13 | Partial | -12 identifies the AI Security Best Practices standard per Region (READY), -13 confirms central configuration policies enable it; no other standard is identified |
-|   14 | CSPM findings consumed by Security Hub for exposure correlation  | —                                                          | Missing |                                                                                                                                                                   |
-|   15 | Automation rule enriches findings with resource context          | —                                                          | Missing |                                                                                                                                                                   |
-|   16 | Custom EventBridge rules for automated response and remediation  | —                                                          | Missing |                                                                                                                                                                   |
-|   17 | CloudWatch telemetry enablement rule for the organization        | —                                                          | Missing |                                                                                                                                                                   |
+Display name `Security Hub CSPM` (SRA-SECURITYHUB-01 – -13 and -21 – -25); the unified Security Hub checks (-14 – -20) are listed under `Security Hub`. Items not added are explained in `.kiro/specs/securityhub-cspm-split`.
+
+|    # | Checklist item                                                   | SRA Verify check(s)                                        | Status  | Note                                                                                                                                                                                   |
+| ---: | ---------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|    1 | CSPM enabled for all member accounts and the management account  | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Covered | -08 all active accounts are members, -09 all members are Enabled                                                                                                                       |
+|    2 | AWS Config enabled as a prerequisite                             | SRA-CONFIG-01, SRA-CONFIG-02                               | Covered | Recorder configured and running per Region                                                                                                                                             |
+|    3 | Security Tooling account is delegated administrator              | SRA-SECURITYHUB-06, SRA-SECURITYHUB-07, SRA-SECURITYHUB-03 | Covered | -06 exists, -07 is the audit account, -03 account-level agreement                                                                                                                      |
+|    4 | GuardDuty and Detective share the CSPM delegated administrator   | SRA-GUARDDUTY-14, SRA-SECURITYHUB-07                       | Partial | Both are compared to the audit account independently, which implies agreement; Detective is not assessed at all. Not added — see `.kiro/specs/securityhub-cspm-split`                  |
+|    5 | Central configuration used                                       | SRA-SECURITYHUB-04                                         | Covered |                                                                                                                                                                                        |
+|    6 | All OUs and member accounts designated centrally managed         | SRA-SECURITYHUB-22                                         | Covered | -22 one row per active account: a non-self-managed configuration policy association with status SUCCESS                                                                                |
+|    7 | Automatically enabled for new member accounts                    | SRA-SECURITYHUB-10                                         | Covered |                                                                                                                                                                                        |
+|    8 | Automatically enabled for new standards                          | SRA-SECURITYHUB-02                                         | Covered |                                                                                                                                                                                        |
+|    9 | Findings from all Regions aggregated to a single home Region     | SRA-SECURITYHUB-21                                         | Covered | -21 the CSPM finding aggregator links every scanned Region                                                                                                                             |
+|   10 | Findings from all member accounts aggregated in Security Tooling | SRA-SECURITYHUB-08, SRA-SECURITYHUB-09                     | Partial | Membership implies finding flow but is not the aggregation configuration itself. Not added — see `.kiro/specs/securityhub-cspm-split`                                                  |
+|   11 | FSBP standard enabled for all member accounts                    | SRA-SECURITYHUB-01, SRA-SECURITYHUB-23                     | Covered | -23 identifies FSBP v1.0.0 per Region and requires READY                                                                                                                               |
+|   12 | CIS AWS Foundations Benchmark enabled for all member accounts    | SRA-SECURITYHUB-01, SRA-SECURITYHUB-24                     | Covered | -24 any CIS version per Region, at least one READY                                                                                                                                     |
+|   13 | Other standards enabled as applicable                            | SRA-SECURITYHUB-01, SRA-SECURITYHUB-12, SRA-SECURITYHUB-13 | Partial | -12 identifies the AI Security Best Practices standard per Region (READY), -13 confirms central configuration policies enable it. Not added — see `.kiro/specs/securityhub-cspm-split` |
+|   14 | CSPM findings consumed by Security Hub for exposure correlation  | —                                                          | Missing | Not added — see `.kiro/specs/securityhub-cspm-split`                                                                                                                                   |
+|   15 | Automation rule enriches findings with resource context          | —                                                          | Missing | Not added — see `.kiro/specs/securityhub-cspm-split`                                                                                                                                   |
+|   16 | Custom EventBridge rules for automated response and remediation  | SRA-SECURITYHUB-25                                         | Covered | -25 an ENABLED rule with a target matches `Security Hub Findings - Imported` events                                                                                                    |
+|   17 | CloudWatch telemetry enablement rule for the organization        | —                                                          | Missing | Not added — see `.kiro/specs/securityhub-cspm-split`                                                                                                                                   |
 
 ## AWS Config
 

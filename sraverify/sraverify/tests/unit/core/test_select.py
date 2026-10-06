@@ -72,7 +72,7 @@ def _import_main():
     """Import ``sraverify.scanner``, stubbing ``sraverify.services`` if needed.
 
     ``scanner.py`` carries ``import sraverify.services`` for its side effect: the
-    import walks 19 service packages and 187 check modules, and each class body
+    import walks 19 service packages and 192 check modules, and each class body
     registers itself. Two reasons not to let that run here:
 
       * During Phase 2 it *cannot* run -- an unmigrated check raises

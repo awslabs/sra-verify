@@ -7,7 +7,7 @@ writing new checks. For deployment and operator instructions, see the [top-level
 The tool is **read-only**. Checks call `Describe*` / `Get*` / `List*` only. Remediation is
 emitted as text in the finding, never performed.
 
-Current catalog: **187 checks across 19 services**. Run `sraverify --list-checks` for the
+Current catalog: **192 checks across 19 services**. Run `sraverify --list-checks` for the
 inventory; [`docs/checks.txt`](../docs/checks.txt) is a checked-in copy of that output.
 
 ## Project structure
@@ -231,7 +231,7 @@ layer instead of removing it. Each check's findings are materialized with
 Because a defective declaration raises at import, **the catalog is validated by importing
 it**: a mis-filed or malformed check is a boot failure, not a silent skip. Nothing on the
 discovery or registration path opens a file or issues an AWS call, which makes
-`--list-checks` a credential-free, I/O-free validation pass over all 187 checks.
+`--list-checks` a credential-free, I/O-free validation pass over all 192 checks.
 
 ### Identity is cross-checked four ways
 
@@ -307,6 +307,14 @@ There is no registration step. Writing the file registers it.
 | Cache namespace      | lowercase service directory name                | `NAMESPACE = "guardduty"`    |
 | `meta.service`       | AWS display name, mixed case                    | `"GuardDuty"`                |
 | `meta.resource_type` | CloudFormation type string                      | `"AWS::GuardDuty::Detector"` |
+
+`meta.service` is a display name, not a package name, and it is the boundary
+`--service` filters on. Two display names may therefore coexist in one package:
+`services/securityhub/` holds `Security Hub CSPM` checks (`SRA-SECURITYHUB-01` –
+`-13`, `-21` – `-25`) and `Security Hub` checks (`-14` – `-20`, the unified V2
+surface), sharing one base class, client and cache namespace. The file stem, check
+ID, class name and package still have to agree; `meta.service` is not an identity
+input.
 
 Legacy short IDs (`SRA-GD-1`, `SRA-CT-1`, `SRA-IAA-1`) are stale. No such check exists.
 
@@ -614,7 +622,7 @@ This is the one client under `core/` (`core/organizations_client.py`): the provi
 `core/` uses it, and `core/` never imports `services/`. Every other client is
 `services/<svc>/client.py`.
 
-That `except` clause is byte-identical in all 101 client methods, and that is the point:
+That `except` clause is byte-identical in all 103 client methods, and that is the point:
 there is nothing to type per call site, so nothing that can be typed wrong. Earlier drafts
 passed `operation="ListRoots"` and `region=self.region`; both were removed on the
 reasoning that a value typed at 108 call sites will be typed wrong at one of them.
@@ -1049,7 +1057,7 @@ before `sts:AssumeRole`, and `SRAVerify.resolve_scan_region()` lets a host prefl
 
 ## Tests
 
-The suite lives at `sraverify/tests/` and collects **11706 tests** (10444 passed, 1262
+The suite lives at `sraverify/tests/` and collects **12064 tests** (10689 passed, 1375
 skipped). None of them needs AWS credentials or issues an AWS call.
 
 From the project root. `[tool.pytest.ini_options]` in `pyproject.toml` sets `testpaths`
@@ -1075,10 +1083,10 @@ contract:
 
 | Module                                   | What it holds                                                                                                                                                                                                                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_client_contract_property.py`       | All 101 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 18 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition |
+| `test_client_contract_property.py`       | All 103 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 18 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition |
 | `test_accessor_cache_property.py`        | Every public base method classified, the classification proven total and exact against the real classes, then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                                                                     |
 | `test_check_classification_property.py`  | Catalog-wide: an error result reaches `error()` and never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                                                                           |
-| `test_discriminator_property.py`         | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared; the provider alone declares its `OWNED_OPERATIONS`, and the 46-row `_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden pins every other service-table entry                                                                                                                                                                                |
+| `test_discriminator_property.py`         | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, conservative on anything undeclared; the provider alone declares its `OWNED_OPERATIONS`, and the 48-row `_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden pins every other service-table entry                                                                                                                                                                                |
 | `test_no_confessing_fail_property.py`    | Static, by AST: no confessing `failed()` wording, no `except` inside `execute()`, no direct SDK access                                                                                                                                                                                              |
 | `test_stdout_contract_property.py`       | Nothing in the package writes to stdout                                                                                                                                                                                                                                                             |
 | `test_organization_provider_property.py` | All eleven `OrganizationsProvider` accessors: every page merged, one fetch per accessor per key per (sequential) scan, failures never cached, the Security Lake primer, log shape, refcount release; exports the `PROVIDER_ADAPTERS` table the catalog harnesses stub `ctx.organization` from                                                   |
@@ -1091,7 +1099,7 @@ must be added to its table, or the completeness test fails for that service. Tha
 deliberate: the tables are how the suite knows what to drive, so an unlisted method would be
 silently untested.
 
-Several property modules are **catalog-wide**: they enumerate all 187 registered checks with
+Several property modules are **catalog-wide**: they enumerate all 192 registered checks with
 `pytest.mark.parametrize` rather than sampling, so a failure names the offending check ID in
 the test ID.
 

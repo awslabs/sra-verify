@@ -677,6 +677,66 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             client_method="get_configuration_policy",
             cache_key=f"configuration_policy:{_TEST_REGION}:policy-abc",
         ),
+        A(
+            "get_finding_aggregator",
+            "accessor",
+            args=(
+                _TEST_REGION,
+                "arn:aws:securityhub:us-east-1:111122223333:finding-aggregator/abc",
+            ),
+            client_method="get_finding_aggregator",
+            cache_key=(
+                f"finding_aggregator:{_TEST_REGION}:"
+                "arn:aws:securityhub:us-east-1:111122223333:finding-aggregator/abc"
+            ),
+        ),
+        A(
+            "get_configuration_policy_associations",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_configuration_policy_associations",
+            cache_key=f"configuration_policy_associations:{_TEST_REGION}",
+        ),
+        # CSPM pure helpers, beside their V2 siblings on the base.
+        A(
+            "cspm_unlinked_regions",
+            "helper",
+            args=(
+                {
+                    "FindingAggregationRegion": "us-west-2",
+                    "RegionLinkingMode": "SPECIFIED_REGIONS",
+                    "Regions": ["us-east-1"],
+                },
+                ["us-east-1", "us-west-2", "eu-west-1"],
+            ),
+        ),
+        A(
+            "association_of",
+            "helper",
+            args=(
+                [
+                    {
+                        "TargetType": "ACCOUNT",
+                        "TargetId": "111122223333",
+                        "ConfigurationPolicyId": "abc",
+                        "AssociationStatus": "SUCCESS",
+                    }
+                ],
+                "111122223333",
+            ),
+        ),
+        A(
+            "matches_cspm_findings",
+            "helper",
+            args=(
+                {
+                    "EventPattern": (
+                        '{"source":["aws.securityhub"],'
+                        '"detail-type":["Security Hub Findings - Imported"]}'
+                    )
+                },
+            ),
+        ),
         # --- Unified Security Hub (V2) org surface ---
         A(
             "get_organization_admin_accounts_v2",

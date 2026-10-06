@@ -250,9 +250,11 @@ Resources:
               - securityhub:GetAggregatorV2
               - securityhub:GetConfigurationPolicy
               - securityhub:GetEnabledStandards
+              - securityhub:GetFindingAggregator
               - securityhub:GetFindings
               - securityhub:ListAggregatorsV2
               - securityhub:ListConfigurationPolicies
+              - securityhub:ListConfigurationPolicyAssociations
               - securityhub:ListEnabledProductsForImport
               - securityhub:ListFindingAggregators
               - securityhub:ListMembers

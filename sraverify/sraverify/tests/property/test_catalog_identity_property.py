@@ -112,8 +112,8 @@ from types import ModuleType
 
 import pytest
 
-# Imported for its registration side effect: the walk over 18 service packages
-# and 158 check modules is what populates the registry this module reads. Drop
+# Imported for its registration side effect: the walk over 19 service packages
+# and 187 check modules is what populates the registry this module reads. Drop
 # it and every parametrized case below silently disappears.
 import sraverify.services  # noqa: F401
 from sraverify.core.check import SecurityCheck
@@ -128,7 +128,7 @@ _CATALOG: dict[str, type[SecurityCheck]] = dict(all_checks())
 #: The catalog size this change ships with. Cross-checked against the file count
 #: on disk in ``test_catalog_is_populated``, so bumping this literal alone does
 #: not make a lost check pass.
-EXPECTED_CHECK_COUNT = 182
+EXPECTED_CHECK_COUNT = 187
 
 #: ``sraverify/services``, located from this test module rather than from a
 #: hard-coded path: ``tests/property/`` -> ``tests/`` -> the package root.

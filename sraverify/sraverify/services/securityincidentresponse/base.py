@@ -13,8 +13,10 @@ be separated from a regression when diffing two scans.
 ``tests/property/test_accessor_cache_property.py`` asserts the absence, so the
 deferral cannot be undone by accident.
 
-The one caching site is the private :meth:`_discover_memberships`, under the
-module-level ``_CACHE_NAMESPACE``.
+Two caching sites, both under the module-level ``_CACHE_NAMESPACE``: the private
+:meth:`_discover_memberships` and the public :meth:`get_event_rules`, whose
+contract is held by
+``test_securityincidentresponse_get_event_rules_never_caches_a_failure``.
 """
 from typing import Any, ClassVar, Dict, Tuple
 
@@ -35,9 +37,9 @@ from sraverify.services.securityincidentresponse.client import (
 # runs once rather than once per check and once per batch API call.
 #
 # A module constant rather than a NAMESPACE class attribute on purpose: see the
-# module docstring. The private _discover_memberships is the only writer, so
-# nothing here goes through the accessor-caching contract the class attribute
-# would advertise.
+# module docstring. Its writers are the private _discover_memberships and
+# get_event_rules; neither goes through the NAMESPACE-keyed accessor harness the
+# class attribute would advertise, so each has a dedicated test.
 _CACHE_NAMESPACE = "securityincidentresponse"
 _MEMBERSHIP_DISCOVERY_KEY = "membership_discovery"
 
@@ -68,7 +70,13 @@ class SecurityIncidentResponseCheck(SecurityCheck):
                     "request referenced a role that does not exist. For a "
                     "service linked role that is precisely the control gap the "
                     "check is testing for, and SRA-SECURITYINCIDENTRESPONSE-05 "
-                    "was already reporting it as FAIL against a live account."
+                    "was already reporting it as FAIL against a live account. "
+                    "Observed 2026 in the test organization: GetRole for "
+                    "AWSServiceRoleForSecurityIncidentResponse answered "
+                    "NoSuchEntity \"The role with name "
+                    "AWSServiceRoleForSecurityIncidentResponse cannot be found.\" "
+                    "in the management, log-archive and an application account, "
+                    "none of them the SIR delegated administrator."
                 ),
             ),
         },
@@ -148,6 +156,31 @@ class SecurityIncidentResponseCheck(SecurityCheck):
         if not client:
             return no_client_result(service=_SERVICE_NAME, region=region)
         return client.get_role(role_name)
+
+    def get_event_rules(self, region: str) -> Dict[str, Any]:
+        """
+        Get the EventBridge rules on the default event bus in a Region, with caching.
+
+        Cached under the module-level ``_CACHE_NAMESPACE`` (this base declares no
+        ``NAMESPACE``; see the module docstring). EventBridge rules are regional,
+        so the wrapper for ``region`` is used, created on demand; there is
+        therefore no no-client path.
+
+        Args:
+            region: AWS region name
+
+        Returns:
+            ``{"Rules": [...]}``, or an error result, which is never cached.
+        """
+        key = f"event_rules:{region}"
+        if self._ctx._has(_CACHE_NAMESPACE, key):
+            return self._ctx._get(_CACHE_NAMESPACE, key)
+        result = self._sir_client(region).list_event_rules()
+        if is_error(result):
+            # Never cached: a retry has to be able to re-issue the call.
+            return result
+        self._ctx._set(_CACHE_NAMESPACE, key, result)
+        return result
 
     def discover_sir_region(self) -> str:
         """

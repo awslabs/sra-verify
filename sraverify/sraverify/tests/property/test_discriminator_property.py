@@ -110,10 +110,10 @@ def _base_class(service: str) -> type[SecurityCheck]:
 _SERVICE_NAMES: list[str] = _service_names()
 
 #: The key the Organizations provider's table is listed under, beside the
-#: eighteen service keys. Not a service package name, so it cannot collide.
+#: nineteen service keys. Not a service package name, so it cannot collide.
 _PROVIDER_KEY = "organization-provider"
 
-#: Every declared discriminator table: the eighteen service base tables and the
+#: Every declared discriminator table: the nineteen service base tables and the
 #: Organizations provider's, which ``SecurityCheck.is_not_configured`` consults
 #: after the service's. Each table is held to the same shape, evidence and
 #: conservatism rules.
@@ -150,7 +150,7 @@ def _entry_ids() -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
-def test_eighteen_services_declare_a_table_attribute() -> None:
+def test_every_service_declares_a_table_attribute() -> None:
     """Every base inherits the ClassVar even before it declares its own.
 
     The default is an empty mapping, which classifies nothing -- so an unmigrated
@@ -590,7 +590,7 @@ _NON_OWNED_NOT_CONFIGURED_ENTRIES: tuple[tuple[str, str, str, str | None, str], 
     ('SecurityHubCheck', 'ListMembers', 'BadRequestException', 'no such resource found', '7b9e912ade6d39edd69dd443c98c299938e7536c69f6dec126fe5cefc81f076d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListMembers', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityHubCheck', 'ListOrganizationAdminAccounts', 'InvalidAccessException', 'not subscribed to aws security hub', '06df84c9084551366d866513ed2dce96c48ef3528471a761e9def60d810b305d'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
-    ('SecurityIncidentResponseCheck', 'GetRole', 'NoSuchEntity', None, '7c5ac83a7dc3e9ac92c4466f38d34e30b8105bcf37792c85c1358fa08242cfc6'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    ('SecurityIncidentResponseCheck', 'GetRole', 'NoSuchEntity', None, '8388b997e9c8fb827a658da5686a24fa4643b8a093c043a3d899257ee85c03e1'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityLakeCheck', 'GetDataLakeOrganizationConfiguration', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityLakeCheck', 'GetDataLakeSources', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('SecurityLakeCheck', 'ListDataLakes', 'ResourceNotFoundException', None, 'd0a3bcee55d785cb9ce21d8c1a0a82108b8d884f1265532f6e0a00c07f6da557'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential

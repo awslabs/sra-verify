@@ -71,3 +71,4 @@ sratester/
 
 # Exclude .agents directory created by Kiro
 .agents/
+.worktrees/

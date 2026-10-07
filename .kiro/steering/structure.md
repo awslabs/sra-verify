@@ -36,14 +36,13 @@ sra-verify/
 ├── .kiro/steering/                     # the six steering docs
 ├── .kiro/specs/                        # check-contract-formalization,
 │                                       #   scan-context-refactor, iam-user-detection
+├── .gitlab-ci.yml                      # CI: iam-policy-drift (generator --check)
 ├── 1-sraverify-member-roles.yaml       # StackSet: SRAMemberRole + managed policies
 ├── 2-sraverify-codebuild-deploy.yaml   # CodeBuild project + findings bucket + starter Lambda
 ├── docs/checks.txt                     # verbatim `sraverify --list-checks` output
 ├── sra-verify-dashboard.html           # standalone HTML findings viewer
 ├── sra-verify-comparison-dashboard.html
-├── generated_sraverify_iam_policy.json # output of util/generate_iam_policy.py
-├── generated_sraverify_cf_policy.yaml
-├── util/generate_iam_policy.py         # derives the least-privilege member policy
+├── util/generate_iam_policy.py         # writes SRAVerifyLeastPrivilege into the template
 ├── sratester/                          # gitignored: test-org accounts.md (see below)
 └── sraverify/                          # project root (pyproject.toml lives here)
     ├── pyproject.toml, uv.lock
@@ -349,8 +348,8 @@ No registration step exists. Writing the file registers it.
 5. **`checks/sra_<svc>_NN.py`** — the check class with `meta = CheckMeta(...)`
    and a yielding `execute()`.
 6. Verify: `sraverify --check SRA-<SERVICE>-NN --debug`.
-7. New AWS API call? Regenerate the IAM policy via `util/generate_iam_policy.py`
-   and update `1-sraverify-member-roles.yaml`.
+7. New AWS API call? Run `util/generate_iam_policy.py`; it rewrites the
+   generated block of `1-sraverify-member-roles.yaml` (`--check` reports drift).
 8. Regenerate `docs/checks.txt` from `sraverify --list-checks`.
 
 ## Canonical code shapes
@@ -686,7 +685,7 @@ order ascending and reproducible.
 ## Tests
 
 The suite lives at `sra-verify/sraverify/sraverify/tests/` and currently collects
-**12064 tests** (10689 passed, 1375 skipped) and no xfails. It is no longer thin.
+**12097 tests** (10722 passed, 1375 skipped) and no xfails. It is no longer thin.
 
 - `tests/unit/core/` — `test_check_registration.py`, `test_enums.py`,
   `test_finding.py`, `test_metadata.py`, `test_registry.py`, `test_select.py`,
@@ -706,7 +705,7 @@ name, because between them they hold the whole contract:
 
 | Module                                   | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_client_contract_property.py`       | All 103 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 18 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return                                                                                                                                                                                                                                                                                                                                                                                         |
+| `test_client_contract_property.py`       | All 103 client methods driven through a `ClientError`, an `EndpointConnectionError`, a `NoCredentialsError` and a `RuntimeError`; plus AST rules over the 18 `services/*/client.py` files and `core/organizations_client.py` — handler shape, `AWSClient` inheritance, constructor-only acquisition, no `-> bool` return                                                                                                                                                                                                                                                                                                                                                                                        |
 | `test_accessor_cache_property.py`        | Every public base method classified as `accessor`, `accessor_uncached`, `helper`, `client_lookup` or `derived`, proven total and exact against the real classes; then never-cache-a-failure, re-issue-on-retry, the no-client result, and the cache key                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `test_check_classification_property.py`  | Catalog-wide over all 192 checks: an error result reaches `error()` with an `ActualValue` naming the operation and code, never `failed()`; a declared semantic code reaches `failed()`; an unsupported Region yields no row and issues no call                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `test_discriminator_property.py`         | Every `NOT_CONFIGURED_ERRORS` entry: shape, non-blank evidence, no placeholders, and `is_not_configured` conservative on anything undeclared; the provider declares only `OWNED_OPERATIONS`, no service table declares one, and the 48-row `_NON_OWNED_NOT_CONFIGURED_ENTRIES` golden pins every other service-table entry                                                                                                                                                                                                                                                                                                                                                                                      |

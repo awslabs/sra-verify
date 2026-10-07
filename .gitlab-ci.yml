@@ -1,0 +1,15 @@
+# Fails when the SRAVerifyLeastPrivilege statements in 1-sraverify-member-roles.yaml
+# no longer match the boto3 calls the package makes, when the generator warns about
+# a client it cannot attribute, or when the policy exceeds the managed-policy quota.
+# The job log shows the drift or the warning.
+# It never commits or pushes; fix drift locally with
+# `cd sraverify && uv run python ../util/generate_iam_policy.py` and commit the result.
+# A warning (exit 2) needs a code fix: bind the client to a literal service id.
+iam-policy-drift:
+  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+  variables:
+    UV_PYTHON_DOWNLOADS: 'never'
+  script:
+    - cd sraverify
+    - uv sync --frozen
+    - uv run --frozen python ../util/generate_iam_policy.py --check

@@ -36,7 +36,9 @@ sra-verify/
 ├── .kiro/steering/                     # the six steering docs
 ├── .kiro/specs/                        # check-contract-formalization,
 │                                       #   scan-context-refactor, iam-user-detection
-├── .gitlab-ci.yml                      # CI: iam-policy-drift (generator --check)
+├── .gitlab-ci.yml                      # CI: iam-policy-drift (generator --check),
+│                                       #   unit-tests (pytest on 3.11),
+│                                       #   checks-inventory-drift (docs/checks.txt)
 ├── 1-sraverify-member-roles.yaml       # StackSet: SRAMemberRole + managed policies
 ├── 2-sraverify-codebuild-deploy.yaml   # CodeBuild project + findings bucket + starter Lambda
 ├── docs/checks.txt                     # verbatim `sraverify --list-checks` output

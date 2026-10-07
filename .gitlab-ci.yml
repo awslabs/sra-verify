@@ -13,3 +13,39 @@ iam-policy-drift:
     - cd sraverify
     - uv sync --frozen
     - uv run --frozen python ../util/generate_iam_policy.py --check
+
+# Fails when any unit or property test fails; the job log shows each failure's traceback.
+# Runs the full unit and property suite on the declared Python floor (3.11), which is
+# what CodeBuild runs; local venvs are newer. Credential-free: tests/conftest.py refuses
+# outbound HTTP. Hypothesis loads its built-in "ci" profile automatically under GitLab
+# (derandomized, no deadline, no example database).
+# It is read-only: it never commits or pushes. Reproduce locally with
+# `cd sraverify && uv run pytest -q -p no:logging --tb=short`, fix the code, and commit.
+unit-tests:
+  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+  variables:
+    UV_PYTHON_DOWNLOADS: 'never'
+  script:
+    - cd sraverify
+    - uv sync --frozen
+    - uv run --frozen pytest -q -p no:logging --tb=short
+
+# Fails when docs/checks.txt is stale against the registered check inventory: a check was
+# added, removed, or had its title, service or account type changed without regenerating
+# it. The job log shows a unified diff, docs/checks.txt on the "-" side and the live
+# inventory on the "+" side.
+# `sraverify --list-checks` needs no credentials and no Region, and its stdout is exactly
+# the format of docs/checks.txt. It is written to a file rather than piped, so a failing
+# `sraverify` fails the job instead of being masked. `diff` is Debian diffutils, an
+# Essential package present in trixie-slim.
+# It is read-only: it never commits or pushes. Fix drift locally from the repo root with
+# `sraverify/.venv/bin/sraverify --list-checks > docs/checks.txt` and commit the result.
+checks-inventory-drift:
+  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+  variables:
+    UV_PYTHON_DOWNLOADS: 'never'
+  script:
+    - cd sraverify
+    - uv sync --frozen
+    - uv run --frozen sraverify --list-checks > /tmp/checks.txt
+    - diff -u ../docs/checks.txt /tmp/checks.txt

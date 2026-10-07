@@ -36,6 +36,7 @@ Feature: check-contract-formalization, Property 9: Findings are immutable.
 from __future__ import annotations
 
 import dataclasses
+import sys
 from typing import Any, Dict
 
 import pytest
@@ -72,6 +73,15 @@ ENUM_FIELD_TYPES: Dict[str, type] = {
 
 #: The one field admitting a null value (Requirement 1.2).
 NULLABLE_FIELD = "resource_id"
+
+#: What setting an undeclared attribute on a Finding may raise. CPython before
+#: 3.13 has gh-90055 (bpo-45897): a frozen ``slots=True`` dataclass's generated
+#: ``__setattr__`` calls ``super(cls, self)`` on the pre-slots class and raises
+#: ``TypeError`` instead. The attribute is still refused. Observed: 3.11.15 and
+#: 3.12.13 raise ``TypeError``; 3.13.14 and 3.14.7 raise ``FrozenInstanceError``.
+NEW_ATTR_ERRORS = (
+    (AttributeError, TypeError) if sys.version_info < (3, 13) else (AttributeError,)
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -275,13 +285,15 @@ def test_no_new_attribute_can_be_attached(
     ``AttributeError`` is the assertion here rather than
     ``FrozenInstanceError``, because for a name that is not a field the two
     mechanisms differ in which one fires first, and either refusal is correct.
+    Before Python 3.13 the refusal arrives as ``TypeError``; see
+    ``NEW_ATTR_ERRORS``.
 
     Validates: Requirements 1.10, 1.11.
     """
     if name in FIELD_NAMES:
         return  # covered by the assignment property above
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(NEW_ATTR_ERRORS):
         setattr(finding, name, value)
 
 

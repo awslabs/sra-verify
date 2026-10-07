@@ -34,7 +34,7 @@ Do these in order. Each step is cheaper than the next and usually settles someth
 3. **Snapshot** every resource you are about to change into `.tmp/sratester/snapshot.json`, byte for byte (policy content, rule state, targets, linked Regions, finding status).
 4. **Mutate → detect → fix → validate**, one check at a time (the five phases below).
 5. **Verify restoration** with a script that re-reads every snapshotted resource and compares it, and include its output in the report. "I reverted it" is not evidence.
-6. **IAM.** Simulate every new action against the deployed member role with `aws iam simulate-principal-policy` (the role cannot be assumed from an Admin profile), and the edited template with `simulate-custom-policy`. Deploy `1-sraverify-member-roles.yaml` (StackSet and the management-account stack) before any CodeBuild run.
+6. **IAM.** Simulate every new action against the deployed member role with `aws iam simulate-principal-policy` (the role cannot be assumed from an Admin profile), and the edited template with `simulate-custom-policy`, whose policy input is the `SRAVerifyLeastPrivilege` `PolicyDocument` from the template converted to JSON (the generator no longer writes a JSON copy). Deploy `1-sraverify-member-roles.yaml` (StackSet and the management-account stack) before any CodeBuild run.
 7. **CodeBuild end to end** (below).
 
 ## The five phases

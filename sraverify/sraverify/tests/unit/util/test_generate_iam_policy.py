@@ -2,7 +2,8 @@
 Unit tests for ``util/generate_iam_policy.py``.
 
 The generator derives the least-privilege member-role policy from the client
-layer. Requirement 1.12 requires it to be tested against at least ``WAFClient``
+layer and writes it into ``1-sraverify-member-roles.yaml`` between the GENERATED
+markers. Requirement 1.12 requires it to be tested against at least ``WAFClient``
 (nine boto3 services) and ``ShieldClient`` (five), so that **multi-service
 attribution is proven rather than assumed**.
 
@@ -24,6 +25,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -39,6 +42,8 @@ _PACKAGE_ROOT: Path = Path(sraverify.__file__).resolve().parent
 _SERVICES_ROOT: Path = _PACKAGE_ROOT / "services"
 #: The project root the generator is pointed at (``--base-dir``).
 _PROJECT_ROOT: Path = _PACKAGE_ROOT.parent
+#: The member-role template the generator writes into.
+_TEMPLATE_PATH: Path = _REPO_ROOT / "1-sraverify-member-roles.yaml"
 
 
 def _load_generator() -> Any:
@@ -75,6 +80,18 @@ def generator() -> Any:
     if not _GENERATOR_PATH.is_file():
         pytest.skip(f"{_GENERATOR_PATH} not present")
     return _load_generator()
+
+
+@pytest.fixture(scope="module")
+def template_text() -> str:
+    """The tracked member-role template, decoded byte for byte.
+
+    Returns:
+        The template text.
+    """
+    if not _TEMPLATE_PATH.is_file():
+        pytest.skip(f"{_TEMPLATE_PATH} not present")
+    return _TEMPLATE_PATH.read_bytes().decode("utf-8")
 
 
 def _attributed(generator: Any, service: str) -> dict[str, set[str]]:
@@ -267,44 +284,22 @@ def test_the_generator_attributes_the_whole_tree(generator: Any) -> None:
         )
 
 
-def test_the_generated_policy_reproduces_the_committed_artefact(
-    generator: Any,
+def test_the_template_matches_the_generator(
+    generator: Any, template_text: str
 ) -> None:
-    """Task 10.3: regenerating must be a no-op against the committed files.
+    """The deployed ``SRAVerifyLeastPrivilege`` block is what the code derives.
 
-    This is the assertion that gives "the generated policy is unchanged" its
-    meaning back. It was **not** true before the rewrite -- the generator emitted
-    an empty policy -- and it is worth holding continuously rather than checking
-    once, because the artefacts feed a deployed IAM managed policy.
-
-    Compares the policy *document*, not the file bytes, so this does not fail on
-    a JSON formatting change.
+    Splicing the freshly generated policy into the tracked template must be a
+    no-op. Anyone who adds a boto3 call without regenerating fails here, before
+    the member role fails the call at scan time. Skips outside a full checkout
+    (no template or no generator), as the rest of this module does.
     """
-    import json
-
-    committed_path = _REPO_ROOT / "generated_sraverify_iam_policy.json"
-    if not committed_path.is_file():
-        pytest.skip("no committed policy artefact to compare against")
-
     service_calls, _ = generator.build(str(_PROJECT_ROOT))
-    derived = generator.generate_iam_policy(service_calls)
-    committed = json.loads(committed_path.read_text(encoding="utf-8"))
+    policy = generator.generate_iam_policy(service_calls)
 
-    derived_actions = {a for s in derived["Statement"] for a in s["Action"]}
-    committed_actions = {a for s in committed["Statement"] for a in s["Action"]}
-
-    missing = committed_actions - derived_actions
-    extra = derived_actions - committed_actions
-
-    assert missing == set(), (
-        f"the committed policy grants actions the code no longer derives: "
-        f"{sorted(missing)}. If an API call was genuinely removed, regenerate the "
-        f"artefacts and update 1-sraverify-member-roles.yaml in the same change."
-    )
-    assert extra == set(), (
-        f"the code makes calls the committed policy does not grant: "
-        f"{sorted(extra)}. The member role would fail these at scan time. "
-        f"Regenerate the artefacts and update 1-sraverify-member-roles.yaml."
+    assert generator.splice(template_text, policy) == template_text, (
+        f"{_TEMPLATE_PATH.name} is out of date with the boto3 calls the package "
+        f"makes. Run: cd sraverify && uv run python ../util/generate_iam_policy.py"
     )
 
 
@@ -749,3 +744,416 @@ def test_the_wrapper_lookup_is_exempt_only_inside_a_check_class(
     _, warnings = generator.build(str(root))
 
     assert [w.split(" ", 1)[0] for w in warnings] == ["core/x.py:3:"]
+
+
+# --------------------------------------------------------------------------- #
+# Sids
+# --------------------------------------------------------------------------- #
+
+
+def test_every_sid_is_alphanumeric(generator: Any) -> None:
+    """IAM allows only ASCII letters and digits in a Sid.
+
+    ``str.capitalize()`` alone gave ``Cognito-idpPermissions``; now that the
+    generator writes the deployed template, an invalid Sid would be a deploy
+    failure rather than a cosmetic one.
+    """
+    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    policy = generator.generate_iam_policy(service_calls)
+    bad = [s["Sid"] for s in policy["Statement"] if not re.fullmatch(r"[A-Za-z0-9]+", s["Sid"])]
+    assert bad == []
+
+
+@pytest.mark.parametrize(
+    "service,sid",
+    [
+        ("cognito-idp", "CognitoIdpPermissions"),
+        ("security-ir", "SecurityIrPermissions"),
+        ("accessanalyzer", "AccessanalyzerPermissions"),
+        ("ec2", "Ec2Permissions"),
+    ],
+)
+def test_sid_for(generator: Any, service: str, sid: str) -> None:
+    """The Sid is derived from the service id, with no override table."""
+    assert generator.sid_for(service) == sid
+
+
+# --------------------------------------------------------------------------- #
+# Splicing the template
+# --------------------------------------------------------------------------- #
+
+_BEGIN = (
+    "          # BEGIN GENERATED by util/generate_iam_policy.py -- do not edit; "
+    "run it to regenerate\n"
+)
+_END = "          # END GENERATED\n"
+
+#: A small template exercising what the splice must leave alone: short-form
+#: tags of all three node kinds, comments, and mixed quoting.
+_HEAD = (
+    "AWSTemplateFormatVersion: '2010-09-09'\n"
+    "# a top-level comment\n"
+    "Resources:\n"
+    "  Role:\n"
+    "    Type: AWS::IAM::Role\n"
+    "    Properties:\n"
+    "      RoleName: !Sub 'role-${AWS::AccountId}'   # trailing comment\n"
+    "      ManagedPolicyArns:\n"
+    "        - !Ref SRAVerifyLeastPrivilege\n"
+    "      Tags: !If {Cond: [a, b]}\n"
+    '      Description: "double \\"quoted\\""\n'
+    "  SRAVerifyLeastPrivilege:\n"
+    "    Type: AWS::IAM::ManagedPolicy\n"
+    "    Properties:\n"
+    "      PolicyDocument:\n"
+    "        Version: '2012-10-17'\n"
+    "        Statement:\n"
+)
+_STALE = (
+    "          - Sid: StalePermissions\n"
+    "            Effect: Allow\n"
+    "            Action:\n"
+    "              - stale:Action\n"
+    "            Resource: '*'\n"
+)
+_TAIL = (
+    "  Other:\n"
+    "    Type: AWS::IAM::ManagedPolicy\n"
+    "    Properties:\n"
+    "      PolicyDocument:\n"
+    "        Version: '2012-10-17'\n"
+    "        Statement:\n"
+    "          - Sid: Hand\n"
+    "            Effect: Allow\n"
+    "            Action: !GetAtt [X, Y]\n"
+    "            Resource: \"*\"\n"
+)
+_SYNTHETIC = _HEAD + _BEGIN + _STALE + _END + _TAIL
+
+
+def _small_policy(generator: Any) -> dict:
+    """A one-statement policy for the synthetic template."""
+    return generator.generate_iam_policy({"iam": {"list_users"}})
+
+
+def _copy_template(tmp_path: Path, template_text: str) -> Path:
+    """Copy the real template's bytes into ``tmp_path`` and return the copy."""
+    path = tmp_path / _TEMPLATE_PATH.name
+    path.write_bytes(template_text.encode("utf-8"))
+    return path
+
+
+def test_the_splice_is_idempotent_on_a_synthetic_template(generator: Any) -> None:
+    """Splicing twice gives the same text as splicing once.
+
+    Needs no tracked template, so it runs from an installed wheel too.
+    """
+    policy = _small_policy(generator)
+    once = generator.splice(_SYNTHETIC, policy)
+    assert once != _SYNTHETIC
+    assert generator.splice(once, policy) == once
+
+
+def test_the_splice_is_idempotent_on_the_real_template(
+    generator: Any, template_text: str
+) -> None:
+    """Splicing the real template twice gives the same text as splicing once."""
+    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    real_policy = generator.generate_iam_policy(service_calls)
+    real_once = generator.splice(template_text, real_policy)
+    assert generator.splice(real_once, real_policy) == real_once
+
+
+def test_bytes_outside_the_markers_are_unchanged(generator: Any) -> None:
+    """Everything up to BEGIN and from END on is copied through exactly."""
+    out = generator.splice(_SYNTHETIC, _small_policy(generator))
+
+    assert out.startswith(_HEAD + _BEGIN)
+    assert out.endswith(_END + _TAIL)
+    block = out[len(_HEAD + _BEGIN): -len(_END + _TAIL)]
+    assert block == (
+        "          - Sid: IamPermissions\n"
+        "            Effect: Allow\n"
+        "            Action:\n"
+        "              - iam:ListUsers\n"
+        "            Resource: '*'\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(_HEAD + _STALE + _END + _TAIL, id="missing-begin"),
+        pytest.param(_HEAD + _BEGIN + _STALE + _TAIL, id="missing-end"),
+        pytest.param(_HEAD + _BEGIN + _BEGIN + _STALE + _END + _TAIL, id="duplicate-begin"),
+        pytest.param(_HEAD + _BEGIN + _STALE + _END + _END + _TAIL, id="duplicate-end"),
+        pytest.param(_HEAD + _END + _STALE + _BEGIN + _TAIL, id="end-before-begin"),
+        pytest.param(
+            _HEAD + _BEGIN + _STALE + "        # END GENERATED\n" + _TAIL,
+            id="end-at-another-indent",
+        ),
+        pytest.param(
+            _HEAD + _BEGIN.replace("  ", "\t", 1) + _STALE + _END + _TAIL,
+            id="begin-indented-with-a-tab",
+        ),
+    ],
+)
+def test_malformed_markers_are_rejected(generator: Any, text: str) -> None:
+    """Every malformed marker layout is a ``TemplateError``."""
+    with pytest.raises(generator.TemplateError):
+        generator.splice(text, _small_policy(generator))
+
+
+def test_markers_in_the_wrong_resource_are_rejected(generator: Any) -> None:
+    """Markers inside another resource's ``Statement`` list fail the re-parse check.
+
+    The block itself would splice cleanly; only comparing the re-parsed
+    ``SRAVerifyLeastPrivilege`` document with the generated one catches it.
+    """
+    wrong = (
+        _HEAD + _STALE + _TAIL.replace(
+            "        Statement:\n", "        Statement:\n" + _BEGIN, 1
+        ) + _END
+    )
+    with pytest.raises(generator.TemplateError, match="does not equal"):
+        generator.splice(wrong, _small_policy(generator))
+
+
+# --------------------------------------------------------------------------- #
+# The CLI
+# --------------------------------------------------------------------------- #
+
+
+def test_the_defaults_are_relative_to_the_script(generator: Any) -> None:
+    """The template and project root resolve from the script, not the cwd."""
+    assert generator.DEFAULT_TEMPLATE == _TEMPLATE_PATH
+    assert generator.DEFAULT_BASE_DIR == _PROJECT_ROOT
+
+
+def test_check_exits_0_in_sync(
+    generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An in-sync template is reported, and nothing goes to stdout."""
+    copy = _copy_template(tmp_path, template_text)
+
+    assert generator.main(["--check", "--template", str(copy)]) == 0
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "in sync" in err
+    assert "headroom" in err
+    assert copy.read_bytes() == template_text.encode("utf-8")
+
+
+def test_check_exits_1_on_drift_shows_the_diff_and_writes_nothing(
+    generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A hand edit inside the block is drift: exit 1, a diff, and no write."""
+    action = "              - sts:GetCallerIdentity\n"
+    assert template_text.count(action) == 1
+    stale = template_text.replace(action, "")
+    copy = tmp_path / _TEMPLATE_PATH.name
+    copy.write_bytes(stale.encode("utf-8"))
+
+    assert generator.main(["--check", "--template", str(copy)]) == 1
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert copy.read_bytes() == stale.encode("utf-8")
+    assert "\n+" + action in err
+    assert "uv run python ../util/generate_iam_policy.py" in err
+
+
+def test_write_mode_brings_a_stale_template_into_sync(
+    generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With no flags the template is rewritten, and then ``--check`` agrees."""
+    stale = template_text.replace("              - sts:GetCallerIdentity\n", "")
+    copy = tmp_path / _TEMPLATE_PATH.name
+    copy.write_bytes(stale.encode("utf-8"))
+
+    assert generator.main(["--template", str(copy)]) == 0
+    assert copy.read_bytes() == template_text.encode("utf-8")
+    assert generator.main(["--check", "--template", str(copy)]) == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("mode", [[], ["--check"]], ids=["write", "check"])
+def test_main_exits_2_on_bad_markers_and_writes_nothing(
+    generator: Any,
+    template_text: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mode: list[str],
+) -> None:
+    """A template with no BEGIN marker is refused in both modes."""
+    broken = template_text.replace(_BEGIN, "")
+    assert broken != template_text
+    copy = tmp_path / _TEMPLATE_PATH.name
+    copy.write_bytes(broken.encode("utf-8"))
+
+    assert generator.main([*mode, "--template", str(copy)]) == 2
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "BEGIN GENERATED marker not found" in err
+    assert copy.read_bytes() == broken.encode("utf-8")
+
+
+def test_main_exits_2_on_a_missing_template(
+    generator: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unreadable template is a usage problem, not drift."""
+    assert generator.main(["--check", "--template", str(tmp_path / "absent.yaml")]) == 2
+    assert "cannot read the template" in capsys.readouterr().err
+
+
+def test_an_oversize_policy_is_refused(
+    generator: Any,
+    template_text: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Over the managed-policy quota, neither mode writes and both exit 2."""
+    policy = _small_policy(generator)
+    assert generator.policy_size(policy) == len(json.dumps(policy, separators=(",", ":")))
+
+    stale = template_text.replace("              - sts:GetCallerIdentity\n", "")
+    copy = tmp_path / _TEMPLATE_PATH.name
+    copy.write_bytes(stale.encode("utf-8"))
+    monkeypatch.setattr(generator, "POLICY_SIZE_QUOTA", 100)
+
+    assert generator.main(["--template", str(copy)]) == 2
+    assert generator.main(["--check", "--template", str(copy)]) == 2
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "headroom" in err
+    assert "exceeds the 100-character managed-policy quota" in err
+    assert copy.read_bytes() == stale.encode("utf-8")
+
+
+def test_nothing_attributed_exits_1(
+    generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tree with no boto3 binding keeps the existing exit 1, and writes nothing."""
+    (tmp_path / "pkg").mkdir()
+    root = _synthetic_package(tmp_path / "pkg", {"core/plain.py": "X = 1\n"})
+    copy = _copy_template(tmp_path, template_text)
+
+    for mode in ([], ["--check"]):
+        assert generator.main([*mode, "--base-dir", str(root), "--template", str(copy)]) == 1
+
+    assert "no boto3 calls were attributed" in capsys.readouterr().err
+    assert copy.read_bytes() == template_text.encode("utf-8")
+
+
+#: A client that attributes ``iam:ListUsers`` -- the same policy as
+#: :func:`_small_policy` -- and also binds a second client through a variable,
+#: which the generator cannot attribute and must warn about (line 4).
+_WARNING_CLIENT = (
+    "class C:\n"
+    "    def __init__(self, ctx, service):\n"
+    "        self.client = ctx.get_client('iam')\n"
+    "        self.other = ctx.get_client(service)\n"
+    "    def go(self):\n"
+    "        return self.client.list_users()\n"
+)
+
+
+def test_check_exits_2_on_a_warning_after_reporting_in_sync(
+    generator: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A warning fails ``--check`` even when the template is in sync.
+
+    The unattributed calls are absent from the policy *and* from the template,
+    so the two agree; only the warning shows the member role would under-grant.
+    """
+    (tmp_path / "pkg").mkdir()
+    root = _synthetic_package(tmp_path / "pkg", {"core/c.py": _WARNING_CLIENT})
+    in_sync = generator.splice(_SYNTHETIC, _small_policy(generator))
+    template = tmp_path / "template.yaml"
+    template.write_bytes(in_sync.encode("utf-8"))
+
+    assert generator.main(["--check", "--base-dir", str(root), "--template", str(template)]) == 2
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "WARNING: core/c.py:4: " in err
+    assert "is in sync" in err
+    assert "1 WARNING(s) above" in err
+    assert err.index("is in sync") < err.index("1 WARNING(s) above")
+    assert template.read_bytes() == in_sync.encode("utf-8")
+
+
+def test_write_mode_exits_2_on_a_warning_and_leaves_the_template_unchanged(
+    generator: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A warning stops write mode before it writes, though the template is stale."""
+    (tmp_path / "pkg").mkdir()
+    root = _synthetic_package(tmp_path / "pkg", {"core/c.py": _WARNING_CLIENT})
+    template = tmp_path / "template.yaml"
+    template.write_bytes(_SYNTHETIC.encode("utf-8"))
+
+    assert generator.main(["--base-dir", str(root), "--template", str(template)]) == 2
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "WARNING: core/c.py:4: " in err
+    assert "was not changed" in err
+    assert "wrote" not in err
+    assert template.read_bytes() == _SYNTHETIC.encode("utf-8")
+
+
+def test_the_exempt_shapes_do_not_fail_the_run(
+    generator: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The wrapper lookup and the factory stay exempt: write and check both exit 0."""
+    (tmp_path / "pkg").mkdir()
+    exempt = (
+        "class FooCheck(SecurityCheck):\n"
+        "    def f(self, region):\n"
+        "        return self.get_client(region)\n"
+        "\n"
+        "class Ctx:\n"
+        "    def get_client(self, service_name, region=None):\n"
+        "        return self._session.client(service_name, region_name=region)\n"
+    )
+    root = _synthetic_package(
+        tmp_path / "pkg",
+        {"core/x.py": exempt, "core/c.py": _WARNING_CLIENT.replace(
+            "        self.other = ctx.get_client(service)\n", ""
+        )},
+    )
+    template = tmp_path / "template.yaml"
+    template.write_bytes(_SYNTHETIC.encode("utf-8"))
+    argv = ["--base-dir", str(root), "--template", str(template)]
+
+    assert generator.main(argv) == 0
+    assert generator.main(["--check", *argv]) == 0
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_the_real_tree_checks_clean(
+    generator: Any, template_text: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The tracked tree and template: ``--check`` exits 0 with no warning."""
+    assert generator.main(["--check"]) == 0
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "WARNING" not in err
+    assert "in sync" in err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--out-json", "x"], ["--out-yaml", "x"], ["--quiet"], ["--diff-out", "x"]],
+    ids=["out-json", "out-yaml", "quiet", "diff-out"],
+)
+def test_removed_flags_are_usage_errors(generator: Any, argv: list[str]) -> None:
+    """The side-artefact flags are gone, and argparse rejects them."""
+    with pytest.raises(SystemExit) as excinfo:
+        generator.main(argv)
+    assert excinfo.value.code == 2

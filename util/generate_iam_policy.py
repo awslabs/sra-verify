@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
 """
-Derive the least-privilege member-role IAM policy from the package's boto3 calls.
+Generate the ``SRAVerifyLeastPrivilege`` policy from the package's boto3 calls.
 
 Reads every module in the ``sraverify`` package -- not only ``services/*/client.py``:
 ``core/`` issues calls too (``ScanContext``'s account, Region and organization
-lookups, and the relocated ``core/organizations_client.py``) -- works out which
-boto3 service each receiver refers to, collects every call made on those
-receivers, and emits the action set as JSON and as a CloudFormation
-managed-policy snippet.
+lookups, and ``core/organizations_client.py``) -- works out which boto3 service
+each receiver refers to, collects every call made on those receivers, and writes
+the resulting ``Statement`` list into ``1-sraverify-member-roles.yaml``, between
+the ``# BEGIN GENERATED`` and ``# END GENERATED`` markers inside the
+``SRAVerifyLeastPrivilege`` resource. Everything outside the markers is
+hand-owned and copied through byte for byte.
 
 ``tests/`` and dot-prefixed directories (``.venv``, ``.pytest_cache``,
 ``.hypothesis``) are pruned, and the modules in :data:`EXCLUDED_MODULES` are
 skipped with their reason.
-
-Why this was rewritten
-----------------------
-
-The previous implementation matched ``session.client('<service>')`` with regular
-expressions. **Nothing in the tree has used that form since the scan-context
-refactor** -- every client now acquires its boto3 clients through
-``ctx.get_client('<service>', region=...)`` -- so the generator matched nothing and
-emitted ``{"Statement": []}``. Its output had therefore been derived from nothing
-for some time, which also means "the generated policy is unchanged" was not
-evidence of anything.
 
 Attribution, not pattern matching
 ---------------------------------
@@ -37,21 +28,14 @@ here with the AST rather than with regexes, in two passes per module:
 2. Attribute every ``self.<attr>.<method>(...)`` and
    ``self.<attr>.get_paginator('<method>')`` in the module to that service.
 
-The receiver is the *only* source. An earlier draft of the client error contract
-had each ``except`` clause name its operation as a string literal, and this module
-cross-checked those literals against the receiver methods. That literal is gone --
-``AWSClient.aws_error`` reads the operation from ``ClientError.operation_name``,
-which botocore sets -- so there is nothing left to cross-check and no second
-opinion to reconcile. The AST attribution above is the whole mechanism.
-
-That removed a class of warning, not a class of protection: a literal that
-disagreed with the call it labelled was invisible at runtime, which is precisely
-why it was dropped in favour of the value botocore already supplies.
-
 Warnings
 --------
 
-Two warnings go to stderr, and a clean run emits neither:
+Two warnings go to stderr, and a clean run emits neither. Either one fails the
+run with exit 2, fail-closed like the size guard: each marks calls that would
+drop out of the policy silently, so the member role would under-grant while the
+template still matched the generator. In write mode the template is not
+changed; ``--check`` still prints its in-sync or drift report first.
 
 * A module that declares an ``AWSClient`` subclass but binds no boto3 client.
 * Any ``<x>.get_client(...)`` or ``<x>.client(...)`` anywhere in the package --
@@ -65,25 +49,62 @@ Two warnings go to stderr, and a clean run emits neither:
   and the factory ``<recv>.client(<param>, ...)`` inside a function named
   ``get_client`` whose parameter it forwards (``ScanContext.get_client``).
 
-Run from the repository root:
+Modes and exit status
+---------------------
 
-    python util/generate_iam_policy.py
+With no flags the template is rewritten in place (and left untouched when it is
+already in sync). ``--check`` writes nothing and reports instead. Status:
+
+* ``0`` -- written, already in sync, or (``--check``) in sync, with no warning.
+* ``1`` -- no boto3 call was attributed at all, or (``--check``) the template has
+  drifted from the code; the drift is printed as a unified diff.
+* ``2`` -- a warning was emitted (see Warnings), the policy exceeds the
+  6,144-character managed-policy quota, or the template is unusable:
+  unreadable, markers missing, duplicated, reversed or mis-indented, or the
+  spliced ``PolicyDocument`` does not parse back to the generated policy.
+  Nothing is written. Regenerating does not clear it: the code or the template
+  has to be fixed.
+
+All output -- warnings, the size and headroom line, the drift diff, errors --
+goes to stderr. Nothing is written to stdout. The template and project-root
+defaults are relative to this script, so it runs from any directory:
+
+    cd sraverify && uv run python ../util/generate_iam_policy.py [--check]
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import difflib
 import functools
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 import botocore.session
 import yaml
+
+#: The repository root: this script lives in ``<root>/util/``.
+REPO_ROOT: Path = Path(__file__).resolve().parent.parent
+#: The member-role template the policy is written into.
+DEFAULT_TEMPLATE: Path = REPO_ROOT / "1-sraverify-member-roles.yaml"
+#: The project root (the directory holding ``pyproject.toml``) that is walked.
+DEFAULT_BASE_DIR: Path = REPO_ROOT / "sraverify"
+
+#: The template resource whose ``PolicyDocument`` holds the generated block.
+POLICY_RESOURCE = "SRAVerifyLeastPrivilege"
+#: IAM's managed-policy size quota, in characters excluding whitespace.
+POLICY_SIZE_QUOTA = 6144
+
+BEGIN_MARKER = (
+    "# BEGIN GENERATED by util/generate_iam_policy.py -- do not edit; run it to regenerate"
+)
+END_MARKER = "# END GENERATED"
 
 #: Directory names pruned from the walk at any depth. Dot-prefixed directories
 #: and ``*.egg-info`` are pruned as well; see :func:`_pruned`.
@@ -133,23 +154,11 @@ S3CONTROL_TO_S3: Dict[str, str] = {
     "get_public_access_block": "get_account_public_access_block",
 }
 
-# Deliberately no acronym normalisation.
-#
-# A naive snake_case -> PascalCase conversion emits ``GetWebAclForResource`` where
-# AWS documents the action as ``GetWebACLForResource``, and ``DescribeDrtAccess``
-# where AWS documents ``DescribeDRTAccess``. Normalising those was tried and
-# reverted, for two reasons:
-#
-# 1. IAM evaluates action names case-insensitively, so both spellings authorize
-#    the same calls. The difference is cosmetic.
-# 2. The committed artefacts and the deployed ``1-sraverify-member-roles.yaml``
-#    carry the un-normalised spelling, and the scans they authorize work. Changing
-#    the spelling would put a 7-action diff into a deployed IAM policy for no
-#    functional gain -- and would destroy the one thing this rewrite is for, which
-#    is making "the generated policy is unchanged" mean something again.
-#
-# If the spelling is ever corrected, it should be its own change, with the
-# CloudFormation template updated in the same commit.
+# Deliberately no acronym normalisation: a snake_case -> PascalCase conversion
+# emits ``GetWebAclForResource`` where AWS documents ``GetWebACLForResource``,
+# and ``DescribeDrtAccess`` for ``DescribeDRTAccess``. IAM matches action names
+# case-insensitively, so both spellings authorize the same calls, and respelling
+# them would diff a deployed policy for no functional gain.
 
 
 def _pruned(name: str) -> bool:
@@ -164,7 +173,7 @@ def _pruned(name: str) -> bool:
     return name in PRUNED_DIRS or name.startswith(".") or name.endswith(".egg-info")
 
 
-def package_dir(base_dir: str = "./sraverify") -> Path:
+def package_dir(base_dir: str | Path = DEFAULT_BASE_DIR) -> Path:
     """Return the ``sraverify`` package directory under the project root.
 
     Args:
@@ -185,7 +194,7 @@ def package_dir(base_dir: str = "./sraverify") -> Path:
     return package
 
 
-def find_python_modules(base_dir: str = "./sraverify") -> List[str]:
+def find_python_modules(base_dir: str | Path = DEFAULT_BASE_DIR) -> List[str]:
     """Return every walked ``.py`` in the package, sorted.
 
     Prunes :data:`PRUNED_DIRS`, dot-prefixed directories and ``*.egg-info`` at
@@ -211,7 +220,7 @@ def find_python_modules(base_dir: str = "./sraverify") -> List[str]:
     return sorted(found)
 
 
-def relative_module(path: str, base_dir: str = "./sraverify") -> str:
+def relative_module(path: str, base_dir: str | Path = DEFAULT_BASE_DIR) -> str:
     """Return ``path`` relative to the package directory, POSIX-style.
 
     Args:
@@ -320,9 +329,8 @@ def bind_clients(tree: ast.Module) -> Dict[str, str]:
             ):
                 bindings[target.attr] = service
             elif isinstance(target, ast.Name):
-                # A local, e.g. `sts_client = self.ctx.get_client("sts")`. Still
-                # attributed, so a client acquired inside a method body before
-                # Requirement 1.11's constructor move is not lost.
+                # A local, e.g. `sts_client = self.ctx.get_client("sts")`, so a
+                # client acquired inside a method body is still attributed.
                 bindings[target.id] = service
 
     return bindings
@@ -488,16 +496,33 @@ def collect_calls(
     return dict(calls)
 
 
+def sid_for(service: str) -> str:
+    """Return the statement Sid for a boto3 service id.
+
+    A Sid may contain only ASCII letters and digits, so the id is split on every
+    other character and each part capitalized: ``cognito-idp`` ->
+    ``CognitoIdpPermissions``, ``security-ir`` -> ``SecurityIrPermissions``.
+
+    Args:
+        service: A boto3 service id.
+
+    Returns:
+        The Sid.
+    """
+    return "".join(p.capitalize() for p in re.split(r"[^A-Za-z0-9]+", service)) + "Permissions"
+
+
 def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
     """Build the policy document from the attributed calls.
 
     Args:
         service_calls: ``{service_id: {boto3_method, ...}}``. Mutated: the
             ``s3control`` mapping and the dependent-permission additions are
-            applied in place, matching the previous behaviour.
+            applied in place.
 
     Returns:
-        A policy document.
+        A policy document, statements sorted by service and actions sorted
+        within each statement.
     """
     # s3control's account-level public access block is an s3 action.
     if "s3control" in service_calls:
@@ -505,9 +530,6 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
         for call in service_calls["s3control"]:
             service_calls["s3"].add(S3CONTROL_TO_S3.get(call, call))
         service_calls.pop("s3control")
-
-    for calls in service_calls.values():
-        calls.discard("get_paginator")
 
     # Operations whose IAM action has a different name from the operation.
     for service, aliases in ACTION_ALIASES.items():
@@ -545,15 +567,7 @@ def generate_iam_policy(service_calls: Dict[str, Set[str]]) -> Dict:
 
         statements.append(
             {
-                # `str.capitalize()` verbatim, matching the committed artefacts.
-                # Note this yields `Cognito-idpPermissions` and
-                # `Security-irPermissions`, which are not valid IAM Sids -- a Sid
-                # must be alphanumeric. That is pre-existing and harmless here,
-                # because `1-sraverify-member-roles.yaml` carries hand-written
-                # statements rather than this snippet; the snippet is a reference.
-                # Left as-is so this generator reproduces the committed files
-                # exactly; fixing it is a separate change.
-                "Sid": f"{service.capitalize()}Permissions",
+                "Sid": sid_for(service),
                 "Effect": "Allow",
                 "Action": actions,
                 "Resource": "*",
@@ -570,14 +584,14 @@ def convert_to_api_action(method_name: str) -> str:
         method_name: e.g. ``"get_web_acl_for_resource"``.
 
     Returns:
-        e.g. ``"GetWebACLForResource"``.
+        e.g. ``"GetWebAclForResource"``.
     """
     if "_" in method_name:
         return "".join(part.capitalize() for part in method_name.split("_"))
     return method_name[:1].upper() + method_name[1:]
 
 
-def build(base_dir: str = "./sraverify") -> Tuple[Dict[str, Set[str]], List[str]]:
+def build(base_dir: str | Path = DEFAULT_BASE_DIR) -> Tuple[Dict[str, Set[str]], List[str]]:
     """Attribute every boto3 call in the package.
 
     Args:
@@ -625,17 +639,14 @@ def build(base_dir: str = "./sraverify") -> Tuple[Dict[str, Set[str]], List[str]
 class NoAliasDumper(yaml.SafeDumper):
     """Emit no aliases, and indent sequences under their key.
 
-    Two deviations from ``SafeDumper``'s defaults, both to reproduce the
-    committed ``generated_sraverify_cf_policy.yaml`` byte for byte:
+    Two deviations from ``SafeDumper``'s defaults, both so the rendered block
+    matches the template's style:
 
     * **No aliases.** A repeated node would otherwise be emitted as ``&id001`` /
       ``*id001``, which is valid YAML that CloudFormation does not accept.
     * **Indented sequences.** PyYAML writes a block sequence at the same
-      indentation as its key by default; the committed file indents it one level,
-      which is the conventional CloudFormation style. Without this the generator
-      produces a 190-line whitespace-only diff on every run, and a whitespace-only
-      diff is indistinguishable from a real one at a glance -- which would undo the
-      point of being able to regenerate and compare.
+      indentation as its key by default; the template indents it one level,
+      the conventional CloudFormation style.
     """
 
     def ignore_aliases(self, data: object) -> bool:
@@ -663,87 +674,306 @@ class NoAliasDumper(yaml.SafeDumper):
         return super().increase_indent(flow, False)
 
 
-def main() -> int:
-    """Attribute the calls, emit the artefacts, and report.
+class TemplateError(Exception):
+    """The template cannot take the generated block; nothing is written."""
+
+
+class _CfnLoader(yaml.SafeLoader):
+    """A SafeLoader that accepts CloudFormation short-form tags (``!Ref``, ``!Sub``).
+
+    Plain ``yaml.safe_load`` rejects them. Each tagged node becomes
+    ``{tag_suffix: value}``, which is enough to locate and compare the policy.
+    """
+
+
+def _construct_tagged(loader: yaml.SafeLoader, suffix: str, node: yaml.Node) -> Dict[str, Any]:
+    """Construct a short-form CloudFormation tag as ``{suffix: value}``."""
+    if isinstance(node, yaml.ScalarNode):
+        value: Any = loader.construct_scalar(node)
+    elif isinstance(node, yaml.SequenceNode):
+        value = loader.construct_sequence(node, deep=True)
+    else:
+        value = loader.construct_mapping(node, deep=True)
+    return {suffix: value}
+
+
+_CfnLoader.add_multi_constructor("!", _construct_tagged)
+
+
+def policy_size(policy: Dict) -> int:
+    """Return the policy's size as IAM counts it against the quota.
+
+    IAM excludes whitespace, so this is the length of the minified JSON.
+
+    Args:
+        policy: A policy document.
 
     Returns:
-        Process exit status: ``0`` on success, ``1`` if nothing was attributed.
+        The character count.
     """
-    parser = argparse.ArgumentParser(description=__doc__)
+    return len(json.dumps(policy, separators=(",", ":")))
+
+
+def render_statements(policy: Dict, indent: str) -> List[str]:
+    """Render the policy's ``Statement`` list as template lines.
+
+    Args:
+        policy: A policy document.
+        indent: The list-item indent, taken from the BEGIN marker.
+
+    Returns:
+        Lines ending in ``"\\n"``.
+    """
+    text = yaml.dump(
+        policy["Statement"],
+        Dumper=NoAliasDumper,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return [f"{indent}{line}\n" for line in text.splitlines()]
+
+
+def find_block(lines: List[str]) -> Tuple[int, int, str]:
+    """Locate the generated block.
+
+    A marker line is one whose stripped text equals the marker exactly.
+
+    Args:
+        lines: The template, split with ``keepends=True``.
+
+    Returns:
+        ``(begin, end, indent)``: the BEGIN and END line indices and the
+        BEGIN line's leading whitespace.
+
+    Raises:
+        TemplateError: If either marker is missing or duplicated, END comes
+            before BEGIN, the BEGIN indent is not spaces only, or END is at a
+            different indent.
+    """
+    begins = [i for i, line in enumerate(lines) if line.strip() == BEGIN_MARKER]
+    ends = [i for i, line in enumerate(lines) if line.strip() == END_MARKER]
+    if not begins:
+        raise TemplateError("BEGIN GENERATED marker not found")
+    if len(begins) > 1:
+        raise TemplateError(f"BEGIN GENERATED marker appears {len(begins)} times")
+    if not ends:
+        raise TemplateError("END GENERATED marker not found")
+    if len(ends) > 1:
+        raise TemplateError(f"END GENERATED marker appears {len(ends)} times")
+    begin, end = begins[0], ends[0]
+    if end < begin:
+        raise TemplateError("END GENERATED marker comes before BEGIN GENERATED")
+
+    begin_line, end_line = lines[begin], lines[end]
+    indent = begin_line[: len(begin_line) - len(begin_line.lstrip())]
+    if indent.strip(" "):
+        raise TemplateError("BEGIN GENERATED marker is indented with something other than spaces")
+    end_indent = end_line[: len(end_line) - len(end_line.lstrip())]
+    if end_indent != indent:
+        raise TemplateError("END GENERATED marker is not at the BEGIN marker's indent")
+    return begin, end, indent
+
+
+def load_template(text: str) -> Dict[str, Any]:
+    """Parse a CloudFormation YAML template, tolerating short-form tags.
+
+    Args:
+        text: The template.
+
+    Returns:
+        The parsed document.
+    """
+    return yaml.load(text, Loader=_CfnLoader)  # nosec B506 - _CfnLoader is a SafeLoader subclass
+
+
+def splice(template_text: str, policy: Dict) -> str:
+    """Replace the generated block with ``policy``'s statements.
+
+    Everything up to and including the BEGIN line, and from the END line on, is
+    copied through unchanged. The result is re-parsed and its
+    ``SRAVerifyLeastPrivilege`` ``PolicyDocument`` must equal ``policy``, so
+    markers in the wrong resource or at the wrong indent are caught before
+    anything is written.
+
+    Args:
+        template_text: The current template.
+        policy: The generated policy document.
+
+    Returns:
+        The new template text.
+
+    Raises:
+        TemplateError: On a malformed block or a re-parse mismatch.
+    """
+    lines = template_text.splitlines(keepends=True)
+    begin, end, indent = find_block(lines)
+    new_text = "".join(
+        lines[: begin + 1] + render_statements(policy, indent) + lines[end:]
+    )
+
+    try:
+        document = load_template(new_text)
+    except yaml.YAMLError as e:
+        raise TemplateError(f"the spliced template does not parse: {e}") from e
+    try:
+        parsed = document["Resources"][POLICY_RESOURCE]["Properties"]["PolicyDocument"]
+    except (KeyError, TypeError) as e:
+        raise TemplateError(
+            f"the spliced template has no Resources.{POLICY_RESOURCE}.Properties.PolicyDocument"
+        ) from e
+    if parsed != policy:
+        raise TemplateError(
+            f"after splicing, {POLICY_RESOURCE}'s PolicyDocument does not equal the "
+            f"generated policy; the markers must sit inside its Statement list, at "
+            f"the list-item indent"
+        )
+    return new_text
+
+
+def drift_diff(old: str, new: str, path: str) -> str:
+    """Return a unified diff from the template to the generated text.
+
+    The headers are ``a/<path>`` and ``b/<path>``, git's convention, so the diff
+    reads like ``git diff`` output.
+
+    Args:
+        old: The template as it is.
+        new: The template as the generator would write it.
+        path: The template's path, relative to the repository root where possible.
+
+    Returns:
+        The diff, empty when the two are equal.
+    """
+    return "".join(
+        difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+        )
+    )
+
+
+def _display(path: Path) -> str:
+    """Return ``path`` relative to :data:`REPO_ROOT` when under it, else as given."""
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _err(message: str) -> None:
+    """Write one line to stderr."""
+    print(message, file=sys.stderr)
+
+
+def main(argv: List[str] | None = None) -> int:
+    """Generate the policy and write it into, or check it against, the template.
+
+    Args:
+        argv: Command-line arguments, ``sys.argv[1:]`` when ``None``.
+
+    Returns:
+        Process exit status; see the module docstring.
+    """
+    parser = argparse.ArgumentParser(
+        description="Write the SRAVerifyLeastPrivilege policy into the member-role template."
+    )
+    parser.add_argument(
+        "--template",
+        type=Path,
+        default=DEFAULT_TEMPLATE,
+        help=f"template to update (default: {_display(DEFAULT_TEMPLATE)})",
+    )
     parser.add_argument(
         "--base-dir",
-        default="./sraverify",
-        help="project root to walk (default: ./sraverify)",
+        type=Path,
+        default=DEFAULT_BASE_DIR,
+        help=f"project root to walk (default: {_display(DEFAULT_BASE_DIR)})",
     )
     parser.add_argument(
-        "--out-json",
-        default="generated_sraverify_iam_policy.json",
-        help="where to write the policy JSON",
+        "--check",
+        action="store_true",
+        help=(
+            "write nothing; exit 1 and print a diff if the template has drifted, "
+            "exit 2 on any WARNING, an oversize policy or a bad template"
+        ),
     )
-    parser.add_argument(
-        "--out-yaml",
-        default="generated_sraverify_cf_policy.yaml",
-        help="where to write the CloudFormation snippet",
-    )
-    parser.add_argument(
-        "--quiet", action="store_true", help="suppress the per-service listing"
-    )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    template: Path = args.template
+    shown = _display(template)
 
     service_calls, warnings = build(args.base_dir)
-
-    if not args.quiet:
-        print("=== Boto3 API calls by service (attributed via __init__) ===")
-        for service in sorted(service_calls):
-            print(f"\n{service}:")
-            for call in sorted(service_calls[service]):
-                print(f"  - {call}")
-
     for warning in warnings:
-        print(f"WARNING: {warning}", file=sys.stderr)
+        _err(f"WARNING: {warning}")
 
     if not service_calls:
-        print(
+        _err(
             "ERROR: no boto3 calls were attributed to any service. The client "
             "layer's client-acquisition form has changed and this generator no "
-            "longer recognizes it -- fix that before trusting the output.",
-            file=sys.stderr,
+            "longer recognizes it; fix that first."
         )
         return 1
 
     policy = generate_iam_policy(service_calls)
+    size = policy_size(policy)
+    quota = POLICY_SIZE_QUOTA
+    actions = sum(len(statement["Action"]) for statement in policy["Statement"])
+    _err(
+        f"{POLICY_RESOURCE}: {len(policy['Statement'])} statements, {actions} actions; "
+        f"{size:,} of {quota:,} characters ({quota - size:,} headroom)"
+    )
+    if size > quota:
+        _err(
+            f"ERROR: {POLICY_RESOURCE} exceeds the {quota:,}-character managed-policy "
+            f"quota by {size - quota:,}; split it into a second managed policy by hand. "
+            f"{shown} was not changed."
+        )
+        return 2
 
-    # No trailing newline, matching the committed artefact. A trailing newline
-    # would be the better convention, but adding one here would put a permanent
-    # one-byte diff into every future regenerate-and-compare -- and the whole
-    # point of this rewrite is that such a comparison means something. Fix the
-    # newline and the committed file together, or not at all.
-    Path(args.out_json).write_text(json.dumps(policy, indent=2), encoding="utf-8")
+    try:
+        try:
+            old = template.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise TemplateError(f"cannot read the template: {e}") from e
+        new = splice(old, policy)
+    except TemplateError as e:
+        _err(f"ERROR: {shown}: {e}")
+        return 2
 
-    cf_policy = {
-        "SRAVerifyLeastPrivilege": {
-            "Type": "AWS::IAM::ManagedPolicy",
-            "Properties": {
-                "ManagedPolicyName": "SRAVerifyLeastPrivilege",
-                "Description": "Least privilege policy for SRA Verify tool",
-                "PolicyDocument": policy,
-            },
-        }
-    }
-    Path(args.out_yaml).write_text(
-        yaml.dump(
-            cf_policy, default_flow_style=False, sort_keys=False, Dumper=NoAliasDumper
-        ),
-        encoding="utf-8",
+    # A warning marks calls the policy would silently omit, so it fails the
+    # run in both modes -- after --check's own report, and before any write.
+    unattributed = (
+        f"ERROR: {len(warnings)} WARNING(s) above: calls through those sites are "
+        f"missing from the generated policy, so the member role would under-grant. "
+        f"Bind each to a literal boto3 service id and re-run."
     )
 
-    total = sum(len(statement["Action"]) for statement in policy["Statement"])
-    print(
-        f"\n{len(policy['Statement'])} statements, {total} actions across "
-        f"{len(service_calls)} services"
-    )
-    print(f"Policy written to {args.out_json}")
-    print(f"CloudFormation snippet written to {args.out_yaml}")
+    if args.check:
+        if new == old:
+            _err(f"{shown} is in sync")
+            status = 0
+        else:
+            sys.stderr.write(drift_diff(old, new, shown))
+            _err(
+                f"ERROR: {shown} is out of date; run: "
+                f"cd sraverify && uv run python ../util/generate_iam_policy.py"
+            )
+            status = 1
+        if warnings:
+            _err(unattributed)
+            return 2
+        return status
+
+    if warnings:
+        _err(f"{unattributed} {shown} was not changed.")
+        return 2
+
+    if new == old:
+        _err(f"{shown} is already up to date")
+    else:
+        template.write_bytes(new.encode("utf-8"))
+        _err(f"wrote {shown}")
     return 0
 
 

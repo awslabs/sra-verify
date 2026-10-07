@@ -26,6 +26,7 @@ Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.13.
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -175,8 +176,20 @@ def test_assignment_to_a_remediation_member_raises(field_name):
         setattr(rem, field_name, "mutated")
 
 
+# CPython before 3.13 has gh-90055 (bpo-45897): a frozen ``slots=True``
+# dataclass's generated ``__setattr__`` calls ``super(cls, self)`` on the
+# pre-slots class and raises ``TypeError`` for a new attribute. The attribute is
+# still refused. Observed: 3.11.15 and 3.12.13 raise ``TypeError``; 3.13.14 and
+# 3.14.7 raise ``FrozenInstanceError``.
+NEW_ATTR_ERRORS = (
+    (AttributeError, FrozenInstanceError, TypeError)
+    if sys.version_info < (3, 13)
+    else (AttributeError, FrozenInstanceError)
+)
+
+
 def test_slotted_storage_admits_no_new_attribute():
-    with pytest.raises((AttributeError, FrozenInstanceError)):
+    with pytest.raises(NEW_ATTR_ERRORS):
         make().extra = "value"
 
 

@@ -19,7 +19,7 @@ The build is scoped explicitly: the wheel ships `packages = ["sraverify"]`, the 
 
 `uv.lock` is for reproducible development only. Consumers installing the package still resolve the ranges in `[project].dependencies`, which is correct for a library. There is no `requirements.txt`: every install path (pip, `uv sync`, the CodeBuild buildspec) reads `[project].dependencies`, so `pyproject.toml` is the only dependency declaration. If a pinned requirements file is ever needed, generate it with `uv export --format requirements-txt` rather than committing a second hand-maintained copy.
 
-There is no Makefile and no tox/nox. `.gitlab-ci.yml` holds one job, `iam-policy-drift` (see IAM policy generation). pytest is configured in `[tool.pytest.ini_options]` (`testpaths`, `pythonpath = ["."]`). `ruff` and `pyright` are **not** adopted here, deliberately: `sra-verify-mcp` formats with single quotes, so `ruff format` would rewrite nearly every file and belongs in a change of its own.
+There is no Makefile and no tox/nox. `.gitlab-ci.yml` holds three read-only jobs, all on the same pinned `uv` image and all without `rules:`, so each runs on every pipeline: `iam-policy-drift` (see IAM policy generation), `unit-tests` (the full pytest suite on Python 3.11, see Test) and `checks-inventory-drift` (`docs/checks.txt` against `sraverify --list-checks`, see Regenerating `docs/checks.txt`). None commits, pushes or keeps an artefact. pytest is configured in `[tool.pytest.ini_options]` (`testpaths`, `pythonpath = ["."]`). `ruff` and `pyright` are **not** adopted here, deliberately: `sra-verify-mcp` formats with single quotes, so `ruff format` would rewrite nearly every file and belongs in a change of its own.
 
 ### Known inconsistencies (do not "fix" without asking)
 
@@ -81,6 +81,8 @@ cd sra-verify/sraverify && uv run pytest -q --tb=line -p no:logging
 
 The 1375 skips are all one property: `test_a_declared_semantic_error_result_reaches_failed` parametrizes over every (check, declared `(operation, code)` pair) — the service table's pairs plus the provider table's four pairs for every one of the 192 checks — and skips a pair the check cannot reach — one whose operation is issued only *after* a successful enumeration, which the "every accessor fails" harness cannot set up. Its docstring says what reaching them would take.
 
+CI runs the full suite on every pipeline through the `unit-tests` job, on Python 3.11 — the declared floor and the CodeBuild runtime — rather than the newer local venv: `uv run --frozen pytest -q -p no:logging --tb=short`. Under GitLab, Hypothesis loads its built-in `ci` profile on its own (derandomized, no deadline, no example database).
+
 ### Regenerating `docs/checks.txt`
 
 Use the installed console script, **not** `-m`:
@@ -89,7 +91,7 @@ Use the installed console script, **not** `-m`:
 sra-verify/sraverify/.venv/bin/sraverify --list-checks > sra-verify/docs/checks.txt
 ```
 
-`python -m sraverify --list-checks` is equivalent (it runs `sraverify/__main__.py`) and also produces a 0-byte stderr. Do not use `python -m sraverify.cli`: runpy would re-execute a module that may already be imported and warn on stderr. This artifact has drifted from the code twice; a stale `docs/checks.txt` is a real failure mode, so verify with `cmp` after regenerating.
+`python -m sraverify --list-checks` is equivalent (it runs `sraverify/__main__.py`) and also produces a 0-byte stderr. Do not use `python -m sraverify.cli`: runpy would re-execute a module that may already be imported and warn on stderr. This artifact has drifted from the code twice; a stale `docs/checks.txt` is a real failure mode, so verify with `cmp` after regenerating. The GitLab job `checks-inventory-drift` now enforces it: it regenerates the inventory to a file (not a pipe, so a failing `sraverify` cannot be masked) and fails with a `diff -u` against `docs/checks.txt`. `--list-checks` needs no credentials and no Region, so the job needs neither. The fix is the regeneration command above, then commit.
 
 ### Build
 

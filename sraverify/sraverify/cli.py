@@ -9,6 +9,7 @@ output path, the summary on stdout, and the exit status. The scan itself is
 """
 import argparse
 import datetime
+import json
 import logging
 import os
 import sys
@@ -22,6 +23,7 @@ from sraverify.core.errors import (
 )
 from sraverify.core.finding import Finding
 from sraverify.core.logging import logger
+from sraverify.core.registry import all_checks
 from sraverify.scanner import SRAVerify
 from sraverify.utils.banner import print_banner
 from sraverify.utils.outputs import write_csv_output
@@ -120,6 +122,26 @@ def print_summary(findings: List[Finding], output_file: str) -> None:
     print(f"  · Output: {output_file}")
 
 
+def _print_check_catalog_json(account_type: str) -> None:
+    checks = []
+    for check_class in all_checks().values():
+        meta = check_class.meta
+        if account_type != 'all' and meta.account_type.value != account_type:
+            continue
+        checks.append({
+            'check_id': meta.check_id,
+            'title': meta.title,
+            'description': meta.description,
+            'service': meta.service,
+            'account_type': meta.account_type.value,
+            'severity': meta.severity.value,
+            'resource_type': meta.resource_type,
+            'sra_sections': meta.sra_sections,
+            'additional_urls': meta.additional_urls,
+        })
+    print(json.dumps({'schema_version': 1, 'checks': checks}, indent=2))
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse command line arguments.
 
@@ -157,6 +179,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument('--log-archive-account', type=str, metavar='ACCOUNTID1,ACCOUNTID2',
                         help='AWS accounts used for Logging, use comma separated values')
     parser.add_argument('--list-checks', action='store_true', help='List available checks')
+    parser.add_argument('--format', choices=('text', 'json'),
+                        help='Output format for --list-checks (default: text)')
     parser.add_argument('--list-services', action='store_true', help='List available services')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 
@@ -173,7 +197,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument('--max-pool-connections', type=int, default=None,
                         help='boto3 max_pool_connections (default: 50)')
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.format is not None and not args.list_checks:
+        parser.error('--format requires --list-checks')
+    return args
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -194,9 +221,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         that cannot be determined), with no file created.
     """
     args = parse_args(argv)
+    if args.format == 'json':
+        _print_check_catalog_json(args.account_type)
+        return 0
 
-    # First, so every record from here on -- including session setup inside
-    # SRAVerify -- goes to stderr at the requested level.
     configure_logging(args.debug)
 
     regions = [r.strip() for r in args.regions.split(',')] if args.regions else None

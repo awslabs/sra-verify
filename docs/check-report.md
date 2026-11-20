@@ -4,7 +4,7 @@ Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazo
 to the SRA Verify checks that assess it, so gaps are visible.
 
 - **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
-- **Check source:** the live registry (`sraverify --list-checks`), **187 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five Security Hub CSPM checks added by the CSPM split (SRA-SECURITYHUB-21 aggregator, -22 central-configuration associations, -23 FSBP, -24 CIS, -25 EventBridge routing), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
+- **Check source:** the live registry (`sraverify --list-checks`), **193 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five Security Hub CSPM checks added by the CSPM split (SRA-SECURITYHUB-21 aggregator, -22 central-configuration associations, -23 FSBP, -24 CIS, -25 EventBridge routing), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,14 +15,14 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` matches the live registry byte for byte at the time of writing (187 checks).
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (193 checks).
 
 ## Summary
 
 | Checklist section                 |   Items | Covered | Partial | Missing |
 | --------------------------------- | ------: | ------: | ------: | ------: |
 | AWS Organizations                 |      11 |       7 |       1 |       3 |
-| AWS CloudTrail                    |      14 |       8 |       1 |       5 |
+| AWS CloudTrail                    |      14 |       8 |       2 |       4 |
 | AWS Security Hub CSPM             |      17 |      11 |       3 |       3 |
 | AWS Config                        |       7 |       5 |       0 |       2 |
 | Amazon GuardDuty                  |      17 |      11 |       1 |       5 |
@@ -45,12 +45,12 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
 | AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **124** |  **13** |  **87** |
+| **Total**                         | **224** | **124** |  **14** |  **86** |
 
 Coverage is concentrated in the security services SRA Verify has packages for. Six
 checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
 Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 87 missing items.
+the 86 missing items.
 
 ---
 
@@ -85,7 +85,7 @@ the 87 missing items.
 |    9 | Integrated with CloudWatch Logs for retention                           | SRA-CLOUDTRAIL-05, SRA-CLOUDTRAIL-09 | Covered | -05 configuration present, -09 delivery working                                                                                                |
 |   10 | Trail encrypted with a customer managed key                             | SRA-CLOUDTRAIL-02                    | Covered | Verifies a KMS key is set; does not distinguish customer managed from AWS managed                                                              |
 |   11 | Central log bucket in Log Archive encrypted with a customer managed key | —                                    | Missing | No S3 encryption check on the log bucket                                                                                                       |
-|   12 | Central log bucket configured with S3 Object Lock                       | —                                    | Missing |                                                                                                                                                |
+|   12 | Central log bucket configured with S3 Object Lock                       | SRA-CLOUDTRAIL-16                    | Partial | Fixed default retention for new objects in owned destinations of visible organization trails; existing objects and unseen trails are not assessed |
 |   13 | Versioning enabled on the central log bucket                            | —                                    | Missing |                                                                                                                                                |
 |   14 | Central log bucket resource policy restricts uploads to the trail ARN   | —                                    | Missing |                                                                                                                                                |
 
@@ -452,5 +452,5 @@ additional coverage, not gaps.
 
 1. **Six service sections with no package at all** — Detective (9), KMS (8), Systems Manager (8), Secrets Manager (8), IAM Identity Center (7 of 8), Private CA (6). 46 missing items.
 2. **Network Firewall and DNS Firewall** (12 items) — visible only through the Firewall Manager policy checks.
-3. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. No check inspects encryption, Object Lock, versioning, or resource policy on a destination bucket. The `s3` package covers public-access block only.
+3. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. Object Lock default retention is checked for visible organization trail destinations owned by scanned Log Archive accounts; encryption, versioning, and resource policy are not assessed on destination buckets. The shared scan role grants its read permissions in every account where it is deployed.
 4. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.

@@ -234,7 +234,9 @@ Resources:
             Action:
               - s3:GetAccountPublicAccessBlock
               - s3:GetBucketLocation
+              - s3:GetBucketObjectLockConfiguration
               - s3:GetBucketPolicy
+              - s3:ListAllMyBuckets
             Resource: '*'
           - Sid: SecurityIrPermissions
             Effect: Allow

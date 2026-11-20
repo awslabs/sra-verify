@@ -1,5 +1,5 @@
 """
-S3 client, for the account-level public access block.
+S3 client for account-level public access and bucket configuration.
 
 Every method returns a dict: the boto3 response on success, or the error result
 built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
@@ -12,7 +12,7 @@ the control genuinely being absent, and ``AccessDenied`` when the caller lacks
 ``s3:GetAccountPublicAccessBlock``, which is an inability to determine. Both reach
 the check intact and ``S3Check.NOT_CONFIGURED_ERRORS`` declares which is which.
 
-The method returns the whole response rather than the extracted
+The public access block method returns the whole response rather than the extracted
 ``PublicAccessBlockConfiguration`` sub-dict, so an empty configuration stays
 distinguishable from a failure.
 """
@@ -23,7 +23,7 @@ from sraverify.core.scan_context import ScanContext
 
 
 class S3Client(AWSClient):
-    """Client for interacting with the S3 account-level public access block."""
+    """Client for S3 account and bucket configuration."""
 
     def __init__(self, region: str, ctx: ScanContext):
         """
@@ -57,6 +57,29 @@ class S3Client(AWSClient):
         try:
             return self.s3control_client.get_public_access_block(
                 AccountId=account_id
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def list_owned_buckets(self) -> Mapping[str, Any]:
+        try:
+            buckets = []
+            for page in self.client.get_paginator('list_buckets').paginate(
+                PaginationConfig={'PageSize': 1000}
+            ):
+                if not isinstance(page.get('Buckets'), list):
+                    return {}
+                buckets.extend(page['Buckets'])
+            return {'Buckets': buckets}
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def get_object_lock_configuration(
+        self, bucket: str, expected_bucket_owner: str
+    ) -> Mapping[str, Any]:
+        try:
+            return self.client.get_object_lock_configuration(
+                Bucket=bucket, ExpectedBucketOwner=expected_bucket_owner
             )
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)

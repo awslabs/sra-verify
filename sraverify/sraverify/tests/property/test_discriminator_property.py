@@ -561,6 +561,12 @@ _NON_OWNED_NOT_CONFIGURED_ENTRIES: tuple[tuple[str, str, str, str | None, str], 
     ('AccountCheck', 'GetAlternateContact', 'ResourceNotFoundException', None, 'cee1a2d0dd7497c603bc606f9955cc3fb248102e17bffb0445056a26c05e66df'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('AuditManagerCheck', 'GetOrganizationAdminAccount', 'AccessDeniedException', 'Please complete AWS Audit Manager setup', 'c94a8c90079f230535f436901a3e87e2cc8ae631c3d848bea2c14afe90c8d3f6'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('CloudTrailCheck', 'GetEventSelectors', 'TrailNotFoundException', None, '501d46b719d2d6608713e7f242dc98fa7afa0335dfa900e278d03b8d1dddb581'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
+    (
+        'CloudTrailCheck', 'GetObjectLockConfiguration',
+        'ObjectLockConfigurationNotFoundError', None,
+        '97ca2b3a6201c45996de59395655c95f'
+        'f497f986be17fff9ca0d8c325d36c37b',
+    ),
     ('CloudTrailCheck', 'GetTrailStatus', 'TrailNotFoundException', None, '64dac76a668ed3de3620f594c77cfd0f0326380821824b00f77befd38cc6803c'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('ConfigCheck', 'GetBucketPolicy', 'NoSuchBucketPolicy', None, 'c443af8abd141a33d8d8a3e870ad157320ee2590984f351a46ad0b3c75dc248a'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
     ('FirewallManagerCheck', 'GetAdminAccount', 'ResourceNotFoundException', None, '3f33df4b1bd99f160b5a9fa54a10b04df68efc3c20f01b76b9074f8d1c0e7ec3'),  # pragma: allowlist secret -- sha256 of public evidence text, not a credential
@@ -669,9 +675,7 @@ def test_no_service_table_declares_an_owned_operation(service: str) -> None:
 
 
 def test_every_non_owned_service_entry_is_unchanged_from_the_merged_phase_one() -> None:
-    """Property 43: 48 entries -- f517024's 46 plus the two Security Hub CSPM
-    entries observed live on 2026-10-05 (evidence by digest)."""
-    assert len(_NON_OWNED_NOT_CONFIGURED_ENTRIES) == 48
+    assert len(_NON_OWNED_NOT_CONFIGURED_ENTRIES) == 49
     assert _live_non_owned_entries() == _NON_OWNED_NOT_CONFIGURED_ENTRIES
 
 

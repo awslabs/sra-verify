@@ -94,7 +94,7 @@ import sraverify.services  # noqa: F401  (imported for its registration side eff
 #: The catalog size the migration is specified to produce: 192 checks across
 #: 19 services. Both numbers are asserted rather than merely derived, so that a
 #: change which drops a check *and* its file stays a bijection and still fails.
-EXPECTED_CHECK_COUNT = 192
+EXPECTED_CHECK_COUNT = 193
 EXPECTED_SERVICE_COUNT = 19
 
 #: Modules eligible to be check modules. Mirrors ``CHECK_MODULE_PREFIX`` in

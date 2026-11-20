@@ -183,7 +183,7 @@ In this step you will clone the Github repository and run the tool.
                      [--account-type {application,audit,log-archive,management,all}]
                      [--audit-account ACCOUNTID1,ACCOUNTID2]
                      [--log-archive-account ACCOUNTID1,ACCOUNTID2] [--list-checks]
-                     [--list-services] [--debug]
+                     [--format {text,json}] [--list-services] [--debug]
                      [--connect-timeout CONNECT_TIMEOUT]
                      [--read-timeout READ_TIMEOUT] [--max-attempts MAX_ATTEMPTS]
                      [--max-pool-connections MAX_POOL_CONNECTIONS]
@@ -212,6 +212,7 @@ In this step you will clone the Github repository and run the tool.
                             AWS accounts used for Logging, use comma separated
                             values
       --list-checks         List available checks
+      --format {text,json}  Output format for --list-checks (default: text)
       --list-services       List available services
       --debug               Enable debug logging
       --connect-timeout CONNECT_TIMEOUT
@@ -242,12 +243,17 @@ In this step you will clone the Github repository and run the tool.
    sraverify --account-type audit --audit-account 111122223333 --regions us-east-1
    ```
 
-   - List the catalog. Both of these exit immediately without making any AWS API call, so
-     they need no credentials:
+   - List the checks or services without AWS credentials:
    ```bash
    sraverify --list-checks
    sraverify --list-services
+   sraverify --list-checks --format json --account-type audit
    ```
+
+   The JSON catalog is written to stdout with `schema_version` set to `1` and a `checks`
+   array sorted by check ID. Each check includes its ID, title, description, service,
+   account type, severity, resource type, SRA sections, and additional documentation URLs.
+   Omit `--account-type` to list every check.
 
 ### Output file naming
 When `--output` is omitted, a timestamp is inserted before the extension, producing

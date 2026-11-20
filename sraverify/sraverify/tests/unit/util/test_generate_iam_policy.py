@@ -1157,3 +1157,9 @@ def test_removed_flags_are_usage_errors(generator: Any, argv: list[str]) -> None
     with pytest.raises(SystemExit) as excinfo:
         generator.main(argv)
     assert excinfo.value.code == 2
+
+
+def test_s3_object_lock_action_aliases(generator: Any) -> None:
+    policy = generator.generate_iam_policy({"s3": {"list_buckets", "get_object_lock_configuration"}})
+    actions = {a for s in policy["Statement"] for a in s["Action"]}
+    assert actions == {"s3:ListAllMyBuckets", "s3:GetBucketObjectLockConfiguration"}

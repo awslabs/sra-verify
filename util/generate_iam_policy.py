@@ -147,6 +147,8 @@ BOTO3_INTERNAL_METHODS: frozenset[str] = frozenset(
 #: authorized to perform: securityhub:GetFindings" (observed 2026-09-25).
 ACTION_ALIASES: Dict[str, Dict[str, str]] = {
     "securityhub": {"get_findings_v2": "get_findings"},
+    "s3": {"list_buckets": "list_all_my_buckets",
+           "get_object_lock_configuration": "get_bucket_object_lock_configuration"},
 }
 
 #: ``s3control`` operations and the ``s3`` action they actually require.

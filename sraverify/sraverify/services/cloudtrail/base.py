@@ -5,9 +5,6 @@ Per-scan cached AWS responses live on the attached :class:`ScanContext` under th
 ``"cloudtrail"`` namespace. Every accessor returns the client's response dict unchanged,
 or an error result, and none caches a failure.
 
-:meth:`describe_trails` is account-wide rather than per-Region: it uses the first
-Region's client and CloudTrail returns every visible trail, shadow trails
-included. Its cache key carries only the boolean flag for that reason.
 """
 from typing import Any, ClassVar, Dict, List, Mapping, Optional
 
@@ -16,6 +13,7 @@ from sraverify.core.aws_errors import (
     NotConfiguredTable,
     is_error,
     no_client_result,
+    error_result,
 )
 from sraverify.core.check import SecurityCheck
 from sraverify.core.logging import logger
@@ -27,14 +25,17 @@ class CloudTrailCheck(SecurityCheck):
 
     NAMESPACE = "cloudtrail"
 
-    #: The ``(operation, code)`` pairs that mean "the control is not configured".
-    #:
-    #: ``TrailNotFoundException`` from ``GetTrailStatus`` is the only entry: the
-    #: requested resource is the trail whose status a check is asking about, so its
-    #: absence is the finding. Nothing is declared for ``DescribeTrails``: an
-    #: account with no trail is a **successful** response with an empty
-    #: ``trailList``, so any error there is an inability to determine.
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {
+        "GetObjectLockConfiguration": {
+            "ObjectLockConfigurationNotFoundError": NotConfigured(
+                evidence=(
+                    "https://docs.aws.amazon.com/code-library/latest/ug/"
+                    "s3_example_s3_Scenario_ObjectLock_section.html -- "
+                    "The S3 SDK example identifies this error as an absent "
+                    "Object Lock configuration."
+                ),
+            ),
+        },
         "GetTrailStatus": {
             "TrailNotFoundException": NotConfigured(
                 evidence=(
@@ -122,7 +123,7 @@ class CloudTrailCheck(SecurityCheck):
             return None
 
     def describe_trails(
-        self, include_shadow_trails: bool = True
+        self, include_shadow_trails: bool = True, *, region: Optional[str] = None
     ) -> Mapping[str, Any]:
         """
         Get every visible CloudTrail trail, with caching.
@@ -136,6 +137,8 @@ class CloudTrailCheck(SecurityCheck):
             forgot would raise.
         """
         cache_key = f"describe_trails:{include_shadow_trails}"
+        if region is not None:
+            cache_key += f":{region}"
         if self._ctx._has(self.NAMESPACE, cache_key):
             logger.debug(f"CloudTrail: Using cached {cache_key}")
             return self._ctx._get(self.NAMESPACE, cache_key)
@@ -144,7 +147,7 @@ class CloudTrailCheck(SecurityCheck):
             logger.warning("CloudTrail: No regions specified")
             return no_client_result(service="CloudTrail", region="global")
 
-        region = self.regions[0]
+        region = region or self.regions[0]
         client = self.get_client(region)
         if client is None:
             logger.warning(f"CloudTrail: No client available for region {region}")
@@ -252,3 +255,37 @@ class CloudTrailCheck(SecurityCheck):
             ``{"DelegatedAdministrators": [...]}``, or an error result.
         """
         return self.organization.delegated_administrators("cloudtrail.amazonaws.com")
+
+    def _list_owned_buckets(self) -> Mapping[str, Any]:
+        from sraverify.services.s3.client import S3Client
+
+        key = "owned_buckets"
+        if self._ctx._has("s3", key):
+            return self._ctx._get("s3", key)
+        result = S3Client(self.regions[0], ctx=self._ctx).list_owned_buckets()
+        if not is_error(result) and isinstance(result.get("Buckets"), list):
+            self._ctx._set("s3", key, result)
+        return result
+
+    def _get_object_lock_configuration(self, region: str, bucket: str) -> Mapping[str, Any]:
+        from sraverify.services.s3.client import S3Client
+
+        key = f"object_lock:{region}:{bucket}:{self.account_id}"
+        if self._ctx._has("s3", key):
+            return self._ctx._get("s3", key)
+        from botocore.exceptions import InvalidRegionError
+        from botocore.utils import validate_region_name
+
+        try:
+            validate_region_name(region)
+        except InvalidRegionError as exc:
+            return error_result(
+                code="InvalidRegion", message=str(exc),
+                operation="GetObjectLockConfiguration",
+            )
+        result = S3Client(region, ctx=self._ctx).get_object_lock_configuration(
+            bucket, self.account_id
+        )
+        if not is_error(result):
+            self._ctx._set("s3", key, result)
+        return result

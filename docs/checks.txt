@@ -27,6 +27,7 @@ Available checks:
   SRA-CLOUDTRAIL-13: The audit account is the Delegated Administrator set for CloudTrail (CloudTrail) [management]
   SRA-CLOUDTRAIL-14: Organization trail selects Amazon Bedrock and AgentCore data events (CloudTrail) [management]
   SRA-CLOUDTRAIL-15: Organization trail logs all management events (CloudTrail) [management]
+  SRA-CLOUDTRAIL-16: Organization trail log bucket has default Object Lock retention (CloudTrail) [log-archive]
   SRA-CONFIG-01: AWS Config recorder is configured in this region (Config) [application]
   SRA-CONFIG-02: AWS Config recorder is running (Config) [application]
   SRA-CONFIG-03: AWS Config latest recording event is processed successfully (Config) [application]

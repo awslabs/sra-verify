@@ -692,6 +692,22 @@ _ORGANIZATIONS = (
 )
 
 _S3 = (
+    ClientAdapter(
+        method="list_owned_buckets",
+        boto_service="s3",
+        boto_method="list_buckets",
+        operation="ListBuckets",
+        success=({"Buckets": [{"Name": "trail-bucket"}]},),
+        paginated=True,
+    ),
+    ClientAdapter(
+        method="get_object_lock_configuration",
+        boto_service="s3",
+        boto_method="get_object_lock_configuration",
+        operation="GetObjectLockConfiguration",
+        args=("trail-bucket", _TEST_ACCOUNT),
+        success={"ObjectLockConfiguration": {"ObjectLockEnabled": "Enabled"}},
+    ),
     # Maps BOTH NoSuchPublicAccessBlockConfiguration and AccessDenied to {}
     # today, which is why SRA-S3-01..04 say "No public access block
     # configuration found" either way. A masked FAIL with no CSV tell.

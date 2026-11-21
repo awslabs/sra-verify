@@ -75,6 +75,7 @@ Available checks:
   SRA-GUARDDUTY-24: GuardDuty Lambda Network Logs auto-enablement configured (GuardDuty) [audit]
   SRA-GUARDDUTY-25: GuardDuty RDS Login Events auto-enablement configured (GuardDuty) [audit]
   SRA-GUARDDUTY-26: GuardDuty AI Protection auto-enablement configured (GuardDuty) [audit]
+  SRA-GUARDDUTY-27: GuardDuty findings export to S3 is configured (GuardDuty) [audit]
   SRA-IAM-01: Account contains no IAM users (IAM) [application]
   SRA-IAM-02: Centralized root credentials management is enabled for member accounts (IAM) [management]
   SRA-IAM-03: Privileged root actions in member accounts are enabled for central use (IAM) [management]

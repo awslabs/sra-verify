@@ -442,6 +442,8 @@ _FIREWALLMANAGER = (
 )
 
 _GUARDDUTY = (
+    ClientAdapter(method="list_publishing_destinations", boto_service="guardduty", boto_method="list_publishing_destinations", operation="ListPublishingDestinations", args=("detector-1", "token"), success={"Destinations": []}),
+    ClientAdapter(method="describe_publishing_destination", boto_service="guardduty", boto_method="describe_publishing_destination", operation="DescribePublishingDestination", args=("detector-1", "destination-1"), success={"DestinationId": "destination-1"}),
     ClientAdapter(
         method="describe_organization_configuration",
         boto_service="guardduty",

@@ -176,9 +176,11 @@ Resources:
             Effect: Allow
             Action:
               - guardduty:DescribeOrganizationConfiguration
+              - guardduty:DescribePublishingDestination
               - guardduty:GetDetector
               - guardduty:ListDetectors
               - guardduty:ListOrganizationAdminAccounts
+              - guardduty:ListPublishingDestinations
             Resource: '*'
           - Sid: IamPermissions
             Effect: Allow

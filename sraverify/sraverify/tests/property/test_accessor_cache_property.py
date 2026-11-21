@@ -326,6 +326,8 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
         ),
     ),
     "guardduty": (
+        A("list_publishing_destinations", "accessor", args=(_TEST_REGION, "detector-1", "token"), client_method="list_publishing_destinations", cache_key=f"publishing_destinations:{_TEST_REGION}:detector-1:'token'"),
+        A("describe_publishing_destination", "accessor", args=(_TEST_REGION, "detector-1", "destination-1"), client_method="describe_publishing_destination", cache_key=f"publishing_destination:{_TEST_REGION}:detector-1:destination-1"),
         A(
             "get_detector_id",
             "accessor",

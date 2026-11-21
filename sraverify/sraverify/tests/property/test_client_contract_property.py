@@ -187,7 +187,7 @@ class ClientAdapter:
 
 
 # --------------------------------------------------------------------------- #
-# The tables -- one per service, all 19, written against the current signatures.
+# The tables -- one per service, all 20, written against the current signatures.
 #
 # ``success`` is the boto3 response the method *reads*, which the migration does
 # not change: it changes what the wrapper returns, not what AWS sends.
@@ -1017,6 +1017,22 @@ _SECURITYINCIDENTRESPONSE = (
     ),
 )
 
+_KMS = (
+    ClientAdapter(
+        method="list_keys", boto_service="kms", boto_method="list_keys", operation="ListKeys",
+        success=({"Keys": []},), paginated=True,
+    ),
+    ClientAdapter(
+        method="describe_key", boto_service="kms", boto_method="describe_key", operation="DescribeKey",
+        args=("arn:aws:kms:us-east-1:123456789012:key/example",), success={"KeyMetadata": {"KeyId": "example"}},
+    ),
+    ClientAdapter(
+        method="get_key_rotation_status", boto_service="kms", boto_method="get_key_rotation_status",
+        operation="GetKeyRotationStatus", args=("arn:aws:kms:us-east-1:123456789012:key/example",),
+        success={"KeyRotationEnabled": True, "RotationPeriodInDays": 365},
+    ),
+)
+
 _ROUTE53RESOLVER = (
     ClientAdapter(
         method="describe_vpcs",
@@ -1298,6 +1314,7 @@ ADAPTERS: dict[str, tuple[ClientAdapter, ...]] = {
     "guardduty": _GUARDDUTY,
     "iam": _IAM,
     "inspector": _INSPECTOR,
+    "kms": _KMS,
     "macie": _MACIE,
     "organizations": _ORGANIZATIONS,
     "route53resolver": _ROUTE53RESOLVER,
@@ -1510,10 +1527,10 @@ def _failure_lines(records: list[logging.LogRecord]) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
-def test_nineteen_services_are_discovered() -> None:
+def test_twenty_services_are_discovered() -> None:
     """The enumeration found the whole tree."""
-    assert len(_SERVICE_NAMES) == 19, (
-        f"expected 19 service packages, found {len(_SERVICE_NAMES)}: {_SERVICE_NAMES}"
+    assert len(_SERVICE_NAMES) == 20, (
+        f"expected 20 service packages, found {len(_SERVICE_NAMES)}: {_SERVICE_NAMES}"
     )
 
 

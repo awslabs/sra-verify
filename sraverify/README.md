@@ -7,7 +7,7 @@ writing new checks. For deployment and operator instructions, see the [top-level
 The tool is **read-only**. Checks call `Describe*` / `Get*` / `List*` only. Remediation is
 emitted as text in the finding, never performed.
 
-Current catalog: **192 checks across 19 services**. Run `sraverify --list-checks` for the
+Current catalog: **193 checks across 20 services**. Run `sraverify --list-checks` for the
 inventory; [`docs/checks.txt`](../docs/checks.txt) is a checked-in copy of that output.
 
 ## Project structure
@@ -231,7 +231,7 @@ layer instead of removing it. Each check's findings are materialized with
 Because a defective declaration raises at import, **the catalog is validated by importing
 it**: a mis-filed or malformed check is a boot failure, not a silent skip. Nothing on the
 discovery or registration path opens a file or issues an AWS call, which makes
-`--list-checks` a credential-free, I/O-free validation pass over all 192 checks.
+`--list-checks` a credential-free, I/O-free validation pass over all 193 checks.
 
 ### Identity is cross-checked four ways
 
@@ -1099,7 +1099,7 @@ must be added to its table, or the completeness test fails for that service. Tha
 deliberate: the tables are how the suite knows what to drive, so an unlisted method would be
 silently untested.
 
-Several property modules are **catalog-wide**: they enumerate all 192 registered checks with
+Several property modules are **catalog-wide**: they enumerate all 193 registered checks with
 `pytest.mark.parametrize` rather than sampling, so a failure names the offending check ID in
 the test ID.
 

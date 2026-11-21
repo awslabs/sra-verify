@@ -196,6 +196,13 @@ Resources:
               - inspector2:DescribeOrganizationConfiguration
               - inspector2:GetDelegatedAdminAccount
             Resource: '*'
+          - Sid: KmsPermissions
+            Effect: Allow
+            Action:
+              - kms:DescribeKey
+              - kms:GetKeyRotationStatus
+              - kms:ListKeys
+            Resource: '*'
           - Sid: LambdaPermissions
             Effect: Allow
             Action:

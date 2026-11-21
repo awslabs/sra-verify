@@ -4,7 +4,7 @@ Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazo
 to the SRA Verify checks that assess it, so gaps are visible.
 
 - **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
-- **Check source:** the live registry (`sraverify --list-checks`), **187 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five Security Hub CSPM checks added by the CSPM split (SRA-SECURITYHUB-21 aggregator, -22 central-configuration associations, -23 FSBP, -24 CIS, -25 EventBridge routing), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
+- **Check source:** the live registry (`sraverify --list-checks`), **193 checks across 20 services**.
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,7 +15,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` matches the live registry byte for byte at the time of writing (187 checks).
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (193 checks).
 
 ## Summary
 
@@ -40,17 +40,16 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS Security Hub (unified)        |       8 |       8 |       0 |       0 |
 | AWS Network Firewall              |       8 |       0 |       1 |       7 |
 | Route 53 Resolver DNS Firewall    |       4 |       0 |       1 |       3 |
-| AWS Key Management Service        |       8 |       0 |       0 |       8 |
+| AWS Key Management Service        |       8 |       0 |       1 |       7 |
 | AWS Private Certificate Authority |       6 |       0 |       0 |       6 |
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
 | AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **124** |  **13** |  **87** |
+| **Total**                         | **224** | **124** |  **14** |  **86** |
 
-Coverage is concentrated in the security services SRA Verify has packages for. Six
-checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
-Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 87 missing items.
+Five checklist sections (Detective, Private CA, IAM Identity Center, Systems Manager,
+and Secrets Manager) have no corresponding service package and account for 38 of the
+86 missing items.
 
 ---
 
@@ -351,16 +350,16 @@ hub, the V2 delegated administrator, the Organizations `SECURITYHUB_POLICY` type
 
 ## AWS Key Management Service
 
-No `kms` service package. All 8 items are Missing. Several service-specific checks do
-verify CMK usage for a particular resource (SRA-CLOUDTRAIL-02, SRA-MACIE-04,
-SRA-SECURITYLAKE-02, SRA-SECURITYLAKE-03), but none assesses key configuration itself.
+`SRA-KMS-01` checks automatic rotation in application accounts for enabled customer-managed
+symmetric encryption keys with AWS-generated key material. Multi-Region keys are evaluated
+in the primary key Region; scanning only replica Regions does not assess those keys.
 
 |    # | Checklist item                                                           | Status  |
 | ---: | ------------------------------------------------------------------------ | ------- |
 |    1 | Customer managed keys used for all sensitive data at rest                | Missing |
 |    2 | Separate keys per service and per account where appropriate              | Missing |
 |    3 | Key policies restrict usage to intended services and principals          | Missing |
-|    4 | Automatic annual rotation enabled for customer managed symmetric keys    | Missing |
+|    4 | Automatic annual rotation enabled for customer managed symmetric keys    | Partial |
 |    5 | Key administration separated from key usage via distinct IAM permissions | Missing |
 |    6 | Key policies use condition keys such as `kms:ViaService`                 | Missing |
 |    7 | Key usage audited through CloudTrail                                     | Missing |
@@ -450,7 +449,7 @@ additional coverage, not gaps.
 
 ## Largest coverage gaps, by size
 
-1. **Six service sections with no package at all** — Detective (9), KMS (8), Systems Manager (8), Secrets Manager (8), IAM Identity Center (7 of 8), Private CA (6). 46 missing items.
+1. **Five service sections with no package at all**: Detective (9), Systems Manager (8), Secrets Manager (8), IAM Identity Center (7 of 8), Private CA (6). 38 missing items.
 2. **Network Firewall and DNS Firewall** (12 items) — visible only through the Firewall Manager policy checks.
 3. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. No check inspects encryption, Object Lock, versioning, or resource policy on a destination bucket. The `s3` package covers public-access block only.
 4. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.

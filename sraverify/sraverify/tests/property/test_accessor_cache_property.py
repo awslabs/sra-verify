@@ -572,6 +572,18 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             args=({"EffectivePolicy": {"PolicyContent": "{}"}},),
         ),
     ),
+    "kms": (
+        A("get_client", "client_lookup", args=(_TEST_REGION,)),
+        A("get_keys", "accessor", args=(_TEST_REGION,), client_method="list_keys", cache_key=f"keys:{_TEST_REGION}"),
+        A(
+            "get_key", "accessor", args=(_TEST_REGION, "key-arn"), client_method="describe_key",
+            cache_key=f"key:{_TEST_REGION}:key-arn",
+        ),
+        A(
+            "get_rotation_status", "accessor", args=(_TEST_REGION, "key-arn"),
+            client_method="get_key_rotation_status", cache_key=f"rotation:{_TEST_REGION}:key-arn",
+        ),
+    ),
     "route53resolver": (
         A("get_client", "client_lookup", args=(_TEST_REGION,)),
         A(
@@ -1518,10 +1530,10 @@ def _params(targets: list[_Target], property_key: str) -> list[Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_nineteen_services_are_discovered() -> None:
+def test_twenty_services_are_discovered() -> None:
     """The enumeration found the whole tree."""
-    assert len(_SERVICE_NAMES) == 19, (
-        f"expected 19 service packages, found {len(_SERVICE_NAMES)}"
+    assert len(_SERVICE_NAMES) == 20, (
+        f"expected 20 service packages, found {len(_SERVICE_NAMES)}"
     )
 
 

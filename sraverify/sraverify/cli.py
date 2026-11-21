@@ -120,6 +120,17 @@ def print_summary(findings: List[Finding], output_file: str) -> None:
     print(f"  · Output: {output_file}")
 
 
+def _positive_int(value: str) -> int:
+    """argparse ``type`` for ``--max-workers``: a base-10 integer of at least 1."""
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a positive integer")
+    return number
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse command line arguments.
 
@@ -172,6 +183,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help='boto3 retry max_attempts (default: 3)')
     parser.add_argument('--max-pool-connections', type=int, default=None,
                         help='boto3 max_pool_connections (default: 50)')
+    parser.add_argument('--max-workers', type=_positive_int, default=1,
+                        help='Number of services scanned in parallel; checks of one '
+                             'service always run in order (default: 1)')
 
     return parser.parse_args(argv)
 
@@ -289,7 +303,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             check_id=args.check,
             audit_accounts=audit_accounts,
             log_archive_accounts=log_archive_accounts,
-            show_progress=True
+            show_progress=True,
+            max_workers=args.max_workers,
         )
     except (UnknownCheckError, NoChecksSelectedError, PartitionUndeterminedError) as exc:
         # Usage error. UnknownCheckError composes a sentence carrying the

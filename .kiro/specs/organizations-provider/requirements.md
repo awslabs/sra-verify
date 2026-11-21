@@ -90,6 +90,7 @@ The verdict-stability property is the whole point of doing this before merge rat
 8. THE Organizations_Provider SHALL log at `debug` only, through the `sraverify` logger, with one record on a fetch and one on a cache hit as the mixin does today, and SHALL emit no `aws_call_failed` record of its own — that record stays the Organizations_Client's, one per failed call.
 9. THE Organizations_Provider SHALL hold no reference to any check and SHALL be unreachable from any `Finding`, so that `test_context_isolation_property.py` — no `ScanContext` reachable from the returned findings after `run_checks` — continues to hold without amendment.
 10. THE Organizations_Provider SHALL be thread-safe to the standard of the existing accessors: cache reads and writes go through the locked primitives, and no second lock is introduced. The cache is double-checked, not single-flight, so the one-sweep guarantee of criterion 3 is scoped to sequential execution: two concurrent first callers may each sweep. Per-key in-flight coordination is a Phase 2 obligation (Requirement 13 criterion 7).
+    Note: per-key single flight now exists (`ScanContext._key_lock`), added with `--max-workers` because Security Hub and Organizations read the same provider keys from parallel services.
 
 ### Requirement 2: The Organizations client is relocated and derives its partition from the scan
 

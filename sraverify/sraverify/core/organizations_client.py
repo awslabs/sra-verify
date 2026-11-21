@@ -30,15 +30,12 @@ if TYPE_CHECKING:
 def scan_region(ctx: ScanContext) -> str:
     """Return the Region an Organizations boto3 client should be built for.
 
-    The scan Region: the first explicit ``--regions`` value, else the session's
-    Region. Never ``None``. Applies ``resolve_scan_region`` to ``ctx.regions``
-    and ``ctx.session`` -- the same pure rule ``ScanContext`` used to compute
-    ``ctx.scan_region``, over the same inputs -- and never calls
-    ``ctx.get_enabled_regions()``, so deriving the Region issues no AWS call.
-
-    It reads the inputs rather than ``ctx.scan_region`` deliberately: the
-    catalog-wide harnesses hand clients a ``MagicMock`` context with a
-    non-empty ``regions``, on which ``ctx.scan_region`` would be a mock.
+    The scan Region: ``ctx.scan_region``, which ``ScanContext`` computed once
+    from the first explicit ``--regions`` value, else the session's Region.
+    Never ``None``, and never resolved through ``ctx.get_enabled_regions()``,
+    so deriving the Region issues no AWS call. It does not read the boto3
+    ``Session``, which is not thread-safe, so a check on a worker thread can
+    call it.
 
     Args:
         ctx: ScanContext for the current scan.
@@ -47,14 +44,14 @@ def scan_region(ctx: ScanContext) -> str:
         A Region name.
 
     Raises:
-        PartitionUndeterminedError: Neither input supplies a Region. A real
-            ``ScanContext`` cannot reach this, because its constructor raised
-            first; only a hand-built context can, and that is a programming
-            defect. Raised rather than asserted, because ``python -O`` strips
-            an ``assert`` and would restore the commercial ``aws-global``
-            fallback this function exists to remove.
+        PartitionUndeterminedError: ``ctx.scan_region`` is not a usable Region
+            string. A real ``ScanContext`` cannot reach this, because its
+            constructor raised first; only a hand-built context can, and that
+            is a programming defect. Raised rather than asserted, because
+            ``python -O`` strips an ``assert`` and would restore the commercial
+            ``aws-global`` fallback this function exists to remove.
     """
-    return resolve_scan_region(ctx.regions, ctx.session)
+    return resolve_scan_region([ctx.scan_region], None)
 
 
 class OrganizationsClient(AWSClient):

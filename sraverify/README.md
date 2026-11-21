@@ -169,9 +169,16 @@ cache-clear step. Never stash per-scan state anywhere else.
 
 The context owns the boto3 `Session`, the region list, the audit and log-archive account
 lists, the bounded `botocore.config.Config`, a `(service, region)` client cache, a
-two-level namespaced response cache, and one `threading.Lock`. Public accessors use
-double-checked locking; execution is single-threaded today and the thread safety is
-deliberate headroom.
+two-level namespaced response cache, and three kinds of lock: a `threading.Lock` for that
+mutable state, a per-key lock for each shared lookup, and a client-build lock. A lookup
+shared across services (identity, enabled Regions, each Organizations provider key) holds
+its key lock while it fetches, so concurrent callers issue one call; a failure is still not
+cached. Clients are built one at a time because a boto3 `Session` is not thread-safe.
+`run_checks(max_workers=N)` runs each service as one task, so a service base class cache is
+only ever touched by one thread. The exception is the `securityhub` namespace, shared by
+Security Hub and Security Hub CSPM: in parallel they can make at most one extra call per
+shared key (`event_rules:{region}`, `rule_targets:{region}:{rule_name}`), with the same
+answer cached.
 
 It also owns the scan Region, `ctx.scan_region`: the first explicit Region, else the
 session's, computed once and read-only. `get_client(service, region=None)` binds to the
@@ -519,8 +526,8 @@ filters it with `is_active_account`. Its other accessors are `describe()`,
 `policies_for_target(target_id, policy_type)`, `describe_policy(policy_id)`,
 `effective_policy(policy_type, target_id)` and `accounts_for_parent(parent_id)`. Each
 caches its success per argument and returns a failure unchanged and uncached; one fetch
-per accessor per key per scan holds under sequential execution (the cache is not
-single-flight). A class attribute named `organization` on a check or an intermediate base raises
+per accessor per key per scan holds with `--max-workers` too, because a miss holds a
+per-key lock. A class attribute named `organization` on a check or an intermediate base raises
 `CheckIdentityError` at import, because it would shadow the property.
 
 Four more delegate to `meta`: `check_id`, `service`, `severity`, `account_type`. None of
@@ -965,7 +972,7 @@ class SRAVerify:
     def run_checks(self, account_type: str = 'all', service: Optional[str] = None,
                    check_id: Optional[str] = None, audit_accounts: Optional[List[str]] = None,
                    log_archive_accounts: Optional[List[str]] = None,
-                   show_progress: bool = False) -> List[Finding]: ...
+                   show_progress: bool = False, *, max_workers: int = 1) -> List[Finding]: ...
 ```
 
 There is no `debug` parameter: the library does not configure logging (see Logging).
@@ -977,6 +984,12 @@ exactly as `run_checks` would, so use it to size or preview a scan.
 The four boto3 tuning knobs are **constructor** parameters, not `run_checks` parameters;
 they are forwarded into every `ScanContext` the instance builds. `None` means "keep the
 context default".
+
+`max_workers` (CLI `--max-workers`) is how many services `run_checks` scans at once. Checks
+of one service run in order on one thread, and the returned list has the same order for any
+value. With 1, or a single selected service, everything runs on the calling thread. A value
+that is not a positive `int` raises `ValueError`. Start with 2; see the top-level README
+for the CodeBuild and throttling caveats.
 
 `get_available_checks` returns a dict keyed by check ID whose values hold `name`, `service`,
 `account_type`, `description`, and `severity`, all strings. `get_available_services`

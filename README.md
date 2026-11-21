@@ -187,6 +187,7 @@ In this step you will clone the Github repository and run the tool.
                      [--connect-timeout CONNECT_TIMEOUT]
                      [--read-timeout READ_TIMEOUT] [--max-attempts MAX_ATTEMPTS]
                      [--max-pool-connections MAX_POOL_CONNECTIONS]
+                     [--max-workers MAX_WORKERS]
 
     SRA Verify - Security Rule Assessment Verification Tool
 
@@ -222,6 +223,9 @@ In this step you will clone the Github repository and run the tool.
                             boto3 retry max_attempts (default: 3)
       --max-pool-connections MAX_POOL_CONNECTIONS
                             boto3 max_pool_connections (default: 50)
+      --max-workers MAX_WORKERS
+                            Number of services scanned in parallel; checks of one
+                            service always run in order (default: 1)
     ```
 
 5. Review these detailed examples
@@ -248,6 +252,16 @@ In this step you will clone the Github repository and run the tool.
    sraverify --list-checks
    sraverify --list-services
    ```
+
+### Parallel scanning
+`--max-workers N` scans up to N services of one account at the same time. Checks of one
+service still run in order, and the report rows come out in the same order as with the
+default of 1. Start with 2. The slowest service bounds the gain, so extra workers help less
+once one large service dominates the scan. The CodeBuild deployment already scans
+`ParallelAccounts` accounts at once (`PARALLEL_ACCOUNTS`) and does not pass `--max-workers`;
+if you add `--max-workers` to the buildspec, total concurrency is that number times
+`--max-workers`. With N above 1, `--debug` lines from different services interleave. API
+throttling at higher values has not been measured: the test suite runs offline.
 
 ### Output file naming
 When `--output` is omitted, a timestamp is inserted before the extension, producing

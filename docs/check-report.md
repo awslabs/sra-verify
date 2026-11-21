@@ -44,13 +44,12 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | AWS Private Certificate Authority |       6 |       0 |       0 |       6 |
 | AWS IAM Identity Center           |       8 |       0 |       1 |       7 |
 | AWS Systems Manager               |       8 |       0 |       0 |       8 |
-| AWS Secrets Manager               |       8 |       0 |       0 |       8 |
-| **Total**                         | **224** | **124** |  **13** |  **87** |
+| AWS Secrets Manager               |       8 |       0 |       1 |       7 |
+| **Total**                         | **224** | **124** |  **14** |  **86** |
 
-Coverage is concentrated in the security services SRA Verify has packages for. Six
-checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager,
-Secrets Manager — have **no** corresponding service package, which accounts for 46 of
-the 87 missing items.
+Coverage is concentrated in the security services SRA Verify has packages for. Five
+checklist sections — Detective, KMS, Private CA, IAM Identity Center, Systems Manager —
+have **no** corresponding service package.
 
 ---
 
@@ -411,18 +410,18 @@ No `ssm` service package. All 8 items are Missing.
 
 ## AWS Secrets Manager
 
-No `secretsmanager` service package. All 8 items are Missing.
+Item 2 is Partial; the other 7 items are Missing.
 
-|    # | Checklist item                                                             | Status  |
-| ---: | -------------------------------------------------------------------------- | ------- |
-|    1 | All credentials, database passwords and API keys stored in Secrets Manager | Missing |
-|    2 | Automatic rotation configured for all secrets that support it              | Missing |
-|    3 | Fine-grained IAM and resource policies control access to each secret       | Missing |
-|    4 | Secrets encrypted with customer managed keys for sensitive workloads       | Missing |
-|    5 | Secret access monitored through CloudTrail                                 | Missing |
-|    6 | Config rules configured to detect changes to secrets                       | Missing |
-|    7 | Integrated with Amazon RDS for automatic credential management             | Missing |
-|    8 | Secrets managed locally in the account closest to their use                | Missing |
+|    # | Checklist item                                                             | SRA Verify check(s)   | Status  | Note                                                                                                                                     |
+| ---: | -------------------------------------------------------------------------- | --------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+|    1 | All credentials, database passwords and API keys stored in Secrets Manager | —                     | Missing |                                                                                                                                          |
+|    2 | Automatic rotation configured for all secrets that support it              | SRA-SECRETSMANAGER-01 | Partial | Rotation flag only, from DescribeSecret per secret; no capability or rotation history. Replicas and secrets pending deletion are skipped |
+|    3 | Fine-grained IAM and resource policies control access to each secret       | —                     | Missing |                                                                                                                                          |
+|    4 | Secrets encrypted with customer managed keys for sensitive workloads       | —                     | Missing |                                                                                                                                          |
+|    5 | Secret access monitored through CloudTrail                                 | —                     | Missing |                                                                                                                                          |
+|    6 | Config rules configured to detect changes to secrets                       | —                     | Missing |                                                                                                                                          |
+|    7 | Integrated with Amazon RDS for automatic credential management             | —                     | Missing |                                                                                                                                          |
+|    8 | Secrets managed locally in the account closest to their use                | —                     | Missing |                                                                                                                                          |
 
 ---
 
@@ -450,7 +449,7 @@ additional coverage, not gaps.
 
 ## Largest coverage gaps, by size
 
-1. **Six service sections with no package at all** — Detective (9), KMS (8), Systems Manager (8), Secrets Manager (8), IAM Identity Center (7 of 8), Private CA (6). 46 missing items.
+1. **Five service sections with no package at all** — Detective (9), KMS (8), Systems Manager (8), IAM Identity Center (7 of 8), Private CA (6). 38 missing items.
 2. **Network Firewall and DNS Firewall** (12 items) — visible only through the Firewall Manager policy checks.
 3. **Log-repository bucket hardening** (6 items) — CloudTrail items 11 – 14, Security Lake items 16 – 17. No check inspects encryption, Object Lock, versioning, or resource policy on a destination bucket. The `s3` package covers public-access block only.
 4. **Finding routing and automation** — CSPM items 9, 14 – 17; Config item 7; GuardDuty items 13 – 17; WAF item 10. Enablement is checked thoroughly; where findings and logs *go* is largely not.

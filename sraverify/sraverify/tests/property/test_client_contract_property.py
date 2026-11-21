@@ -1047,6 +1047,37 @@ _ROUTE53RESOLVER = (
     ),
 )
 
+_SECRETSMANAGER = (
+    ClientAdapter(
+        method="describe_secret",
+        boto_service="secretsmanager",
+        boto_method="describe_secret",
+        operation="DescribeSecret",
+        args=(f"arn:aws:secretsmanager:{_TEST_REGION}:{_TEST_ACCOUNT}:secret:app-AbCdEf",),
+        success={
+            "ARN": f"arn:aws:secretsmanager:{_TEST_REGION}:{_TEST_ACCOUNT}:secret:app-AbCdEf",
+            "RotationEnabled": True,
+        },
+    ),
+    ClientAdapter(
+        method="list_secrets",
+        boto_service="secretsmanager",
+        boto_method="list_secrets",
+        operation="ListSecrets",
+        success=(
+            {
+                "SecretList": [
+                    {
+                        "ARN": f"arn:aws:secretsmanager:{_TEST_REGION}:{_TEST_ACCOUNT}:secret:app-AbCdEf",
+                        "Name": "app",
+                    }
+                ]
+            },
+        ),
+        paginated=True,
+    ),
+)
+
 _SECURITYLAKE = (
     ClientAdapter(
         method="get_data_lake_sources",
@@ -1302,6 +1333,7 @@ ADAPTERS: dict[str, tuple[ClientAdapter, ...]] = {
     "organizations": _ORGANIZATIONS,
     "route53resolver": _ROUTE53RESOLVER,
     "s3": _S3,
+    "secretsmanager": _SECRETSMANAGER,
     "securityhub": _SECURITYHUB,
     "securityincidentresponse": _SECURITYINCIDENTRESPONSE,
     "securitylake": _SECURITYLAKE,
@@ -1510,10 +1542,10 @@ def _failure_lines(records: list[logging.LogRecord]) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
-def test_nineteen_services_are_discovered() -> None:
+def test_twenty_services_are_discovered() -> None:
     """The enumeration found the whole tree."""
-    assert len(_SERVICE_NAMES) == 19, (
-        f"expected 19 service packages, found {len(_SERVICE_NAMES)}: {_SERVICE_NAMES}"
+    assert len(_SERVICE_NAMES) == 20, (
+        f"expected 20 service packages, found {len(_SERVICE_NAMES)}: {_SERVICE_NAMES}"
     )
 
 

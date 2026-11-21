@@ -249,7 +249,7 @@ def test_every_client_module_binds_at_least_one_boto3_client(
     relative = {p.resolve().relative_to(_PACKAGE_ROOT).as_posix() for p in modules}
     assert "core/organizations_client.py" in relative
     assert "services/organizations/client.py" not in relative
-    assert len(modules) == 19, sorted(relative)
+    assert len(modules) == 20, sorted(relative)
 
     unbound: list[str] = []
     for path in modules:

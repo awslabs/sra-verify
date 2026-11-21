@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 # The boto3 floor is load-bearing too: older botocore lacks operations the
 # AI-coverage checks call, which would surface as synthetic ERROR rows.
 dependencies = [
-    "boto3>=1.43.96",
+    "boto3>=1.44.3",
     "colorama>=0.4.4",
 ]
 license-files = ["LICENSE", "NOTICE"]

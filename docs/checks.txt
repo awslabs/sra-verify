@@ -119,6 +119,7 @@ Available checks:
   SRA-S3-02: S3 block public ACLs is set (S3) [application]
   SRA-S3-03: S3 ignore public ACL is enabled (S3) [application]
   SRA-S3-04: S3 block public policy is enabled (S3) [application]
+  SRA-SECRETSMANAGER-01: Secrets Manager automatic rotation is enabled for every secret (Secrets Manager) [application]
   SRA-SECURITYHUB-01: Security Hub enabled account level standards exist (Security Hub CSPM) [application]
   SRA-SECURITYHUB-02: Security Hub auto-enable new standards is enabled (Security Hub CSPM) [audit]
   SRA-SECURITYHUB-03: Security Hub administration for the account matches delegated administrator (Security Hub CSPM) [management]

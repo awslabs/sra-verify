@@ -189,6 +189,30 @@ class GuardDutyCheck(SecurityCheck):
         self._ctx._set(self.NAMESPACE, cache_key, result)
         return result
 
+    def list_publishing_destinations(self, region: str, detector_id: str, token: str | None = None) -> Mapping[str, Any]:
+        cache_key = f"publishing_destinations:{region}:{detector_id}:{token!r}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            return self._ctx._get(self.NAMESPACE, cache_key)
+        client = self.get_client(region)
+        if client is None:
+            return no_client_result(service="GuardDuty", region=region)
+        result = client.list_publishing_destinations(detector_id, token)
+        if not is_error(result):
+            self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
+
+    def describe_publishing_destination(self, region: str, detector_id: str, destination_id: str) -> Mapping[str, Any]:
+        cache_key = f"publishing_destination:{region}:{detector_id}:{destination_id}"
+        if self._ctx._has(self.NAMESPACE, cache_key):
+            return self._ctx._get(self.NAMESPACE, cache_key)
+        client = self.get_client(region)
+        if client is None:
+            return no_client_result(service="GuardDuty", region=region)
+        result = client.describe_publishing_destination(detector_id, destination_id)
+        if not is_error(result):
+            self._ctx._set(self.NAMESPACE, cache_key, result)
+        return result
+
     def get_organization_configuration(self, region: str) -> Mapping[str, Any]:
         """
         Get organization configuration for a specific region.

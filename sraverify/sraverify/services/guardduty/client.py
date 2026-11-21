@@ -62,6 +62,23 @@ class GuardDutyClient(AWSClient):
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
+    def list_publishing_destinations(self, detector_id: str, token: str | None = None) -> Mapping[str, Any]:
+        try:
+            params = {"DetectorId": detector_id}
+            if token is not None:
+                params["NextToken"] = token
+            return self.client.list_publishing_destinations(**params)
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
+    def describe_publishing_destination(self, detector_id: str, destination_id: str) -> Mapping[str, Any]:
+        try:
+            return self.client.describe_publishing_destination(
+                DetectorId=detector_id, DestinationId=destination_id
+            )
+        except AWS_EXCEPTIONS as e:
+            return self.aws_error(e)
+
     def describe_organization_configuration(
         self, detector_id: str
     ) -> Mapping[str, Any]:

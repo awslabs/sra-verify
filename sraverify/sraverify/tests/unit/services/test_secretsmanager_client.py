@@ -51,6 +51,27 @@ def test_list_secrets_error_on_a_later_page_is_one_error_result() -> None:
     assert result["Error"]["Operation"] == "ListSecrets"
 
 
+@pytest.mark.parametrize(
+    "pages",
+    [
+        [{"SecretList": "oops"}],
+        [{"SecretList": None}],
+        [None],
+        ["x"],
+        [{"SecretList": [{"ARN": _ARN}]}, {"SecretList": "oops"}],
+        [{"SecretList": [{"ARN": _ARN}]}, None],
+    ],
+    ids=["str", "none", "null-page", "str-page", "valid-then-str", "valid-then-null"],
+)
+def test_list_secrets_malformed_page_is_one_error_result_without_partials(pages: list[Any]) -> None:
+    client, _ = _client()
+    client.client = MagicMock()
+    client.client.get_paginator.return_value.paginate.return_value = pages
+    result = client.list_secrets()
+    assert set(result) == {"Error"}
+    assert result["Error"]["Code"] == "PaginationError"
+
+
 def test_describe_secret_returns_the_response_and_keeps_cross_account_primary() -> None:
     client, stub = _client()
     stub.add_response(

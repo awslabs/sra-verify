@@ -25,49 +25,20 @@ class SecretsManagerCheck(SecurityCheck):
     NOT_CONFIGURED_ERRORS: ClassVar[NotConfiguredTable] = {}
 
     def _setup_clients(self):
-        """Set up a Secrets Manager client for each region."""
         self._clients.clear()
         if hasattr(self, 'regions') and self.regions:
             for region in self.regions:
                 self._clients[region] = SecretsManagerClient(region, ctx=self._ctx)
 
     def get_client(self, region: str) -> Optional[SecretsManagerClient]:
-        """
-        Get the Secrets Manager client for a specific region.
-
-        Args:
-            region: AWS region name
-
-        Returns:
-            SecretsManagerClient for the region or None if not available
-        """
         return self._clients.get(region)
 
     def get_secrets(self, region: str) -> Mapping[str, Any]:
-        """
-        Get the secret inventory of a Region, with caching.
-
-        Args:
-            region: AWS region name
-
-        Returns:
-            ``{"SecretList": [...]}``, or an error result.
-        """
         return self._cached(
             region, f"secrets:{region}", lambda client: client.list_secrets()
         )
 
     def get_secret(self, region: str, secret_arn: str) -> Mapping[str, Any]:
-        """
-        Get the description of one secret, with caching.
-
-        Args:
-            region: AWS region name
-            secret_arn: The secret ARN
-
-        Returns:
-            The ``DescribeSecret`` response, or an error result.
-        """
         return self._cached(
             region,
             f"secret:{region}:{secret_arn}",

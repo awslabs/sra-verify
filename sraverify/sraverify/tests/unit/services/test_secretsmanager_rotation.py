@@ -92,10 +92,9 @@ def test_list_error_is_one_region_error_and_other_regions_continue() -> None:
     [
         {"SecretList": "oops"},
         {"SecretList": None},
-        {"SecretList": [], "InvalidPages": 1},
         [],
     ],
-    ids=["str", "none", "invalid-page", "not-a-mapping"],
+    ids=["str", "none", "not-a-mapping"],
 )
 def test_invalid_inventory_envelope_is_one_region_error(listing: Any) -> None:
     rows, mocks = _run(lambda region: listing)
@@ -123,8 +122,10 @@ def test_malformed_entries_are_one_aggregated_error_and_valid_arns_still_run() -
     )
     error = next(r for r in rows if r.status is Status.ERROR)
     assert error.resource_id == f"secretsmanager:{_R1}:{_ACCOUNT}"
-    assert "9" in error.actual_value
-    assert "999988887777" not in error.actual_value
+    assert error.actual_value == (
+        "ListSecrets failed: InvalidResponse: ListSecrets returned 9 entries that are not "
+        "a secret ARN in this account and Region; they were not evaluated"
+    )
     assert [c.args for c in mocks["get_secret"].call_args_list] == [(_R1, _arn("good"))]
 
 
@@ -253,9 +254,15 @@ def test_primary_and_null_markers_are_evaluated(extra: dict[str, Any]) -> None:
     [
         {"DeletedDate": "2026-01-01"},
         {"PrimaryRegion": 5},
+        {"PrimaryRegion": ""},
+        {"PrimaryRegion": "  "},
+        {"PrimaryRegion": "US_EAST_1"},
         {"CrossAccountPrimary": "Detached"},
     ],
-    ids=["deleted", "primary-region", "cross-account"],
+    ids=[
+        "deleted", "primary-region-int", "primary-region-empty",
+        "primary-region-blank", "primary-region-malformed", "cross-account",
+    ],
 )
 def test_wrong_typed_markers_are_an_error(extra: dict[str, Any]) -> None:
     rows, _ = _run(

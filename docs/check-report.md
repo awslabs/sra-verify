@@ -4,7 +4,7 @@ Maps every item in the [AWS SRA best practices checklist](https://docs.aws.amazo
 to the SRA Verify checks that assess it, so gaps are visible.
 
 - **Checklist source:** AWS SRA best practices checklist, retrieved 2026-09-16. 224 items across 24 service sections. Re-checked 2026-09-25: the checklist still has no Amazon Bedrock items.
-- **Check source:** the live registry (`sraverify --list-checks`), **187 checks across 18 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five Security Hub CSPM checks added by the CSPM split (SRA-SECURITYHUB-21 aggregator, -22 central-configuration associations, -23 FSBP, -24 CIS, -25 EventBridge routing), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
+- **Check source:** the live registry (`sraverify --list-checks`), **193 checks across 20 services**, including the nine AI-coverage checks, the six unified Security Hub checks (SRA-SECURITYHUB-15 – SRA-SECURITYHUB-20), the five Security Hub CSPM checks added by the CSPM split (SRA-SECURITYHUB-21 aggregator, -22 central-configuration associations, -23 FSBP, -24 CIS, -25 EventBridge routing), the five root-access and password-policy IAM checks (SRA-IAM-02 – SRA-IAM-06) and the four internal- and unused-access analyzer checks (SRA-ACCESSANALYZER-05 – SRA-ACCESSANALYZER-08).
 - Content from the AWS documentation was rephrased for compliance with licensing restrictions.
 
 ## How to read the Status column
@@ -15,7 +15,7 @@ to the SRA Verify checks that assess it, so gaps are visible.
 | Partial | A check touches the item but does not fully establish it — narrower scope, adjacent signal, or only one arm of a two-part recommendation. The note says what is short. |
 | Missing | No check assesses the item.                                                                                                                                            |
 
-`docs/checks.txt` matches the live registry byte for byte at the time of writing (187 checks).
+`docs/checks.txt` matches the live registry byte for byte at the time of writing (193 checks).
 
 ## Summary
 

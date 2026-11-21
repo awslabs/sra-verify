@@ -12,6 +12,7 @@ from sraverify.core.finding import Finding
 from sraverify.core.metadata import CheckMeta, Remediation
 from sraverify.services.secretsmanager.base import SecretsManagerCheck
 
+_REGION_NAME = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
 _SECRET_ARN = re.compile(
     r"^arn:aws[a-z-]*:secretsmanager:(?P<region>[a-z0-9-]+):(?P<account>\d{12}):secret:[^\s]+$"
 )
@@ -80,7 +81,6 @@ class SRA_SECRETSMANAGER_01(SecretsManagerCheck):
         if (
             not isinstance(listing, Mapping)
             or not isinstance(listing.get("SecretList"), list)
-            or listing.get("InvalidPages")
         ):
             return None
         arns: set[str] = set()
@@ -125,7 +125,7 @@ class SRA_SECRETSMANAGER_01(SecretsManagerCheck):
 
         primary = described.get("PrimaryRegion")
         if primary is not None:
-            if not isinstance(primary, str):
+            if not isinstance(primary, str) or not _REGION_NAME.match(primary):
                 return invalid("an invalid PrimaryRegion")
             if primary != region:
                 return None
@@ -157,14 +157,7 @@ class SRA_SECRETSMANAGER_01(SecretsManagerCheck):
         return invalid("an invalid RotationEnabled")
 
     def execute(self) -> Iterable[Finding]:
-        """
-        Execute the check.
-
-        Yields:
-            One Finding per evaluated secret, plus one Region-level ERROR when the
-            inventory fails, is invalid or holds malformed entries. No Finding when
-            a Region has no secret to evaluate.
-        """
+        """Yield one Finding per evaluated secret and a Region ERROR for a bad inventory."""
         for region in dict.fromkeys(self.regions):
             listing = self.get_secrets(region)
             if isinstance(listing, Mapping) and "Error" in listing:

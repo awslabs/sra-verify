@@ -249,7 +249,7 @@ def test_every_client_module_binds_at_least_one_boto3_client(
     relative = {p.resolve().relative_to(_PACKAGE_ROOT).as_posix() for p in modules}
     assert "core/organizations_client.py" in relative
     assert "services/organizations/client.py" not in relative
-    assert len(modules) == 19, sorted(relative)
+    assert len(modules) == 20, sorted(relative)
 
     unbound: list[str] = []
     for path in modules:
@@ -271,13 +271,13 @@ def test_the_generator_attributes_the_whole_tree(generator: Any) -> None:
 
     assert len(service_calls) >= 25, (
         f"only {len(service_calls)} boto3 services attributed across the tree; "
-        f"the 19 clients reach roughly 30"
+        f"the 20 clients reach roughly 30"
     )
     # A spread across all four kinds of client: the service's own API, an
     # organizations call, an STS call, and a call on a service borrowed by another.
     # ``ec2`` and ``account`` are reached from ``core/scan_context.py`` too.
     for expected in (
-        "guardduty", "organizations", "sts", "wafv2", "s3control", "sqs", "ec2", "account",
+        "guardduty", "organizations", "sts", "wafv2", "s3control", "sqs", "ec2", "account", "kms",
     ):
         assert expected in service_calls, (
             f"{expected} was not attributed anywhere in the tree"

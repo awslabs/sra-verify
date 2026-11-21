@@ -92,6 +92,7 @@ Available checks:
   SRA-INSPECTOR-09: Inspector ECR auto-enable is configured (Inspector) [audit]
   SRA-INSPECTOR-10: Inspector Lambda auto-enable is configured (Inspector) [audit]
   SRA-INSPECTOR-11: Inspector Lambda Code auto-enable is configured (Inspector) [audit]
+  SRA-KMS-01: Eligible KMS keys rotate automatically at least annually (KMS) [application]
   SRA-MACIE-01: Macie publish policy findings to Security Hub is enabled (Macie) [application]
   SRA-MACIE-02: Macie publish classification findings to Security Hub is enabled (Macie) [application]
   SRA-MACIE-03: Macie findings exported to a S3 bucket in Log Archive account are encrypted at rest (Macie) [application]

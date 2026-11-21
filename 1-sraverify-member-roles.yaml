@@ -236,6 +236,12 @@ Resources:
               - s3:GetBucketLocation
               - s3:GetBucketPolicy
             Resource: '*'
+          - Sid: SecretsmanagerPermissions
+            Effect: Allow
+            Action:
+              - secretsmanager:DescribeSecret
+              - secretsmanager:ListSecrets
+            Resource: '*'
           - Sid: SecurityIrPermissions
             Effect: Allow
             Action:

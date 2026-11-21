@@ -589,6 +589,23 @@ _ADAPTERS: dict[str, tuple[AccessorAdapter, ...]] = {
             cache_key=f"query_log_config_associations:{_TEST_REGION}",
         ),
     ),
+    "secretsmanager": (
+        A("get_client", "client_lookup", args=(_TEST_REGION,)),
+        A(
+            "get_secrets",
+            "accessor",
+            args=(_TEST_REGION,),
+            client_method="list_secrets",
+            cache_key=f"secrets:{_TEST_REGION}",
+        ),
+        A(
+            "get_secret",
+            "accessor",
+            args=(_TEST_REGION, f"arn:aws:secretsmanager:{_TEST_REGION}:{_TEST_ACCOUNT}:secret:app-AbCdEf"),
+            client_method="describe_secret",
+            cache_key=f"secret:{_TEST_REGION}:arn:aws:secretsmanager:{_TEST_REGION}:{_TEST_ACCOUNT}:secret:app-AbCdEf",
+        ),
+    ),
     "s3": (
         A("get_client", "client_lookup", args=(_TEST_REGION,)),
         A(
@@ -1518,10 +1535,10 @@ def _params(targets: list[_Target], property_key: str) -> list[Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_nineteen_services_are_discovered() -> None:
+def test_twenty_services_are_discovered() -> None:
     """The enumeration found the whole tree."""
-    assert len(_SERVICE_NAMES) == 19, (
-        f"expected 19 service packages, found {len(_SERVICE_NAMES)}"
+    assert len(_SERVICE_NAMES) == 20, (
+        f"expected 20 service packages, found {len(_SERVICE_NAMES)}"
     )
 
 

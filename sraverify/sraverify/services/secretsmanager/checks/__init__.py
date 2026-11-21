@@ -1,0 +1,1 @@
+"""Secrets Manager security checks."""

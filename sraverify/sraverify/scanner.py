@@ -52,6 +52,11 @@ SUGGESTION_CUTOFF = 0.6
 #: At most this many suggestions accompany an UnknownCheckError.
 SUGGESTION_LIMIT = 3
 
+#: The parallel scan's calling thread waits for results in slices this long,
+#: so Ctrl-C is seen on Windows, where Python before 3.14 cannot interrupt a
+#: blocking lock wait (Python docs, ``threading.Lock.acquire``).
+_WAIT_SLICE_SECONDS = 0.5
+
 
 def _near_misses(check_id: str, registry) -> List[str]:
     """Registry keys similar enough to ``check_id`` to be worth suggesting.
@@ -439,11 +444,13 @@ def _run_services_in_parallel(
     """Run each service as one task on ``workers`` threads.
 
     Rows are merged in ``service_checks`` order, whatever order the services
-    finish in. Progress advances on the calling thread, one service at a time.
+    finish in. Progress advances on the calling thread, one service at a time,
+    and names the earliest service in that order that has not finished.
     On ``KeyboardInterrupt``, or an exception a service reports, no further
     check starts, services not yet taken are skipped, running checks are
     waited for, and the exception propagates. The calling thread waits on a
-    ``SimpleQueue`` and so holds no lock a worker needs when interrupted.
+    ``SimpleQueue`` in ``_WAIT_SLICE_SECONDS`` slices and so holds no lock a
+    worker needs when interrupted.
 
     Returns:
         Every row, in the same order a one-worker scan produces.
@@ -461,18 +468,24 @@ def _run_services_in_parallel(
         )
         for number in range(1, workers + 1)
     ]
+    names = list(service_checks)
     results: Dict[str, List[Finding]] = {}
     try:
         for thread in threads:
             thread.start()
         begin.set()
-        while len(results) < len(service_checks):
-            name, rows, error = done.get()
+        if progress:
+            progress.update(names[0])
+        while len(results) < len(names):
+            try:
+                name, rows, error = done.get(timeout=_WAIT_SLICE_SECONDS)
+            except queue.Empty:
+                continue
             if error is not None:
                 raise error
             results[name] = rows
             if progress:
-                progress.update(name)
+                progress.update(next((n for n in names if n not in results), names[-1]))
                 for _ in service_checks[name]:
                     progress.increment()
     finally:
@@ -481,7 +494,7 @@ def _run_services_in_parallel(
         for thread in threads:
             if thread.is_alive():
                 thread.join()
-    return [finding for name in service_checks for finding in results[name]]
+    return [finding for name in names for finding in results[name]]
 
 
 class SRAVerify:

@@ -325,6 +325,10 @@ class ScanContext:
         The holder re-checks the cache before calling AWS and never caches a
         failure, so a waiting caller either reads the cached success or issues
         the call itself. Locks for other keys, and ``self._lock``, stay free.
+
+        Lock order is key lock, then ``_client_build_lock``, then
+        ``self._lock``. Take a key lock only while holding no other lock, and
+        never call another key-locked lookup from inside one.
         """
         with self._lock:
             lock = self._key_locks.get((namespace, key))

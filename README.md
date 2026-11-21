@@ -258,9 +258,10 @@ In this step you will clone the Github repository and run the tool.
 service still run in order, and the report rows come out in the same order as with the
 default of 1. Start with 2. The slowest service bounds the gain, so extra workers help less
 once one large service dominates the scan. The CodeBuild deployment already scans
-`ParallelAccounts` accounts at once (`PARALLEL_ACCOUNTS`), so its total concurrency is that
-number times `--max-workers`. API throttling at higher values has not been measured: the
-test suite runs offline.
+`ParallelAccounts` accounts at once (`PARALLEL_ACCOUNTS`) and does not pass `--max-workers`;
+if you add `--max-workers` to the buildspec, total concurrency is that number times
+`--max-workers`. With N above 1, `--debug` lines from different services interleave. API
+throttling at higher values has not been measured: the test suite runs offline.
 
 ### Output file naming
 When `--output` is omitted, a timestamp is inserted before the extension, producing

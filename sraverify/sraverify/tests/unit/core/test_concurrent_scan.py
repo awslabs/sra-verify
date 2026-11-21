@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import gc
 import inspect
+import queue
 import signal
 import threading
+import types
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -311,6 +313,63 @@ def test_parallel_progress_runs_on_the_calling_thread_and_counts_every_check(
     assert capsys.readouterr().out.endswith("\n")
 
 
+def test_parallel_progress_names_the_earliest_unfinished_service(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    labels: list[str] = []
+    shown = [threading.Event() for _ in range(5)]
+
+    class _SpyProgress(scanner_module.ScanProgress):
+        def update(self, service: str) -> None:
+            labels.append(service)
+            super().update(service)
+            shown[len(labels) - 1].set()
+
+    def after_label(index: int) -> Callable[[SecurityCheck], None]:
+        def wait(self: SecurityCheck) -> None:
+            assert shown[index].wait(TIMEOUT)
+        return wait
+
+    monkeypatch.setattr(scanner_module, "ScanProgress", _SpyProgress)
+    classes = [
+        _check("Alpha", 1, _passing()),
+        _check("Bravo", 1, _passing(after_label(2))),
+        _check("Charlie", 1, _passing(after_label(1))),
+    ]
+
+    findings = _scan(classes, max_workers=3, show_progress=True)
+
+    assert [f.status for f in findings] == [Status.PASS] * 3
+    assert labels == ["Alpha", "Bravo", "Bravo", "Charlie"]
+
+
+def test_the_parallel_wait_wakes_periodically_so_ctrl_c_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeouts: list[float | None] = []
+    woke = threading.Event()
+
+    class _SpyQueue(queue.SimpleQueue):
+        def get(self, block: bool = True, timeout: float | None = None) -> Any:
+            timeouts.append(timeout)
+            try:
+                return super().get(block, timeout)
+            except queue.Empty:
+                woke.set()
+                raise
+
+    monkeypatch.setattr(scanner_module, "queue", types.SimpleNamespace(SimpleQueue=_SpyQueue, Empty=queue.Empty))
+    monkeypatch.setattr(scanner_module, "_WAIT_SLICE_SECONDS", 0.01)
+
+    def until_woken(self: SecurityCheck) -> None:
+        assert woke.wait(TIMEOUT)
+
+    classes = [_check("Alpha", 1, _passing(until_woken)), _check("Bravo", 1, _passing())]
+
+    findings = _scan(classes, max_workers=2)
+
+    assert [f.status for f in findings] == [Status.PASS, Status.PASS]
+    assert timeouts and all(t == 0.01 for t in timeouts)
+
+
 def test_a_parallel_scan_releases_its_context_on_return() -> None:
     def raising(self: SecurityCheck) -> Iterator[Finding]:
         yield self.passed(region=REGION, resource_id=None, actual_value="partial")
@@ -333,16 +392,22 @@ def test_a_parallel_scan_releases_its_context_on_return() -> None:
     assert created[0]() is None
 
 
+@pytest.fixture
+def sigint_raises_keyboard_interrupt() -> Iterator[None]:
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("a SIGINT handler can only be installed on the main thread")
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous if previous is not None else signal.SIG_DFL)
+
+
 @pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="needs signal.pthread_kill")
+@pytest.mark.usefixtures("sigint_raises_keyboard_interrupt")
 def test_ctrl_c_skips_pending_work_waits_for_running_checks_and_releases_the_context(
     spy_thread: type[_SpyThread],
 ) -> None:
-    if (
-        threading.current_thread() is not threading.main_thread()
-        or signal.getsignal(signal.SIGINT) is not signal.default_int_handler
-    ):
-        pytest.skip("SIGINT must reach this thread as KeyboardInterrupt")
-
     main_ident = threading.main_thread().ident
     alpha_started = threading.Event()
     lock = threading.Lock()

@@ -169,14 +169,16 @@ cache-clear step. Never stash per-scan state anywhere else.
 
 The context owns the boto3 `Session`, the region list, the audit and log-archive account
 lists, the bounded `botocore.config.Config`, a `(service, region)` client cache, a
-two-level namespaced response cache, and one `threading.Lock`. A lookup shared across
-services (identity, enabled Regions, each Organizations provider key) holds a per-key lock
-while it fetches, so concurrent callers issue one call; a failure is still not cached.
-Clients are built one at a time because a boto3 `Session` is not thread-safe.
+two-level namespaced response cache, and three kinds of lock: a `threading.Lock` for that
+mutable state, a per-key lock for each shared lookup, and a client-build lock. A lookup
+shared across services (identity, enabled Regions, each Organizations provider key) holds
+its key lock while it fetches, so concurrent callers issue one call; a failure is still not
+cached. Clients are built one at a time because a boto3 `Session` is not thread-safe.
 `run_checks(max_workers=N)` runs each service as one task, so a service base class cache is
-only ever touched by one thread. Security Hub and Security Hub CSPM share the `securityhub`
-namespace, so in parallel each may fetch a key the other is still fetching: one extra call,
-the same answer cached.
+only ever touched by one thread. The exception is the `securityhub` namespace, shared by
+Security Hub and Security Hub CSPM: in parallel they can make at most one extra call per
+shared key (`event_rules:{region}`, `rule_targets:{region}:{rule_name}`), with the same
+answer cached.
 
 It also owns the scan Region, `ctx.scan_region`: the first explicit Region, else the
 session's, computed once and read-only. `get_client(service, region=None)` binds to the

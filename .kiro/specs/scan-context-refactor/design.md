@@ -94,19 +94,14 @@ flowchart TB
 
 ### Concurrency model
 
-`ScanContext` is designed to be safe to share across threads. A single `threading.Lock` (acquired briefly inside `_get` / `_set` / `_has` / `get_client` / `get_account_info` / `get_management_account_id` / `get_enabled_regions`) protects the four mutable structures: the namespaced cache, the client cache, the cached account info, and the cached enabled-regions list. We use a single lock rather than per-namespace locks because:
+`ScanContext` is safe to share across threads. `run_checks(max_workers=N)` makes a service the unit of work: each service's checks run in order on one thread, and services run in parallel. A service base class cache is therefore touched by one thread at a time, except the `securityhub` namespace that Security Hub and Security Hub CSPM share (at most one extra call per shared key). The shared state below is what crosses services.
 
-- The work inside the critical section is dict access plus, on miss, a boto3 client construction or an AWS API call. The client construction releases the GIL during socket setup, but the lock is released before any AWS API call is issued in `get_account_info` / `get_management_account_id` / `get_enabled_regions` (see "Cache miss flow" below). So the lock is held for microseconds, not seconds.
-- A single lock is correct under all access patterns and easy to reason about. Per-namespace locks would create the risk of deadlock if cross-service reads ever nest.
-- The future Phase 3.1 fan-out is "one check per thread," not "thousands of cache reads per thread." A single lock with microsecond critical sections is not the bottleneck.
+- **`_lock`** guards the mutable structures: the namespaced cache, the client cache, the cached account info, the cached enabled-regions list, and the key-lock table. It is held for dict access only, never across an AWS call or a client build.
+- **Single flight per key.** `get_account_info`, `get_enabled_regions` and every Organizations provider key (`accounts()` and each `_cached()` key) hold `_key_lock(namespace, key)` across a miss: re-check the cache, fetch, store a success. A concurrent caller for the same key waits and reads the cached success. A failure is returned and never cached, so a waiting caller retries it. Other keys are not blocked.
+- **Client builds are serialized** under `_client_build_lock`, with a re-check, because a boto3 `Session` is not thread-safe. Each `(service, region)` client is built once.
+- **Lock order** is key lock, then client-build lock, then `_lock`. `_lock` is a leaf. A key lock is taken only while holding no other lock, and no key-locked fetch may call another key-locked lookup.
 
-**Cache miss flow** (the subtle part): for the typed methods that issue AWS API calls on miss (`get_account_info`, `get_management_account_id`, `get_enabled_regions`, `get_client`), we do **not** hold the lock across the AWS call. The flow is:
-
-1. Acquire lock, check cache, if hit return cached value, release lock.
-2. (Lock not held) Issue AWS call / construct boto3 client.
-3. Acquire lock, double-check cache (another thread may have populated it while we were calling AWS), if now-populated discard our result and return the cached one, otherwise store ours and return it.
-
-This is the standard double-checked locking pattern. It guarantees that all callers see the same cached object (Requirement 2.10, 2.11) without serializing AWS calls, but it does mean two threads racing to populate a missing cache entry may both make the AWS call — only one of the results will be retained. This is acceptable because the cache is per-scan and the AWS call is idempotent.
+This refines the original double-checked design, in which two racing callers could both issue the AWS call (Requirements 2.10 and 2.11 still hold: every caller sees the same cached object).
 
 ### Bounded timeouts
 

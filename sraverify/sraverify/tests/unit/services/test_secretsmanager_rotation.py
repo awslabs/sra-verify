@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from unittest.mock import MagicMock, patch
 
+import boto3
+from botocore.stub import Stubber
+
 import pytest
 
 from sraverify.core.aws_errors import error_result
@@ -295,3 +298,43 @@ def test_fail_remediation_does_not_assume_lambda_rotation() -> None:
     )
     assert "lambda" not in rows[0].remediation.lower()
     assert "AutomaticallyAfterDays" not in rows[0].remediation
+
+
+def test_eusc_primary_secret_is_evaluated_end_to_end() -> None:
+    region = "eusc-de-east-1"
+    arn = f"arn:aws-eusc:secretsmanager:{region}:{_ACCOUNT}:secret:app-AbCdEf"
+    raw = boto3.client(
+        "secretsmanager",
+        region_name=region,
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    stub = Stubber(raw)
+    stub.add_response("list_secrets", {"SecretList": [{"ARN": arn}]})
+    stub.add_response(
+        "describe_secret",
+        {"ARN": arn, "PrimaryRegion": region, "RotationEnabled": True},
+        {"SecretId": arn},
+    )
+    ctx = ScanContext(session=MagicMock(name="session"), regions=[region])
+    ctx.get_client = MagicMock(return_value=raw)
+    with patch.object(
+        ScanContext,
+        "get_account_info",
+        return_value={"account_id": _ACCOUNT, "account_name": "test"},
+    ), stub:
+        check = SRA_SECRETSMANAGER_01()
+        check.initialize(ctx)
+        rows = list(check.execute())
+    assert [(r.status, r.resource_id) for r in rows] == [(Status.PASS, arn)]
+
+
+def test_trailing_newline_in_an_arn_or_primary_region_is_malformed() -> None:
+    rows, mocks = _run(lambda region: _listing({"ARN": _arn() + "\n"}))
+    assert _statuses(rows) == [Status.ERROR]
+    assert mocks["get_secret"].call_count == 0
+    rows, _ = _run(
+        lambda region: _listing({"ARN": _arn()}),
+        lambda region, arn: _described(arn, True, PrimaryRegion=_R1 + "\n"),
+    )
+    assert _statuses(rows) == [Status.ERROR]

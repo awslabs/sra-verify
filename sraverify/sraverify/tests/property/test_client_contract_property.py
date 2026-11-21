@@ -1394,10 +1394,7 @@ def _build_wrapper(target: _Target) -> tuple[Any, MagicMock]:
 
     ctx = MagicMock(spec=ScanContext)
     ctx.get_client.side_effect = _get_client
-    # Organizations derives its Region from the scan (``scan_region``); pin both
-    # inputs so the derivation is deterministic over the mock.
-    ctx.regions = [_TEST_REGION]
-    ctx.session.region_name = _TEST_REGION
+    ctx.scan_region = _TEST_REGION
 
     # iam and organizations take (ctx); everyone else takes (region, ctx).
     parameters = list(inspect.signature(target.cls.__init__).parameters)

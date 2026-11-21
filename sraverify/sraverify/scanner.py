@@ -8,6 +8,8 @@ logging handlers and writes nothing to stdout; both belong to the host
 application. The command-line interface lives in ``sraverify.cli``.
 """
 import difflib
+import queue
+from threading import Event, Thread
 from boto3 import Session
 from botocore.exceptions import (
     CredentialRetrievalError,
@@ -17,7 +19,7 @@ from botocore.exceptions import (
     TokenRetrievalError,
     UnauthorizedSSOTokenError,
 )
-from typing import Dict, Final, List, Any, Optional
+from typing import Callable, Dict, Final, List, Any, Optional
 
 from sraverify.core.aws_errors import TRANSPORT_ERROR_CODES, is_error
 from sraverify.core.check import SecurityCheck
@@ -268,6 +270,220 @@ def _precondition_error(
     )
 
 
+def _run_check(
+    selected_id: str,
+    check_class: type[SecurityCheck],
+    ctx: ScanContext,
+    fallback_account: tuple,
+) -> List[Finding]:
+    """Run one check inside the per-check guard and return the rows it contributes.
+
+    Returns:
+        The check's findings, or one ERROR row when it raised, or no row when
+        that ERROR row itself could not be built.
+    """
+    # One guarded block per check, spanning construction, initialize, and
+    # consumption of execute() (Requirement 10.1). Construction is inside it
+    # because an abstractmethod violation, a metadata-property failure, or a
+    # rejected ``self.findings`` assignment raises there, and one broken check
+    # must cost one row rather than the scan.
+    #
+    # ``except Exception``, deliberately NOT ``except BaseException`` and not a
+    # bare ``except`` (10.1). BaseException would catch KeyboardInterrupt and
+    # SystemExit, which are not check failures -- they are the operator or the
+    # runtime asking the process to stop. Catching them per check would turn a
+    # single Ctrl-C into one synthetic ERROR row per remaining check, producing
+    # a full-looking report from an aborted scan. Letting them propagate runs
+    # ``finally: del ctx`` on the way out (10.9).
+    try:
+        logger.debug(f"Initializing check {selected_id}: {check_class.meta.title}")
+        check = check_class()
+        # Hand the shared context to the check. Audit and log-archive account
+        # lists flow through ``ctx`` rather than through direct mutation on the
+        # check instance (Requirement 3.4).
+        check.initialize(ctx)
+
+        logger.debug(f"Executing check {selected_id}")
+        # This ``list()`` is LOAD-BEARING. Do not "optimize" it into a lazy
+        # ``all_findings.extend(check.execute())``.
+        #
+        # ``execute()`` is a generator in the migrated catalog, and a generator
+        # captures its frame. That frame references the check instance, which
+        # holds ``self._ctx``. An unconsumed or partially consumed generator
+        # therefore keeps the whole ScanContext -- and every boto3 client it has
+        # cached -- reachable past ``finally: del ctx``, silently defeating the
+        # per-scan isolation the long-running MCP server depends on. ``list()``
+        # forces and drops the generator inside this call, so nothing survives
+        # the guarded block (10.6).
+        #
+        # It also preserves today's semantics exactly (10.8): a check that
+        # raises midway contributes ONE synthetic ERROR row and nothing else,
+        # because the rows it yielded before failing go with the discarded
+        # generator. Yielding the partial rows as well would arguably be more
+        # informative, and is a deliberate future decision rather than an
+        # oversight -- it is a behavior change to every check that can fail
+        # after its first yield. And ``len()`` on a generator is a TypeError, so
+        # the debug line below needs the list too.
+        findings = list(check.execute())
+        logger.debug(f"Check {selected_id} completed with {len(findings)} findings")
+        return findings
+    except ScanPreconditionError as exc:
+        # The check read the account identity or the Region list and that
+        # lookup failed. Ahead of ``except Exception`` so it becomes one honest
+        # ERROR row naming the failed call, not a synthetic row naming a Python
+        # exception. One ``error`` record per row.
+        logger.error(f"{selected_id} could not run: {exc}")
+        try:
+            return [_precondition_error(check_class, exc, fallback_account, ctx.scan_region)]
+        except Exception:
+            # Same secondary-failure rule as the synthetic row (Requirement
+            # 10.12): an exception raised inside an ``except`` handler is not
+            # caught by a sibling clause of the same ``try``, so without this
+            # nesting a defect in building the row would escape the per-check
+            # guard and end the scan. A failure here costs this check its row,
+            # never the scan.
+            logger.error(
+                f"Could not build precondition ERROR row for {selected_id}",
+                exc_info=True,
+            )
+            return []
+    except Exception as exc:
+        logger.error(f"Error running check {selected_id}: {exc}", exc_info=True)
+        try:
+            # Exactly one ERROR row for this check; every finding already
+            # collected is retained and the scan continues with the next check
+            # (10.2).
+            return [_synthetic_error(check_class, exc, fallback_account)]
+        except Exception:
+            # Secondary failure (10.12): the ERROR row itself could not be built
+            # -- e.g. ``meta`` is absent because __init_subclass__ never
+            # completed. Log and move on, contributing no row. Without this
+            # nesting a failure inside error handling escapes the per-check
+            # guard and ends the scan, which is the exact failure mode the guard
+            # exists to remove, reintroduced one level in.
+            logger.error(
+                f"Could not build synthetic ERROR row for {selected_id}",
+                exc_info=True,
+            )
+            return []
+
+
+def _run_service(
+    service_name: str,
+    checks: List[Any],
+    ctx: ScanContext,
+    fallback_account: tuple,
+    stop: Optional[Event] = None,
+    on_check_done: Optional[Callable[[], None]] = None,
+) -> List[Finding]:
+    """Run one service's checks in order and return their rows in that order.
+
+    Args:
+        service_name: The service display name, for the debug record.
+        checks: ``(check_id, check_class)`` pairs in scan order.
+        ctx: The scan's context.
+        fallback_account: The ``(account_id, account_name)`` pair for ERROR rows.
+        stop: When set, no further check of this service starts.
+        on_check_done: Called after every check, broken or not (10.2).
+
+    Returns:
+        The rows of every check that ran, in check order.
+    """
+    logger.debug(f"Running {len(checks)} checks for service {service_name}")
+    findings: List[Finding] = []
+    for selected_id, check_class in checks:
+        if stop is not None and stop.is_set():
+            break
+        findings.extend(_run_check(selected_id, check_class, ctx, fallback_account))
+        if on_check_done is not None:
+            on_check_done()
+    return findings
+
+
+def _service_worker(
+    todo: queue.SimpleQueue[str],
+    done: queue.SimpleQueue[tuple],
+    begin: Event,
+    stop: Event,
+    service_checks: Dict[str, List[Any]],
+    ctx: ScanContext,
+    fallback_account: tuple,
+) -> None:
+    """Take services off ``todo`` and report each as ``(name, rows, exception)``.
+
+    Waits for ``begin`` first, so no check starts while the calling thread is
+    still starting workers. A ``BaseException`` from a service is reported, not
+    swallowed: the calling thread re-raises it.
+    """
+    begin.wait()
+    while not stop.is_set():
+        try:
+            name = todo.get_nowait()
+        except queue.Empty:
+            return
+        try:
+            rows = _run_service(name, service_checks[name], ctx, fallback_account, stop)
+        except BaseException as exc:
+            done.put((name, None, exc))
+            return
+        done.put((name, rows, None))
+
+
+def _run_services_in_parallel(
+    service_checks: Dict[str, List[Any]],
+    ctx: ScanContext,
+    fallback_account: tuple,
+    workers: int,
+    progress: Optional[ScanProgress],
+) -> List[Finding]:
+    """Run each service as one task on ``workers`` threads.
+
+    Rows are merged in ``service_checks`` order, whatever order the services
+    finish in. Progress advances on the calling thread, one service at a time.
+    On ``KeyboardInterrupt``, or an exception a service reports, no further
+    check starts, services not yet taken are skipped, running checks are
+    waited for, and the exception propagates. The calling thread waits on a
+    ``SimpleQueue`` and so holds no lock a worker needs when interrupted.
+
+    Returns:
+        Every row, in the same order a one-worker scan produces.
+    """
+    todo: queue.SimpleQueue[str] = queue.SimpleQueue()
+    for name in service_checks:
+        todo.put(name)
+    done: queue.SimpleQueue[tuple] = queue.SimpleQueue()
+    begin, stop = Event(), Event()
+    threads = [
+        Thread(
+            target=_service_worker,
+            args=(todo, done, begin, stop, service_checks, ctx, fallback_account),
+            name=f"sraverify-worker-{number}",
+        )
+        for number in range(1, workers + 1)
+    ]
+    results: Dict[str, List[Finding]] = {}
+    try:
+        for thread in threads:
+            thread.start()
+        begin.set()
+        while len(results) < len(service_checks):
+            name, rows, error = done.get()
+            if error is not None:
+                raise error
+            results[name] = rows
+            if progress:
+                progress.update(name)
+                for _ in service_checks[name]:
+                    progress.increment()
+    finally:
+        stop.set()
+        begin.set()
+        for thread in threads:
+            if thread.is_alive():
+                thread.join()
+    return [finding for name in service_checks for finding in results[name]]
+
+
 class SRAVerify:
     """Main class for SRA Verify functionality."""
 
@@ -321,7 +537,6 @@ class SRAVerify:
         self._read_timeout = read_timeout
         self._max_attempts = max_attempts
         self._max_pool_connections = max_pool_connections
-        self.progress = None
 
     def select_checks(self, account_type: str = 'all', service: Optional[str] = None,
                       check_id: Optional[str] = None) -> Dict[str, type[SecurityCheck]]:
@@ -451,7 +666,8 @@ class SRAVerify:
     def run_checks(self, account_type: str = 'all', service: Optional[str] = None,
                   check_id: Optional[str] = None, audit_accounts: Optional[List[str]] = None,
                   log_archive_accounts: Optional[List[str]] = None,
-                  show_progress: bool = False) -> List[Finding]:
+                  show_progress: bool = False, *,
+                  max_workers: int = 1) -> List[Finding]:
         """
         Run security checks.
 
@@ -462,6 +678,10 @@ class SRAVerify:
             audit_accounts: List of AWS accounts used for Audit/Security Tooling
             log_archive_accounts: List of AWS accounts used for Logging
             show_progress: Whether to show progress bar
+            max_workers: How many services run at once. Checks of one service
+                always run in order on one thread, and the rows come back in
+                the same order whatever the value. With 1, or when one service
+                is selected, every check runs on the calling thread.
 
         Returns:
             A concrete ``list`` of :class:`Finding`, never a generator, an
@@ -471,6 +691,8 @@ class SRAVerify:
             moving the client leak up one layer rather than removing it.
 
         Raises:
+            ValueError: ``max_workers`` is not a positive ``int``. Raised
+                before anything else.
             UnknownCheckError: ``check_id`` names an ID absent from the
                 registry.
             NoChecksSelectedError: The filter combination matched no check.
@@ -479,7 +701,10 @@ class SRAVerify:
                 call, so an undetermined scan never reaches botocore's
                 commercial ``aws-global`` default.
         """
-        # First: refuse a scan whose partition cannot be determined, before any
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError(f"max_workers must be a positive integer, got {max_workers!r}")
+
+        # Refuse a scan whose partition cannot be determined, before any
         # selection, context, or AWS call. The value is discarded; ScanContext
         # recomputes it from the same inputs.
         self.resolve_scan_region()
@@ -494,8 +719,6 @@ class SRAVerify:
         )
         checks_to_run = self.select_checks(account_type, service, check_id)
 
-        all_findings: List[Finding] = []
-
         # Group checks by service for better organization. Read from
         # ``cls.meta``; grouping constructs no instance.
         service_checks: Dict[str, List[Any]] = {}
@@ -505,9 +728,7 @@ class SRAVerify:
                 (selected_id, check_class)
             )
 
-        # Set up progress tracking if requested
-        if show_progress:
-            self.progress = ScanProgress(len(checks_to_run))
+        progress = ScanProgress(len(checks_to_run)) if show_progress else None
 
         # Construct the per-scan context. It owns the session, region list,
         # audit/log-archive account lists, the bounded ``Client_Config``, the
@@ -552,134 +773,24 @@ class SRAVerify:
                 logger.error(f"Could not resolve account identity: {exc}", exc_info=True)
                 fallback_account = ("", "")
 
-            # Run checks by service
-            for service_name, checks in service_checks.items():
-                if self.progress:
-                    self.progress.update(service_name)
-                logger.debug(f"Running {len(checks)} checks for service {service_name}")
+            workers = min(max_workers, len(service_checks))
+            all_findings: List[Finding]
+            if workers == 1:
+                all_findings = []
+                for service_name, checks in service_checks.items():
+                    if progress:
+                        progress.update(service_name)
+                    all_findings.extend(_run_service(
+                        service_name, checks, ctx, fallback_account,
+                        on_check_done=progress.increment if progress else None,
+                    ))
+            else:
+                all_findings = _run_services_in_parallel(
+                    service_checks, ctx, fallback_account, workers, progress
+                )
 
-                for selected_id, check_class in checks:
-                    # One guarded block per check, spanning construction,
-                    # initialize, and consumption of execute() (Requirement
-                    # 10.1). Construction is inside it because an
-                    # abstractmethod violation, a metadata-property failure,
-                    # or a rejected ``self.findings`` assignment raises there,
-                    # and one broken check must cost one row rather than the
-                    # scan.
-                    #
-                    # ``except Exception``, deliberately NOT
-                    # ``except BaseException`` and not a bare ``except``
-                    # (10.1). BaseException would catch KeyboardInterrupt and
-                    # SystemExit, which are not check failures -- they are the
-                    # operator or the runtime asking the process to stop.
-                    # Catching them per check would turn a single Ctrl-C into
-                    # one synthetic ERROR row per remaining check, producing a
-                    # full-looking report from an aborted scan. Letting them
-                    # propagate runs ``finally: del ctx`` on the way out (10.9).
-                    try:
-                        logger.debug(
-                            f"Initializing check {selected_id}: "
-                            f"{check_class.meta.title}"
-                        )
-                        check = check_class()
-                        # Hand the shared context to the check. Audit and
-                        # log-archive account lists flow through ``ctx`` rather
-                        # than through direct mutation on the check instance
-                        # (Requirement 3.4).
-                        check.initialize(ctx)
-
-                        logger.debug(f"Executing check {selected_id}")
-                        # This ``list()`` is LOAD-BEARING. Do not "optimize" it
-                        # into a lazy ``all_findings.extend(check.execute())``.
-                        #
-                        # ``execute()`` is a generator in the migrated
-                        # catalog, and a generator captures its frame. That
-                        # frame references the check instance, which holds
-                        # ``self._ctx``. An unconsumed or partially consumed
-                        # generator therefore keeps the whole ScanContext --
-                        # and every boto3 client it has cached -- reachable
-                        # past ``finally: del ctx``, silently defeating the
-                        # per-scan isolation the long-running MCP server
-                        # depends on. ``list()`` forces and drops the
-                        # generator inside this loop iteration, so nothing
-                        # survives the guarded block (10.6).
-                        #
-                        # It also preserves today's semantics exactly (10.8):
-                        # a check that raises midway contributes ONE synthetic
-                        # ERROR row and nothing else, because the rows it
-                        # yielded before failing go with the discarded
-                        # generator. Yielding the partial rows as well would
-                        # arguably be more informative, and is a deliberate
-                        # future decision rather than an oversight -- it is a
-                        # behavior change to every check that can fail after
-                        # its first yield. And ``len()`` on a generator is a
-                        # TypeError, so the debug line below needs the list too.
-                        findings = list(check.execute())
-                        all_findings.extend(findings)
-                        logger.debug(
-                            f"Check {selected_id} completed with "
-                            f"{len(findings)} findings"
-                        )
-                    except ScanPreconditionError as exc:
-                        # The check read the account identity or the Region
-                        # list and that lookup failed. Ahead of ``except
-                        # Exception`` so it becomes one honest ERROR row naming
-                        # the failed call, not a synthetic row naming a Python
-                        # exception. One ``error`` record per row.
-                        logger.error(f"{selected_id} could not run: {exc}")
-                        try:
-                            all_findings.append(
-                                _precondition_error(
-                                    check_class, exc, fallback_account, ctx.scan_region
-                                )
-                            )
-                        except Exception:
-                            # Same secondary-failure rule as the synthetic row
-                            # (Requirement 10.12): an exception raised inside an
-                            # ``except`` handler is not caught by a sibling
-                            # clause of the same ``try``, so without this nesting
-                            # a defect in building the row would escape the
-                            # per-check guard and end the scan. A failure here
-                            # costs this check its row, never the scan.
-                            logger.error(
-                                f"Could not build precondition ERROR row for "
-                                f"{selected_id}",
-                                exc_info=True,
-                            )
-                    except Exception as exc:
-                        logger.error(
-                            f"Error running check {selected_id}: {exc}",
-                            exc_info=True,
-                        )
-                        try:
-                            # Exactly one ERROR row for this check; every
-                            # finding already collected is retained and the
-                            # loop continues with the next check (10.2).
-                            all_findings.append(
-                                _synthetic_error(check_class, exc, fallback_account)
-                            )
-                        except Exception:
-                            # Secondary failure (10.12): the ERROR row itself
-                            # could not be built -- e.g. ``meta`` is absent
-                            # because __init_subclass__ never completed. Log
-                            # and move on, contributing no row. Without this
-                            # nesting a failure inside error handling escapes
-                            # the per-check guard and ends the scan, which is
-                            # the exact failure mode the guard exists to
-                            # remove, reintroduced one level in.
-                            logger.error(
-                                f"Could not build synthetic ERROR row for "
-                                f"{selected_id}",
-                                exc_info=True,
-                            )
-
-                    # Outside the ``except``, so a broken check advances the
-                    # indicator exactly once, same as a healthy one (10.2).
-                    if self.progress:
-                        self.progress.increment()
-
-            if self.progress:
-                self.progress.finish()
+            if progress:
+                progress.finish()
 
             # A concrete list (10.7). The per-check ``list()`` above looks
             # like it has already solved the lifetime problem, and it has not:

@@ -77,10 +77,10 @@ class ScanContext:
 
     A fresh ``ScanContext`` is constructed per scan and goes out of scope when
     the scan finishes. Cached AWS API responses, cached boto3 clients, and the
-    bounded ``Client_Config`` all live here. The context is designed to be safe
-    to share across threads; the namespaced cache primitives, the client cache,
-    and the lazy typed accessors all serialize their critical sections through
-    a single ``threading.Lock``.
+    bounded ``Client_Config`` all live here. The context is safe to share
+    across threads: one ``threading.Lock`` guards the mutable state, a
+    per-key lock (``_key_lock``) lets one caller at a time fetch a missing
+    shared lookup, and boto3 clients are built one at a time.
 
     Construction-time overrides for the ``Client_Config`` follow this
     precedence (Requirements 2.4, 2.5):
@@ -110,8 +110,7 @@ class ScanContext:
     ) -> None:
         # Per-scan immutable inputs (Requirements 1.6, 1.7, 1.8, 1.9). The
         # explicit Region list is copied, so a caller mutating its own list
-        # mid-scan cannot make ``scan_region(ctx)`` and ``ctx.scan_region``
-        # disagree.
+        # mid-scan cannot change ``ctx.regions`` or ``ctx.scan_region``.
         self._session: boto3.Session = session
         self._explicit_regions: Optional[List[str]] = (
             list(regions) if regions is not None else None
@@ -170,6 +169,8 @@ class ScanContext:
         # concurrent-execution work does not need a second refactor
         # (Requirement 1.11).
         self._lock: threading.Lock = threading.Lock()
+        self._key_locks: Dict[Tuple[str, str], threading.Lock] = {}
+        self._client_build_lock: threading.Lock = threading.Lock()
 
         # The Organizations provider, reached as ``ctx.organization`` and from a
         # check as ``self.organization``. Last, because it holds this context
@@ -248,10 +249,10 @@ class ScanContext:
     # Thread-safety: every operation acquires ``self._lock`` for the dict
     # access (Requirement 1.11). The critical section is a handful of dict
     # lookups, so the lock is held for microseconds. Boto3 calls on cache miss
-    # happen outside this lock; the typed accessors that combine a miss with an
-    # AWS API call (``get_account_info``, ``get_management_account_id``,
-    # ``get_enabled_regions``, ``get_client``) implement their own
-    # double-checked locking on top of these primitives.
+    # happen outside this lock. A lookup shared across services holds
+    # ``_key_lock(namespace, key)`` across its miss instead, so a concurrent
+    # caller for the same key waits for that answer rather than repeating the
+    # call.
 
     def _get(self, namespace: str, key: str, default: Any = None) -> Any:
         """Return the cached value for ``(namespace, key)`` or ``default``.
@@ -318,6 +319,19 @@ class ScanContext:
                 return False
             return key in namespace_cache
 
+    def _key_lock(self, namespace: str, key: str) -> threading.Lock:
+        """Return the lock held while ``(namespace, key)`` is fetched on a miss.
+
+        The holder re-checks the cache before calling AWS and never caches a
+        failure, so a waiting caller either reads the cached success or issues
+        the call itself. Locks for other keys, and ``self._lock``, stay free.
+        """
+        with self._lock:
+            lock = self._key_locks.get((namespace, key))
+            if lock is None:
+                lock = self._key_locks[(namespace, key)] = threading.Lock()
+            return lock
+
     # ------------------------------------------------------------------ #
     # Per-scan boto3 client cache (public typed accessor).
     # ------------------------------------------------------------------ #
@@ -338,17 +352,11 @@ class ScanContext:
         endpoint).
 
         Thread-safety contract (Requirement 2.11): callers racing on the same
-        ``(service_name, region)`` key are guaranteed to receive the same
-        client object. The implementation uses double-checked locking: the
-        cache is checked under the lock, the lock is released while
-        ``session.client`` runs (because boto3 client construction can take
-        non-trivial time and we don't want to serialize all callers behind
-        it), and then the lock is re-acquired to insert the result. Under
-        contention this means ``session.client`` may be called more than once
-        for the same key, but only the first result that wins the second
-        critical section is retained and returned to every caller; any extra
-        clients built by losing threads are discarded so the cache always
-        reflects a single instance per key.
+        ``(service_name, region)`` key receive the same client object, built
+        once. Clients are built one at a time under ``_client_build_lock``,
+        because a boto3 ``Session`` is not thread-safe (boto3 guide, "Session
+        > Multithreading or multiprocessing with sessions"). ``self._lock`` is
+        not held while building, so a cache hit never waits for a build.
 
         Args:
             service_name: The AWS service name as understood by ``boto3``
@@ -370,22 +378,18 @@ class ScanContext:
             if cached is not None:
                 return cached
 
-        # Lock released. Construct the client outside the critical section so
-        # concurrent callers for *different* keys aren't serialized behind us.
-        new_client = self._session.client(
-            service_name,
-            region_name=region,
-            config=self._client_config,
-        )
-
-        # Second check: another thread may have populated the cache while we
-        # were building our client. If so, drop ours and return theirs so all
-        # callers observe the same instance for this key.
-        with self._lock:
-            cached = self._clients.get(cache_key)
-            if cached is not None:
-                return cached
-            self._clients[cache_key] = new_client
+        with self._client_build_lock:
+            with self._lock:
+                cached = self._clients.get(cache_key)
+                if cached is not None:
+                    return cached
+            new_client = self._session.client(
+                service_name,
+                region_name=region,
+                config=self._client_config,
+            )
+            with self._lock:
+                self._clients[cache_key] = new_client
             return new_client
 
     # ------------------------------------------------------------------ #
@@ -395,16 +399,10 @@ class ScanContext:
     # ``get_account_info`` and ``get_enabled_regions`` each issue an AWS call the
     # first time they are invoked in a scan and cache a success for the
     # remainder of the scan (Requirements 1.2, 1.4); ``get_management_account_id``
-    # reads the Organizations provider, which owns that cache. Both of the first
-    # two follow the double-checked locking shape used by ``get_client``:
-    #
-    # 1. Acquire ``self._lock``, peek at the cache field. On hit, release and
-    #    return the cached value.
-    # 2. Lock released. Issue the AWS call(s), so threads racing on different
-    #    lazy accessors don't serialize behind each other.
-    # 3. Re-acquire ``self._lock`` and double-check. If another thread won the
-    #    race, return its result and discard ours so every caller observes the
-    #    same object. Otherwise store ours and return it.
+    # reads the Organizations provider, which owns that cache. On a miss, each of
+    # the first two holds its own ``_key_lock`` and re-checks the cache before
+    # calling AWS, so concurrent first callers issue one call and all receive
+    # the same object. ``self._lock`` is never held across an AWS call.
     #
     # They follow the client-error contract (Requirement 13.3): an AWS failure is
     # returned as an error result, logged once as ``aws_call_failed`` at
@@ -450,38 +448,37 @@ class ScanContext:
             if self._account_info is not None:
                 return self._account_info
 
-        # Both clients are acquired before their try: a construction failure is
-        # a defect, not an AWS outcome, and propagates unchanged.
-        sts_client = self.get_client("sts", region=self._scan_region)
-        account_client = self.get_client("account", region=self._scan_region)
-        try:
-            response = sts_client.get_caller_identity()
-        except AWS_EXCEPTIONS as e:
-            return self._call_failed(e)  # never cached; the next caller re-issues
-        account_id = response["Account"]
+        with self._key_lock("scan_context", "account_info"):
+            with self._lock:
+                if self._account_info is not None:
+                    return self._account_info
 
-        logger.debug("Getting AWS account name from Account API")
-        try:
-            response = account_client.get_account_information()
-        except AWS_EXCEPTIONS as e:
-            self._call_failed(e)  # one debug record; the name is best-effort
-            account_name = ""
-        else:
-            account_name = response.get("AccountName", "")
-            logger.debug(f"Retrieved account name: {account_name}")
+            # Both clients are acquired before their try: a construction failure is
+            # a defect, not an AWS outcome, and propagates unchanged.
+            sts_client = self.get_client("sts", region=self._scan_region)
+            account_client = self.get_client("account", region=self._scan_region)
+            try:
+                response = sts_client.get_caller_identity()
+            except AWS_EXCEPTIONS as e:
+                return self._call_failed(e)  # never cached; the next caller re-issues
+            account_id = response["Account"]
 
-        new_info: Dict[str, str] = {
-            "account_id": account_id,
-            "account_name": account_name,
-        }
+            logger.debug("Getting AWS account name from Account API")
+            try:
+                response = account_client.get_account_information()
+            except AWS_EXCEPTIONS as e:
+                self._call_failed(e)  # one debug record; the name is best-effort
+                account_name = ""
+            else:
+                account_name = response.get("AccountName", "")
+                logger.debug(f"Retrieved account name: {account_name}")
 
-        # Second check: another thread may have populated the cache while we
-        # were calling AWS. If so, return its result and drop ours so every
-        # caller sees the same object.
-        with self._lock:
-            if self._account_info is not None:
-                return self._account_info
-            self._account_info = new_info
+            new_info: Dict[str, str] = {
+                "account_id": account_id,
+                "account_name": account_name,
+            }
+            with self._lock:
+                self._account_info = new_info
             logger.debug(f"Cached account information for {account_id}")
             return new_info
 
@@ -527,21 +524,22 @@ class ScanContext:
             if self._resolved_regions is not None:
                 return self._resolved_regions
 
-        logger.debug("Getting enabled AWS regions")
-        # Acquired outside the try, like STS and Account above: a construction
-        # failure (e.g. PartialCredentialsError) propagates unchanged.
-        ec2_client = self.get_client("ec2", region=self._scan_region)
-        try:
-            response = ec2_client.describe_regions(AllRegions=False)
-        except AWS_EXCEPTIONS as e:
-            return self._call_failed(e)  # never cached; the next caller re-issues
-        regions = [region["RegionName"] for region in response["Regions"]]
-        logger.debug(f"Found {len(regions)} enabled regions")
+        with self._key_lock("scan_context", "enabled_regions"):
+            with self._lock:
+                if self._resolved_regions is not None:
+                    return self._resolved_regions
 
-        # Second check: another thread may have populated the cache while we
-        # were calling AWS.
-        with self._lock:
-            if self._resolved_regions is not None:
-                return self._resolved_regions
-            self._resolved_regions = regions
+            logger.debug("Getting enabled AWS regions")
+            # Acquired outside the try, like STS and Account above: a construction
+            # failure (e.g. PartialCredentialsError) propagates unchanged.
+            ec2_client = self.get_client("ec2", region=self._scan_region)
+            try:
+                response = ec2_client.describe_regions(AllRegions=False)
+            except AWS_EXCEPTIONS as e:
+                return self._call_failed(e)  # never cached; the next caller re-issues
+            regions = [region["RegionName"] for region in response["Regions"]]
+            logger.debug(f"Found {len(regions)} enabled regions")
+
+            with self._lock:
+                self._resolved_regions = regions
             return regions

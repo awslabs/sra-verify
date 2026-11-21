@@ -29,10 +29,11 @@ Four decisions are embedded here:
   ``is_active_account`` filter, so moving a call site to the provider changes one
   token and nothing else.
 
-One fetch per accessor per key per scan is a guarantee for sequential
-execution. The cache is double-checked, not single-flight, so concurrent first
-callers may each issue the call; per-key in-flight coordination is a follow-up,
-to land before or with concurrent scanning. No lock is added here.
+One fetch per accessor per key per scan holds under concurrent scanning too: a
+miss holds ``ctx._key_lock(NAMESPACE, key)`` and re-checks the cache before
+calling AWS, so concurrent first callers (Security Hub and Organizations both
+read ``roots()``) issue one call. A failure is still never cached, so a waiting
+caller re-issues it.
 """
 from __future__ import annotations
 
@@ -154,36 +155,33 @@ class OrganizationsProvider:
     def accounts(self) -> Mapping[str, Any]:
         """Every account in the organization, cached once per scan.
 
-        Takes no Region: the answer is organization-wide.
-
-        "One sweep per scan" holds for sequential execution, which is how
-        ``run_checks`` runs today. The cache is not single-flight: two
-        concurrent first callers can each miss and each paginate. Per-key
-        in-flight coordination belongs with concurrent scanning (Phase 2).
+        Takes no Region: the answer is organization-wide. One sweep per scan,
+        also under concurrent callers (see the module docstring).
 
         Returns:
             ``{"Accounts": [...]}`` with every page merged, or the error result
             unchanged. A failure is never cached, so the next caller re-issues.
         """
         ctx = self._ctx
-        if ctx._has(NAMESPACE, ACCOUNTS_KEY):
-            logger.debug("Organizations: Using cached organization accounts")
-            return ctx._get(NAMESPACE, ACCOUNTS_KEY)
+        with ctx._key_lock(NAMESPACE, ACCOUNTS_KEY):
+            if ctx._has(NAMESPACE, ACCOUNTS_KEY):
+                logger.debug("Organizations: Using cached organization accounts")
+                return ctx._get(NAMESPACE, ACCOUNTS_KEY)
 
-        logger.debug("Organizations: Fetching organization accounts")
-        # A wrapper per call, never memoised: memoising it would store
-        # wrapper.ctx -> ctx on the provider, which is the cycle the weakref
-        # above exists to avoid.
-        response = OrganizationsClient(ctx).list_accounts()
-        if is_error(response):
-            return response  # never cached; the next caller re-issues
+            logger.debug("Organizations: Fetching organization accounts")
+            # A wrapper per call, never memoised: memoising it would store
+            # wrapper.ctx -> ctx on the provider, which is the cycle the weakref
+            # above exists to avoid.
+            response = OrganizationsClient(ctx).list_accounts()
+            if is_error(response):
+                return response  # never cached; the next caller re-issues
 
-        ctx._set(NAMESPACE, ACCOUNTS_KEY, response)
-        logger.debug(
-            f"Organizations: Cached {len(response.get('Accounts', []))} "
-            f"organization accounts"
-        )
-        return response
+            ctx._set(NAMESPACE, ACCOUNTS_KEY, response)
+            logger.debug(
+                f"Organizations: Cached {len(response.get('Accounts', []))} "
+                f"organization accounts"
+            )
+            return response
 
     def _cached(
         self, key: str, fetch: Callable[[OrganizationsClient], Mapping[str, Any]]
@@ -199,17 +197,18 @@ class OrganizationsProvider:
             A failure is never cached, so the next caller re-issues.
         """
         ctx = self._ctx
-        if ctx._has(NAMESPACE, key):
-            logger.debug(f"Organizations: Using cached {key}")
-            return ctx._get(NAMESPACE, key)
-        logger.debug(f"Organizations: Fetching {key}")
-        # A wrapper per miss, never memoised (see the module docstring).
-        response = fetch(OrganizationsClient(ctx))
-        if is_error(response):
-            return response  # never cached; the next caller re-issues
-        ctx._set(NAMESPACE, key, response)
-        logger.debug(f"Organizations: Cached {key}")
-        return response
+        with ctx._key_lock(NAMESPACE, key):
+            if ctx._has(NAMESPACE, key):
+                logger.debug(f"Organizations: Using cached {key}")
+                return ctx._get(NAMESPACE, key)
+            logger.debug(f"Organizations: Fetching {key}")
+            # A wrapper per miss, never memoised (see the module docstring).
+            response = fetch(OrganizationsClient(ctx))
+            if is_error(response):
+                return response  # never cached; the next caller re-issues
+            ctx._set(NAMESPACE, key, response)
+            logger.debug(f"Organizations: Cached {key}")
+            return response
 
     def describe(self) -> Mapping[str, Any]:
         """The organization, cached once per scan.

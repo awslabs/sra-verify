@@ -784,7 +784,8 @@ def test_returned_findings_hold_no_scan_context(
     )
 
     # ---- Requirement 10.11: the weak reference is dead ---------------- #
-    gc.collect()
+    if context_ref() is not None:
+        gc.collect()
     context = context_ref()
     if context is not None:
         summary = _referrer_summary(context)

@@ -38,6 +38,8 @@ them (Property 8 needs non-member enum strings), not here.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from hypothesis import strategies as st
 
 from sraverify.core.enums import AccountType, Severity, Status
@@ -76,6 +78,7 @@ _HOSTILE_CELLS = (
 )
 
 
+@lru_cache(maxsize=None)
 def cell_text(max_size: int = 40) -> st.SearchStrategy[str]:
     """Return a strategy for one CSV cell's worth of text.
 
@@ -97,6 +100,7 @@ def cell_text(max_size: int = 40) -> st.SearchStrategy[str]:
     return st.one_of(plain, hostile, mixed)
 
 
+@lru_cache(maxsize=None)
 def check_ids() -> st.SearchStrategy[str]:
     """Return a strategy for check IDs in the ``SRA-<SERVICE>-NN`` shape.
 
@@ -117,6 +121,7 @@ def check_ids() -> st.SearchStrategy[str]:
     return st.builds(lambda s, n: f"SRA-{s}-{n}", service, number)
 
 
+@lru_cache(maxsize=None)
 def regions() -> st.SearchStrategy[str]:
     """Return a strategy for the ``region`` field.
 
@@ -138,6 +143,14 @@ def regions() -> st.SearchStrategy[str]:
         ]
     )
     return st.one_of(known, cell_text(max_size=16))
+
+
+_RESOURCE_IDS = st.one_of(st.none(), cell_text())
+_ACCOUNT_IDS = st.one_of(
+    st.text(alphabet="0123456789", min_size=12, max_size=12),
+    st.just(""),
+    cell_text(max_size=16),
+)
 
 
 @st.composite
@@ -167,15 +180,9 @@ def findings(draw: st.DrawFn) -> Finding:
         title=f"{check_id} {draw(cell_text())}",
         description=draw(cell_text()),
         # The one nullable field.
-        resource_id=draw(st.one_of(st.none(), cell_text())),
+        resource_id=draw(_RESOURCE_IDS),
         resource_type=draw(cell_text(max_size=24)),
-        account_id=draw(
-            st.one_of(
-                st.text(alphabet="0123456789", min_size=12, max_size=12),
-                st.just(""),
-                cell_text(max_size=16),
-            )
-        ),
+        account_id=draw(_ACCOUNT_IDS),
         account_name=draw(cell_text(max_size=24)),
         checked_value=draw(cell_text()),
         actual_value=draw(cell_text()),

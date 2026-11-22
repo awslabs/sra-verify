@@ -48,7 +48,7 @@ import re
 from dataclasses import fields as dataclass_fields
 from dataclasses import replace as dataclass_replace
 
-from hypothesis import find, given
+from hypothesis import Phase, find, given, settings
 
 from sraverify.core.finding import Finding
 from sraverify.tests.property.strategies import cell_text, findings
@@ -301,5 +301,10 @@ def test_generator_reaches_both_resource_id_shapes() -> None:
     ``find`` raises if no example satisfying the predicate exists, so a
     generator that stopped producing either shape fails this test.
     """
-    assert find(findings(), lambda f: f.resource_id is None) is not None
-    assert find(findings(), lambda f: isinstance(f.resource_id, str)) is not None
+    search_settings = settings(max_examples=2000, phases=(Phase.generate,))
+    assert find(
+        findings(), lambda f: f.resource_id is None, settings=search_settings
+    ) is not None
+    assert find(
+        findings(), lambda f: isinstance(f.resource_id, str), settings=search_settings
+    ) is not None

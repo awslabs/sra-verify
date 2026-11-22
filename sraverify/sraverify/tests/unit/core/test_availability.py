@@ -42,7 +42,8 @@ def cold_cache() -> Any:
 
     Requested explicitly rather than autouse. The warning, fail-open, cache-hit,
     and no-network tests each need a cold entry, because a warm one would serve
-    the answer without running the body and they would pass vacuously. Every
+    the answer without running the body and they would pass vacuously. The
+    Shield sweep also clears it and shares one session within the test. Every
     other test in this module only cares about the *answer*, and letting those
     share the cache keeps the module from rebuilding a ``boto3.Session`` for each
     of the 34 Regions in the non-regionalized sweep -- which is the difference
@@ -174,7 +175,9 @@ _NON_REGIONALIZED: tuple[str, ...] = (
 )
 
 
-def test_shield_is_available_in_every_commercial_region() -> None:
+def test_shield_is_available_in_every_commercial_region(
+    cold_cache: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A partition-endpoint service answers ``[]`` and must read as available.
 
     ``get_available_regions`` returns ``[]`` for ``shield`` because it resolves
@@ -188,6 +191,9 @@ def test_shield_is_available_in_every_commercial_region() -> None:
     plus the four spot-checks below covers it without paying 34 endpoint lookups
     five times over.
     """
+    session = boto3.Session()
+    assert session.get_available_regions("shield", partition_name="aws") == []
+    monkeypatch.setattr(availability.boto3, "Session", lambda: session)
     for region in _COMMERCIAL_REGIONS:
         assert service_available_in_region("shield", region) is True, (
             f"shield in {region} must be available: an empty regional list "

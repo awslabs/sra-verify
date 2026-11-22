@@ -117,7 +117,7 @@ Display name `Security Hub CSPM` (SRA-SECURITYHUB-01 – -13 and -21 – -25); t
 
 |    # | Checklist item                                                        | SRA Verify check(s)                         | Status  | Note                                                 |
 | ---: | --------------------------------------------------------------------- | ------------------------------------------- | ------- | ---------------------------------------------------- |
-|    1 | Recorder enabled for all member accounts and the management account   | SRA-CONFIG-01, SRA-CONFIG-02, SRA-CONFIG-03 | Covered | -03 also confirms the last recording event succeeded |
+|    1 | Recorder enabled for all member accounts and the management account   | SRA-CONFIG-01, SRA-CONFIG-02, SRA-CONFIG-03 | Covered | -03 also checks history and applicable snapshot and SNS delivery status |
 |    2 | Recorder enabled for all Regions                                      | SRA-CONFIG-01                               | Covered | Emits one row per Region in `--regions`              |
 |    3 | Delivery channel S3 bucket centralized in the Log Archive account     | SRA-CONFIG-06                               | Covered | Needs `--log-archive-account`                        |
 |    4 | Delegated administrator set to the Security Tooling account           | SRA-CONFIG-07, SRA-CONFIG-08                | Covered | -07 exists, -08 is the audit account                 |

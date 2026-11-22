@@ -94,6 +94,30 @@ def template_text() -> str:
     return _TEMPLATE_PATH.read_bytes().decode("utf-8")
 
 
+@pytest.fixture(scope="module")
+def real_tree_snapshot(generator: Any) -> Any:
+    return generator.build(str(_PROJECT_ROOT))
+
+
+@pytest.fixture
+def real_tree(real_tree_snapshot: Any) -> Any:
+    calls, warnings = real_tree_snapshot
+    return {service: set(methods) for service, methods in calls.items()}, list(warnings)
+
+
+@pytest.fixture
+def cached_real_tree(generator: Any, real_tree_snapshot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = generator.build
+
+    def build(path: str) -> Any:
+        if Path(path).resolve() == _PROJECT_ROOT.resolve():
+            calls, warnings = real_tree_snapshot
+            return {service: set(methods) for service, methods in calls.items()}, list(warnings)
+        return original(path)
+
+    monkeypatch.setattr(generator, "build", build)
+
+
 def _attributed(generator: Any, service: str) -> dict[str, set[str]]:
     """Return the calls attributed for one service's ``client.py``.
 
@@ -222,14 +246,14 @@ def test_a_multi_service_client_does_not_collapse_shared_method_names(
 # --------------------------------------------------------------------------- #
 
 
-def _client_modules(generator: Any) -> list[Path]:
+def _client_modules(generator: Any) -> dict[Path, ast.AST]:
     """Return every walked module that declares an ``AWSClient`` subclass."""
-    out: list[Path] = []
+    out: dict[Path, ast.AST] = {}
     for name in generator.find_python_modules(str(_PROJECT_ROOT)):
         path = Path(name)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=name)
         if generator.declares_aws_client(tree):
-            out.append(path)
+            out[path] = tree
     return out
 
 
@@ -252,8 +276,7 @@ def test_every_client_module_binds_at_least_one_boto3_client(
     assert len(modules) == 19, sorted(relative)
 
     unbound: list[str] = []
-    for path in modules:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for path, tree in modules.items():
         if not generator.bind_clients(tree):
             unbound.append(path.resolve().relative_to(_PACKAGE_ROOT).as_posix())
 
@@ -263,9 +286,9 @@ def test_every_client_module_binds_at_least_one_boto3_client(
     )
 
 
-def test_the_generator_attributes_the_whole_tree(generator: Any) -> None:
+def test_the_generator_attributes_the_whole_tree(generator: Any, real_tree: Any) -> None:
     """The end-to-end result is non-trivial and covers the expected services."""
-    service_calls, warnings = generator.build(str(_PROJECT_ROOT))
+    service_calls, warnings = real_tree
 
     assert warnings == []
 
@@ -285,7 +308,7 @@ def test_the_generator_attributes_the_whole_tree(generator: Any) -> None:
 
 
 def test_the_template_matches_the_generator(
-    generator: Any, template_text: str
+    generator: Any, real_tree: Any, template_text: str
 ) -> None:
     """The deployed ``SRAVerifyLeastPrivilege`` block is what the code derives.
 
@@ -294,7 +317,7 @@ def test_the_template_matches_the_generator(
     the member role fails the call at scan time. Skips outside a full checkout
     (no template or no generator), as the rest of this module does.
     """
-    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    service_calls, _ = real_tree
     policy = generator.generate_iam_policy(service_calls)
 
     assert generator.splice(template_text, policy) == template_text, (
@@ -605,7 +628,7 @@ def test_a_region_literal_does_not_bind(generator: Any) -> None:
 
 
 def test_the_session_builder_is_excluded_and_assume_role_is_not_an_action(
-    generator: Any,
+    generator: Any, real_tree: Any,
 ) -> None:
     """``core/session.py`` is not walked, so ``sts:AssumeRole`` is never granted.
 
@@ -621,7 +644,7 @@ def test_the_session_builder_is_excluded_and_assume_role_is_not_an_action(
     assert "core/session.py" not in walked
     assert "core/scan_context.py" in walked
 
-    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    service_calls, _ = real_tree
     policy = generator.generate_iam_policy(service_calls)
     actions = {a for s in policy["Statement"] for a in s["Action"]}
     assert "sts:AssumeRole" not in actions
@@ -675,9 +698,9 @@ def _synthetic_package(tmp_path: Path, modules: dict[str, str]) -> Path:
     return tmp_path
 
 
-def test_the_real_tree_has_no_unbindable_site(generator: Any) -> None:
+def test_the_real_tree_has_no_unbindable_site(generator: Any, real_tree: Any) -> None:
     """Property 35: a clean tree produces no warning of either kind."""
-    _, warnings = generator.build(str(_PROJECT_ROOT))
+    _, warnings = real_tree
     assert warnings == []
 
 
@@ -751,14 +774,14 @@ def test_the_wrapper_lookup_is_exempt_only_inside_a_check_class(
 # --------------------------------------------------------------------------- #
 
 
-def test_every_sid_is_alphanumeric(generator: Any) -> None:
+def test_every_sid_is_alphanumeric(generator: Any, real_tree: Any) -> None:
     """IAM allows only ASCII letters and digits in a Sid.
 
     ``str.capitalize()`` alone gave ``Cognito-idpPermissions``; now that the
     generator writes the deployed template, an invalid Sid would be a deploy
     failure rather than a cosmetic one.
     """
-    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    service_calls, _ = real_tree
     policy = generator.generate_iam_policy(service_calls)
     bad = [s["Sid"] for s in policy["Statement"] if not re.fullmatch(r"[A-Za-z0-9]+", s["Sid"])]
     assert bad == []
@@ -855,10 +878,10 @@ def test_the_splice_is_idempotent_on_a_synthetic_template(generator: Any) -> Non
 
 
 def test_the_splice_is_idempotent_on_the_real_template(
-    generator: Any, template_text: str
+    generator: Any, real_tree: Any, template_text: str
 ) -> None:
     """Splicing the real template twice gives the same text as splicing once."""
-    service_calls, _ = generator.build(str(_PROJECT_ROOT))
+    service_calls, _ = real_tree
     real_policy = generator.generate_iam_policy(service_calls)
     real_once = generator.splice(template_text, real_policy)
     assert generator.splice(real_once, real_policy) == real_once
@@ -930,6 +953,7 @@ def test_the_defaults_are_relative_to_the_script(generator: Any) -> None:
     assert generator.DEFAULT_BASE_DIR == _PROJECT_ROOT
 
 
+@pytest.mark.usefixtures("cached_real_tree")
 def test_check_exits_0_in_sync(
     generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -945,6 +969,7 @@ def test_check_exits_0_in_sync(
     assert copy.read_bytes() == template_text.encode("utf-8")
 
 
+@pytest.mark.usefixtures("cached_real_tree")
 def test_check_exits_1_on_drift_shows_the_diff_and_writes_nothing(
     generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -964,6 +989,7 @@ def test_check_exits_1_on_drift_shows_the_diff_and_writes_nothing(
     assert "uv run python ../util/generate_iam_policy.py" in err
 
 
+@pytest.mark.usefixtures("cached_real_tree")
 def test_write_mode_brings_a_stale_template_into_sync(
     generator: Any, template_text: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -979,6 +1005,7 @@ def test_write_mode_brings_a_stale_template_into_sync(
 
 
 @pytest.mark.parametrize("mode", [[], ["--check"]], ids=["write", "check"])
+@pytest.mark.usefixtures("cached_real_tree")
 def test_main_exits_2_on_bad_markers_and_writes_nothing(
     generator: Any,
     template_text: str,
@@ -1000,6 +1027,7 @@ def test_main_exits_2_on_bad_markers_and_writes_nothing(
     assert copy.read_bytes() == broken.encode("utf-8")
 
 
+@pytest.mark.usefixtures("cached_real_tree")
 def test_main_exits_2_on_a_missing_template(
     generator: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1008,6 +1036,7 @@ def test_main_exits_2_on_a_missing_template(
     assert "cannot read the template" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("cached_real_tree")
 def test_an_oversize_policy_is_refused(
     generator: Any,
     template_text: str,

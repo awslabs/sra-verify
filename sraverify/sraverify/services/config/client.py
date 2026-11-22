@@ -1,8 +1,9 @@
 """
 Config client.
 
-Every method returns a dict: the boto3 response on success, or the error result
-built by ``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
+Every method returns a dict: the boto3 response on success (the two aggregator
+reads merge every page into one response), or the error result built by
+``AWSClient.aws_error``. Each method catches exactly ``AWS_EXCEPTIONS``
 and hands the exception over; anything else raised is a programming defect and
 propagates to the orchestrator's guard.
 
@@ -109,7 +110,8 @@ class ConfigClient(AWSClient):
             result.
         """
         try:
-            return self.client.describe_configuration_aggregators()
+            pages = self.client.get_paginator('describe_configuration_aggregators').paginate()
+            return {'ConfigurationAggregators': self._merge_pages(pages, 'ConfigurationAggregators')}
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
 
@@ -127,11 +129,24 @@ class ConfigClient(AWSClient):
             result.
         """
         try:
-            return self.client.describe_configuration_aggregator_sources_status(
-                ConfigurationAggregatorName=aggregator_name
-            )
+            pages = self.client.get_paginator(
+                'describe_configuration_aggregator_sources_status'
+            ).paginate(ConfigurationAggregatorName=aggregator_name)
+            return {'AggregatedSourceStatusList': self._merge_pages(pages, 'AggregatedSourceStatusList')}
         except AWS_EXCEPTIONS as e:
             return self.aws_error(e)
+
+    @staticmethod
+    def _merge_pages(pages, key):
+        result = []
+        for page in pages:
+            if not isinstance(page, Mapping):
+                raise TypeError("Expected a mapping page")
+            items = page.get(key, [])
+            if not isinstance(items, list) or any(not isinstance(item, Mapping) for item in items):
+                raise TypeError("Expected a list of mappings")
+            result.extend(items)
+        return result
 
     def get_bucket_location(self, bucket_name: str) -> Mapping[str, Any]:
         """

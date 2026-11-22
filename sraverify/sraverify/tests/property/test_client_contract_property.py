@@ -305,18 +305,20 @@ _CONFIG = (
         boto_method="describe_configuration_aggregator_sources_status",
         operation="DescribeConfigurationAggregatorSourcesStatus",
         args=("org-aggregator",),
-        success={"AggregatedSourceStatusList": [{"SourceId": _TEST_ACCOUNT}]},
+        paginated=True,
+        success=({"AggregatedSourceStatusList": [{"SourceId": _TEST_ACCOUNT}]},),
     ),
     ClientAdapter(
         method="describe_configuration_aggregators",
         boto_service="config",
         boto_method="describe_configuration_aggregators",
         operation="DescribeConfigurationAggregators",
-        success={
+        paginated=True,
+        success=({
             "ConfigurationAggregators": [
                 {"ConfigurationAggregatorName": "org-aggregator"}
             ]
-        },
+        },),
     ),
     ClientAdapter(
         method="describe_configuration_recorder_status",

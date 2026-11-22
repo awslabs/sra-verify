@@ -1,3 +1,19 @@
+variables:
+  UV_PYTHON_DOWNLOADS: 'never'
+  UV_CACHE_DIR: .uv-cache
+  UV_LINK_MODE: copy
+
+default:
+  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+  cache:
+    key:
+      files: [sraverify/uv.lock]
+    paths: [$UV_CACHE_DIR]
+  before_script:
+    - export UV_CACHE_DIR="$CI_PROJECT_DIR/$UV_CACHE_DIR"
+  after_script:
+    - uv cache prune --ci
+
 # Fails when the SRAVerifyLeastPrivilege statements in 1-sraverify-member-roles.yaml
 # no longer match the boto3 calls the package makes, when the generator warns about
 # a client it cannot attribute, or when the policy exceeds the managed-policy quota.
@@ -6,9 +22,6 @@
 # `cd sraverify && uv run python ../util/generate_iam_policy.py` and commit the result.
 # A warning (exit 2) needs a code fix: bind the client to a literal service id.
 iam-policy-drift:
-  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
-  variables:
-    UV_PYTHON_DOWNLOADS: 'never'
   script:
     - cd sraverify
     - uv sync --frozen
@@ -22,9 +35,6 @@ iam-policy-drift:
 # It is read-only: it never commits or pushes. Reproduce locally with
 # `cd sraverify && uv run pytest -q -p no:logging --tb=short`, fix the code, and commit.
 unit-tests:
-  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
-  variables:
-    UV_PYTHON_DOWNLOADS: 'never'
   script:
     - cd sraverify
     - uv sync --frozen
@@ -41,9 +51,6 @@ unit-tests:
 # It is read-only: it never commits or pushes. Fix drift locally from the repo root with
 # `sraverify/.venv/bin/sraverify --list-checks > docs/checks.txt` and commit the result.
 checks-inventory-drift:
-  image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
-  variables:
-    UV_PYTHON_DOWNLOADS: 'never'
   script:
     - cd sraverify
     - uv sync --frozen

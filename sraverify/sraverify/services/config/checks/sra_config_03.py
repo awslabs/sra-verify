@@ -20,13 +20,10 @@ class SRA_CONFIG_03(ConfigCheck):
         check_id="SRA-CONFIG-03",
         title="AWS Config latest recording event is processed successfully",
         description=(
-            "This check verifies whether the last delivery attempt to the delivery channel was successful "
-            "to ensure you receive configuration change notifications. As AWS Config continually records "
-            "the changes that occur to your AWS resources, it sends notifications and updated configuration "
-            "states through the delivery channel."
+            "Checks AWS Config history delivery and applicable snapshot and SNS stream delivery."
         ),
         check_logic=(
-            "Checks if the lastStatus of the delivery channel is SUCCESS."
+            "Requires successful history delivery and evaluates snapshot and stream delivery when applicable."
         ),
         severity=Severity.HIGH,
         account_type=AccountType.APPLICATION,
@@ -34,16 +31,15 @@ class SRA_CONFIG_03(ConfigCheck):
         resource_type="AWS::Config::ConfigurationRecorder",
         remediation=Remediation(
             text=(
-                "Repair AWS Config delivery so the configuration history delivery reports "
-                "lastStatus SUCCESS: grant the delivery channel S3 bucket and SNS topic the "
-                "permissions AWS Config requires."
+                "Repair Config delivery using the S3 bucket and KMS key policies, and the SNS "
+                "topic policy when a topic is configured."
             ),
             cli=(
                 "aws configservice describe-delivery-channel-status --region <region>"
             ),
             console=(
                 "Config console in each Region, Settings, review the delivery channel S3 "
-                "bucket and SNS topic and their resource policies."
+                "bucket policy and, if configured, the SNS topic policy."
             ),
         ),
     )
@@ -139,8 +135,8 @@ class SRA_CONFIG_03(ConfigCheck):
                     resource_id=f"arn:aws:config:{region}:{self.account_id}:deliveryChannel/default",
                     actual_value="No delivery channel found in this region",
                     remediation=(
-                        f"Create a delivery channel in {region} using: aws configservice put-delivery-channel --delivery-channel name=default,s3BucketName=config-bucket-{self.account_id},snsTopicARN=arn:aws:sns:{region}:{self.account_id}:config-notifications --region {region}. "
-                        f"Note: You must first create an S3 bucket and SNS topic with appropriate permissions for AWS Config."
+                        f"Create a delivery channel in {region} using: aws configservice put-delivery-channel --delivery-channel name=default,s3BucketName=config-bucket-{self.account_id} --region {region}. "
+                        f"Note: You must first create an S3 bucket with appropriate permissions for AWS Config."
                     ),
                 )
                 continue
@@ -153,59 +149,53 @@ class SRA_CONFIG_03(ConfigCheck):
                     actual_value="No delivery channel status found in this region",
                     remediation=(
                         f"Check the delivery channel configuration in {region} and ensure it's properly configured. "
-                        f"Verify S3 bucket permissions and SNS topic permissions are correctly set up for AWS Config."
+                        f"Verify S3 bucket permissions and, if configured, SNS topic permissions for AWS Config."
                     ),
                 )
                 continue
 
-            # Check each delivery channel status
             for status in channel_statuses:
                 channel_name = status.get('name', 'default')
                 resource_id = f"config:deliveryChannel:{channel_name}"
-
-                # Check configHistoryDeliveryInfo - this is the most important one
-                history_info = status.get('configHistoryDeliveryInfo', {})
-                history_status = history_info.get('lastStatus', 'UNKNOWN')
-                history_attempt_time = history_info.get('lastAttemptTime', 'UNKNOWN')
-                history_success_time = history_info.get('lastSuccessfulTime', 'UNKNOWN')
-
-                # Check configSnapshotDeliveryInfo - may be UNKNOWN if no snapshot has been taken yet
-                snapshot_info = status.get('configSnapshotDeliveryInfo', {})
-                snapshot_status = snapshot_info.get('lastStatus', 'UNKNOWN')
-
-                # Check configStreamDeliveryInfo - may be NOT_APPLICABLE if streaming is not configured
-                stream_info = status.get('configStreamDeliveryInfo', {})
-                stream_status = stream_info.get('lastStatus', 'UNKNOWN')
-
-                # Determine overall status - focus on history delivery as the primary indicator
-                # Stream may be NOT_APPLICABLE and snapshot may be UNKNOWN if not configured/used
-                if history_status == "SUCCESS":
-                    # History delivery is successful, which is the most important
-                    yield self.passed(
-                        region=region,
-                        resource_id=resource_id,
-                        actual_value=(
-                            f"Delivery channel '{channel_name}' is processing events successfully: "
-                            f"Config History: {history_status} (Last success: {history_success_time}), "
-                            f"Config Snapshot: {snapshot_status}, "
-                            f"Config Stream: {stream_status}"
-                        ),
-                    )
+                matches = [channel for channel in channels if channel.get('name') == status.get('name') and status.get('name') is not None]
+                channel = matches[0] if matches else (channels[0] if len(channels) == 1 and (not status.get('name') or not channels[0].get('name')) else None)
+                snapshot_configured = None if channel is None else bool(channel.get('configSnapshotDeliveryProperties', {}).get('deliveryFrequency'))
+                stream_configured = None if channel is None else bool(channel.get('snsTopicARN'))
+                history = status.get('configHistoryDeliveryInfo') or {}
+                snapshot = status.get('configSnapshotDeliveryInfo') or {}
+                stream = status.get('configStreamDeliveryInfo') or {}
+                failures = []
+                errors = []
+                if history.get('lastStatus') not in ("Success", "SUCCESS"):
+                    failures.append('History')
+                for name, info, configured in (("Snapshot", snapshot, snapshot_configured), ("Stream", stream, stream_configured)):
+                    value = info.get('lastStatus')
+                    if value in ("Success", "SUCCESS"):
+                        continue
+                    normalized = value.lower() if isinstance(value, str) and value.isascii() else None
+                    if normalized == "failure":
+                        if name == "Stream" and configured is False:
+                            errors.append(name)
+                        else:
+                            failures.append(name)
+                        continue
+                    missing = 'lastStatus' not in info
+                    has_error = bool(info.get('lastErrorCode') or info.get('lastErrorMessage'))
+                    attempted = name == "Snapshot" and bool(info.get('lastAttemptTime') or info.get('lastSuccessfulTime') or info.get('nextDeliveryTime'))
+                    if configured is False and (normalized == "not_applicable" or (missing and not has_error and not attempted)):
+                        continue
+                    errors.append(name)
+                actual = (
+                    f"Delivery channel '{channel_name}': Config History: {history.get('lastStatus', 'UNKNOWN')} "
+                    f"(Last attempt: {history.get('lastAttemptTime', 'UNKNOWN')}, Last success: {history.get('lastSuccessfulTime', 'UNKNOWN')}), "
+                    f"Config Snapshot: {snapshot.get('lastStatus', 'UNKNOWN')}, Config Stream: {stream.get('lastStatus', 'UNKNOWN')}; "
+                    f"Failed: {', '.join(failures) or 'none'}; indeterminate: {', '.join(errors) or 'none'}"
+                )
+                if failures:
+                    yield self.failed(region=region, resource_id=resource_id, actual_value=actual,
+                        remediation="Check S3 bucket and KMS key policies for history or snapshot failures, and SNS topic policy for stream failures.")
+                elif errors:
+                    yield self.error(region=region, resource_id=resource_id, actual_value=actual,
+                        remediation="Verify delivery status and configuration, and retry after a delivery attempt.")
                 else:
-                    # History delivery is not successful
-                    yield self.failed(
-                        region=region,
-                        resource_id=resource_id,
-                        actual_value=(
-                            f"Delivery channel '{channel_name}' has issues processing events: "
-                            f"Config History: {history_status} (Last attempt: {history_attempt_time}), "
-                            f"Config Snapshot: {snapshot_status}, "
-                            f"Config Stream: {stream_status}"
-                        ),
-                        remediation=(
-                            "Check the following: 1. S3 bucket permissions - ensure Config has write access. "
-                            "2. SNS topic permissions - ensure Config can publish to the topic. "
-                            "3. IAM role permissions - ensure Config service role has necessary permissions. "
-                            "4. Check CloudWatch Logs for Config service errors."
-                        ),
-                    )
+                    yield self.passed(region=region, resource_id=resource_id, actual_value=actual)

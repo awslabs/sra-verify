@@ -27,7 +27,7 @@ class SRA_CONFIG_02(ConfigCheck):
             "ability to stop configuration recorder."
         ),
         check_logic=(
-            "Checks if AWS Config recorder is running by verifying the lastStatus is SUCCESS."
+            "Checks if AWS Config recorder is running by verifying recording is enabled and lastStatus is Success or SUCCESS."
         ),
         severity=Severity.HIGH,
         account_type=AccountType.APPLICATION,
@@ -36,7 +36,7 @@ class SRA_CONFIG_02(ConfigCheck):
         remediation=Remediation(
             text=(
                 "Start the AWS Config configuration recorder in every enabled Region and "
-                "confirm its last status is SUCCESS."
+                "confirm its last status is Success or SUCCESS."
             ),
             cli=(
                 "aws configservice start-configuration-recorder "
@@ -182,21 +182,18 @@ class SRA_CONFIG_02(ConfigCheck):
                 )
                 continue
 
-            # Check if the recorder is recording
             is_recording = recorder_status.get('recording', False)
             last_status = recorder_status.get('lastStatus', 'UNKNOWN')
             last_error_code = recorder_status.get('lastErrorCode', '')
             last_error_message = recorder_status.get('lastErrorMessage', '')
 
-            if is_recording and last_status == "SUCCESS":
-                # Configuration recorder is running successfully
+            if is_recording and last_status in ("Success", "SUCCESS"):
                 yield self.passed(
                     region=region,
                     resource_id=recorder_arn,
-                    actual_value=f"Configuration recorder '{recorder_name}' is running with lastStatus: SUCCESS",
+                    actual_value=f"Configuration recorder '{recorder_name}' is running with lastStatus: {last_status}",
                 )
             elif is_recording:
-                # Configuration recorder is recording but not in SUCCESS state
                 error_info = f"lastStatus: {last_status}"
                 if last_error_code:
                     error_info += f", errorCode: {last_error_code}"
@@ -213,7 +210,6 @@ class SRA_CONFIG_02(ConfigCheck):
                     ),
                 )
             else:
-                # Configuration recorder is not recording
                 yield self.failed(
                     region=region,
                     resource_id=recorder_arn,

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_PYTHON_DOWNLOADS: 'never'
+
+defaults:
+  run:
+    working-directory: sraverify
+    shell: bash
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest -q -p no:logging --tb=short
+
+  iam-policy-drift:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: uv sync --frozen
+      - run: uv run --frozen python ../util/generate_iam_policy.py --check
+
+  checks-inventory-drift:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/astral-sh/uv:0.12.23-python3.11-trixie-slim
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: uv sync --frozen
+      - run: |
+          uv run --frozen sraverify --list-checks > /tmp/checks.txt
+          diff -u ../docs/checks.txt /tmp/checks.txt
